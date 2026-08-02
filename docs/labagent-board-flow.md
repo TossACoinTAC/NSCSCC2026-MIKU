@@ -29,6 +29,16 @@ test image is loaded, then runs functional tests with deterministic AXI seeds
 `F0`, `FF`, and `A5`. This compatibility behavior is why a package carries the
 Chiplab commit; it does not authorize the server to rebuild the SoC.
 
+## Execution Boundary
+
+The local LabAgent executable may perform client-side work that does not access
+hardware: build or pack a `.fpgajob`, verify its inputs and hashes, upload it to
+the service, query status, and fetch evidence. The remote installed runtime is
+the only instance allowed to run a worker, invoke Vivado Hardware Manager,
+program the FPGA, drive VIO/reset protocols, or capture the board camera. Local
+Vivado remains responsible for synthesis, implementation, timing/DRC reports,
+and bitstream generation; the remote server never rebuilds a candidate.
+
 ## Release And Deployment
 
 Before deploying a LabAgent update:

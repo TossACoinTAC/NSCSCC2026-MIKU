@@ -201,10 +201,14 @@ After local gates pass:
    generation with the local Vivado 2023.2 flow. Do not move these build stages
    to the remote server.
 3. Package the resulting checked bitstream, probes, test image, and Vivado
-   metrics as a LabAgent `.fpgajob`. Transfer compiled artifacts only; the
-   server must not clone Chiplab or synthesize the design. The package's locked
-   Chiplab commit is metadata used to validate the platform and select the
-   compatible board reset/VIO protocol.
+   metrics as a LabAgent `.fpgajob`. Local LabAgent execution is limited to
+   client-side pre-board work such as `pack`/`build-package`, package integrity
+   checks, upload, status, and artifact fetch commands. Run `worker`, board
+   programming, VIO tests, camera capture, and other hardware interaction only
+   on the remote server. Transfer compiled artifacts only; the server must not
+   clone Chiplab or synthesize the design. The package's locked Chiplab commit
+   is metadata used to validate the platform and select the compatible board
+   reset/VIO protocol.
 4. Before starting a hardware job, coordinate with the team and inspect the
    LabAgent queue. A missing JTAG device or disappearing debug core may mean a
    teammate has reprogrammed the shared board, including for Linux testing. It
