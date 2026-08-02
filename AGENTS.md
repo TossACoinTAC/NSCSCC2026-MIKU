@@ -161,6 +161,25 @@ Use the cheapest decisive checks first, then broaden with risk:
 For Linux-impacting changes, add directed privileged/MMU/cache/atomic tests and
 retain early-boot UART logs. A passing performance suite alone is insufficient.
 
+## Locked RTL Gate Container
+
+The reusable local image `nscscc-local-gates:ubuntu24.04-v1` provides Ubuntu
+24.04, Git, Python 3, Verilator 5.020, and Yosys 0.33 for the generated-RTL gates.
+Build it with `make gate-image` from
+`docker/nscscc-local-gates.Dockerfile`, then run `make cpu-locked-gates`.
+The gate scripts still verify the exact tool binary hashes against
+`nscscc-cpu/reference/manifest.lock`; a matching image tag alone is not
+evidence that the contents are correct.
+
+Keep a successfully validated image for reuse across candidates. Rebuild and
+revalidate it when the Dockerfile, Ubuntu base, or locked tool versions/hashes
+change. The workspace is bind-mounted at `/work`, and disposable reports belong
+under `nscscc-cpu/build/core_top/locked-gates/`; do not place source changes or
+submission artifacts inside the image. This image covers port, lint, Yosys, and
+publication checks only. It does not contain Vivado, simulate the complete SoC,
+or substitute for implementation, post-implementation simulation, or board
+validation.
+
 ## Team Board Flow
 
 The team board is attached to the Windows server at
@@ -217,6 +236,9 @@ the nested repositories remain authoritative for implementation details.
 - `make doctor`: check WSL/tool paths/repository revisions.
 - `make status`: show root and nested Git state without changing it.
 - `make cpu-check`: run the existing CPU local gates.
+- `make gate-image`: build the reusable Ubuntu 24.04 locked RTL gate image.
+- `make cpu-locked-gates`: regenerate RTL and run port/lint/Yosys/publication
+  gates with exact tool hashes inside that image.
 - `make cpu-generate`: generate and publish `mycpu_top.v` through SpinalHDL.
 - `make sim RUN_SOFTWARE=func/func_lab19`: synchronize generated RTL and run
   Chiplab Verilator simulation.
