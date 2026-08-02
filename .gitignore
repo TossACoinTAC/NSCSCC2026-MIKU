@@ -19,6 +19,7 @@
 /output/
 /tmp/
 /.cache/
+/Stable_Backup/
 
 # FPGA and simulator products accidentally emitted at the workspace root
 /.Xil/
