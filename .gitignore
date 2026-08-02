@@ -1,0 +1,41 @@
+# Workspace-local tools and editors
+/.codex/
+/.vscode/
+/.idea/
+/.bsp/
+/.metals/
+/.scala-build/
+
+# Nested repositories and local reference material are managed independently.
+/chiplab/
+/nscscc-cpu/
+/nscscc-team-ci/
+/nscscc-linux-kernel/
+/Info/
+
+# Root-level generated output
+/build/
+/out/
+/output/
+/tmp/
+/.cache/
+
+# FPGA and simulator products accidentally emitted at the workspace root
+/.Xil/
+/*.bit
+/*.bin
+/*.dcp
+/*.fpgajob
+/*.fst
+/*.jou
+/*.ltx
+/*.pb
+/*.str
+/*.vcd
+/*.wdb
+/*.xpr
+
+# OS/editor residue
+*~
+.DS_Store
+Thumbs.db
