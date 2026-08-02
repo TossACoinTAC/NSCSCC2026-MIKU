@@ -49,6 +49,10 @@ Chiplab revision or a descendant commit is not equivalent evidence.
   input through the reproducible synchronization flow.
 - `nscscc-team-ci/`: authoritative submission and evaluation contract. Do not
   copy platform PLL XCI files into a student submission.
+- `fpga-lab-agent/`: independent source and release repository for the team's
+  serialized board service. Develop and test it locally, then push reviewed
+  compatible updates to its `main`; do not copy it into the CPU repository or
+  treat it as part of the submitted CPU RTL.
 - `Info/References/`: official manuals, competition rules, schematics, and pin
   data. Treat binary references as read-only.
 - `Info/CurrentDesign/`: snapshots and audits of earlier/current candidates.
@@ -183,34 +187,52 @@ validation.
 ## Team Board Flow
 
 The team board is attached to the Windows server at
-`administrator@10.20.213.157`. After local gates pass:
+`administrator@10.20.213.157`. The server is a shared board endpoint, not a
+remote build machine. LabAgent source and release development belongs in the
+root `fpga-lab-agent/` clone; the installed runtime belongs under
+`D:\fpga-lab\app`. See `docs/labagent-board-flow.md` for the deployment and
+evidence contract.
+
+After local gates pass:
 
 1. Record the candidate CPU commit/configuration and hashes of generated RTL,
    submitted package, software image, and bitstream inputs.
 2. Complete synthesis, implementation, DRC/timing checks, and bitstream
    generation with the local Vivado 2023.2 flow. Do not move these build stages
    to the remote server.
-3. Transfer only the resulting checked bitstream, test image, board-interaction
-   scripts, and required test artifacts with `scp`; keep each candidate in a
-   distinct remote directory so results cannot be mixed across RTL revisions.
-4. Connect with `ssh administrator@10.20.213.157`, start `powershell` first, and
-   perform all subsequent remote work in PowerShell rather than `cmd.exe`.
-5. Use the remote Vivado 2023.2 executable at
+3. Package the resulting checked bitstream, probes, test image, and Vivado
+   metrics as a LabAgent `.fpgajob`. Transfer compiled artifacts only; the
+   server must not clone Chiplab or synthesize the design. The package's locked
+   Chiplab commit is metadata used to validate the platform and select the
+   compatible board reset/VIO protocol.
+4. Before starting a hardware job, coordinate with the team and inspect the
+   LabAgent queue. A missing JTAG device or disappearing debug core may mean a
+   teammate has reprogrammed the shared board, including for Linux testing. It
+   is an infrastructure/conflict result, not evidence that the DUT passed or
+   failed. Do not probe, reprogram, or retry until ownership is confirmed.
+5. For administrator maintenance, connect with
+   `ssh administrator@10.20.213.157`, start `powershell` immediately, and
+   perform subsequent interactive work in PowerShell rather than `cmd.exe`.
+   LabAgent's packaged internal wrappers may invoke `cmd.exe`; do not rewrite
+   them merely to satisfy the interactive-shell rule.
+6. Use the remote Vivado 2023.2 executable at
    `E:\XilinX\Vivado\2023.2\bin\vivado.bat` only when board programming or a
    hardware-manager interaction requires it. Remote work is limited to steps
    that require the attached development board; preserve Tcl commands and logs.
-6. The paired host Moonlight session may be used to view the server's camera and
+7. The paired host Moonlight session may be used to view the server's camera and
    confirm the board's power, cable, indicator, and other visible physical
    state. Camera observations supplement but do not replace UART output,
    hardware test logs, timing/DRC reports, and artifact hashes.
-7. Copy board logs and reports back with `scp`. Record the exact observable
+8. Copy board logs and reports back with `scp`. Record the exact observable
    milestone, UART/terminal output, test result, remote job/run identifier, and
    hashes before claiming board validation.
 
 Do not overwrite a known-good remote candidate or reprogram the board when its
 target, power, cable state, or currently running team job is uncertain. Inspect
 the remote state first and coordinate with the team when a run could interfere
-with another user.
+with another user. Restore test-only server changes after the test. A validated
+LabAgent release, reproducible Git bundle, compiled candidate package, and
+stable backup may remain for reuse when their version and hashes are recorded.
 
 ## Completion And Claims
 
