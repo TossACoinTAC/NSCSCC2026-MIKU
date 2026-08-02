@@ -11,9 +11,9 @@ optimize both benchmark cycle count and achievable CPU frequency.
 Local development runs in WSL2 Ubuntu. Use Verilator for architectural and SoC
 simulation, Vivado 2023.2 for synthesis/implementation, and the Windows Surfer
 binary at `D:/Surfer/surfer.exe` (WSL path `/mnt/d/Surfer/surfer.exe`) for FST or
-VCD inspection. This workstation is not connected to the competition board,
-but the team has a board available through another team environment. Do not
-describe local simulation, standalone synthesis, or bitstream generation as
+VCD inspection. This WSL host is not directly connected to the competition
+board, but the board is reachable through the team's remote Windows server. Do
+not describe local simulation, standalone synthesis, or bitstream generation as
 board validation; hand candidates and reproducible artifacts to the team board
 flow after local gates pass.
 
@@ -155,11 +155,43 @@ Use the cheapest decisive checks first, then broaden with risk:
 7. Validated post-implementation simulation when it can exercise the changed
    behavior. Document the timing model, test image, and observed endpoint.
 8. Team-board/official CI validation after local gates pass. It may run on a
-   teammate's host or a hardware Runner; this workstation cannot substitute for
-   it.
+   teammate's host, the remote team Windows server, or a hardware Runner; local
+   WSL-only results cannot substitute for it.
 
 For Linux-impacting changes, add directed privileged/MMU/cache/atomic tests and
 retain early-boot UART logs. A passing performance suite alone is insufficient.
+
+## Team Board Flow
+
+The team board is attached to the Windows server at
+`administrator@10.20.213.157`. After local gates pass:
+
+1. Record the candidate CPU commit/configuration and hashes of generated RTL,
+   submitted package, software image, and bitstream inputs.
+2. Complete synthesis, implementation, DRC/timing checks, and bitstream
+   generation with the local Vivado 2023.2 flow. Do not move these build stages
+   to the remote server.
+3. Transfer only the resulting checked bitstream, test image, board-interaction
+   scripts, and required test artifacts with `scp`; keep each candidate in a
+   distinct remote directory so results cannot be mixed across RTL revisions.
+4. Connect with `ssh administrator@10.20.213.157`, start `powershell` first, and
+   perform all subsequent remote work in PowerShell rather than `cmd.exe`.
+5. Use the remote Vivado 2023.2 executable at
+   `E:\XilinX\Vivado\2023.2\bin\vivado.bat` only when board programming or a
+   hardware-manager interaction requires it. Remote work is limited to steps
+   that require the attached development board; preserve Tcl commands and logs.
+6. The paired host Moonlight session may be used to view the server's camera and
+   confirm the board's power, cable, indicator, and other visible physical
+   state. Camera observations supplement but do not replace UART output,
+   hardware test logs, timing/DRC reports, and artifact hashes.
+7. Copy board logs and reports back with `scp`. Record the exact observable
+   milestone, UART/terminal output, test result, remote job/run identifier, and
+   hashes before claiming board validation.
+
+Do not overwrite a known-good remote candidate or reprogram the board when its
+target, power, cable state, or currently running team job is uncertain. Inspect
+the remote state first and coordinate with the team when a run could interfere
+with another user.
 
 ## Completion And Claims
 
