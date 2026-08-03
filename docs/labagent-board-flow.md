@@ -22,12 +22,18 @@ protocol:
 
 - legacy Chiplab packages use `legacy-vio-v1`;
 - official commit `68c20a539e2be8a05300e714296f5fda8373ee80` uses
-  `nscscc-seeded-reset-v1`.
+  `nscscc-seeded-reset-v1`;
+- current production commit `c398d274812f164d387146fa7d8f612a4a1296d9` uses
+  `nscscc-system-reset-v1`.
 
-The official protocol holds CPU/confreg reset while DDR is initialized and the
-test image is loaded, then runs functional tests with deterministic AXI seeds
-`F0`, `FF`, and `A5`. This compatibility behavior is why a package carries the
-Chiplab commit; it does not authorize the server to rebuild the SoC.
+The historical seeded-reset protocol holds CPU/confreg reset while DDR is
+initialized and the test image is loaded, then runs functional tests with
+deterministic AXI seeds `F0`, `FF`, and `A5`. The production system-reset
+protocol follows the current Chiplab reset topology: it performs a full-system
+reset, waits for DDR readiness, and repeats that sequence for each functional
+seed. Performance tests run twice and retain the slower valid result. This
+compatibility behavior is why a package carries the Chiplab commit; it does not
+authorize the server to rebuild the SoC.
 
 ## Execution Boundary
 
@@ -90,11 +96,11 @@ board protocol, exact seed/profile, timestamps, `programming-summary.txt`,
 missing summary, partial CSV, or a log line containing `PASS` is not a hardware
 pass.
 
-The LabAgent release installed on 2026-08-03 was source commit
-`243ef82e0f706f925983a324f2d9ad2fbc241984` (version 0.2.4), with executable
-SHA256 `5eb2ecae4aa7c4bc24b34af7b95a6ce6f9da6bca41067c122f2a1c6657a35a5c`.
+The LabAgent release installed on 2026-08-03 is source commit
+`21cc630` (version 0.3.0), with executable SHA256
+`0d090fc8a9dfab7256b49c24f9ec3c8c45725a7fceecfedc9b7a5e5d5d4091a3`.
 The timestamped pre-update backup is
-`D:\fpga-lab\backup\before-seeded-reset-20260803-040401`.
+`D:\fpga-lab\backup\before-system-reset-20260803-180241`.
 
 The first official-protocol validation job,
 `20260802-201006-ac3bf081`, programmed successfully, observed DDR ready, and

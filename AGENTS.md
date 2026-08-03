@@ -318,7 +318,10 @@ the nested repositories remain authoritative for implementation details.
 - `make sim RUN_SOFTWARE=func/func_lab19`: synchronize generated RTL and run
   Chiplab Verilator simulation.
 - `make wave`: open the default FST in host Surfer; override `WAVE=...` as needed.
-- `make soc-impl`: create and implement the local complete SoC in Vivado 2023.2.
+- `make soc-impl`: create and implement the local complete SoC at the default
+  100 MHz CPU target in Vivado 2023.2. Override `PERF_CPU_MHZ` only for an
+  explicitly recorded frequency experiment; the Chiplab functional-clock
+  default is not a valid performance or board candidate.
 - `make soc-impl-incremental`: run fresh RTL generation/synthesis followed by
   incremental implementation from the latest preserved routed checkpoint.
 - `make soc-incremental-archive`: archive the current incremental comparison

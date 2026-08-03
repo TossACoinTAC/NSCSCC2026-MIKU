@@ -66,7 +66,7 @@ help:
 		'  make sim              Build software/model and run Verilator' \
 		'  make wave             Open WAVE in Windows Surfer' \
 		'  make soc-project      Recreate the local nscscc-team Vivado project' \
-		'  make soc-impl         Run complete-SoC implementation, bitstream, and timing gate' \
+		'  make soc-impl         Run the 100 MHz complete-SoC implementation and timing gate' \
 		'  make soc-incremental-reference  Preserve the latest routed DCP outside the Vivado project' \
 		'  make soc-impl-incremental  Re-synthesize, then implement with the preserved routed DCP' \
 		'  make soc-incremental-archive  Archive the current incremental artifacts and hashes' \
@@ -302,10 +302,15 @@ soc-project: chiplab-sync
 		"$(SOC_VIO_DIR)/vio_0_sim_netlist.v" \
 		"$(SOC_VIO_DIR)/vio_0_sim_netlist.vhdl" \
 		"$(SOC_VIO_DIR)/vio_0_stub.v" "$(SOC_VIO_DIR)/vio_0_stub.vhdl"
+	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch \
+		-source generate_perf_pll.tcl -tclargs "$(PERF_CPU_MHZ)" \
+		"$(SOC_PLATFORM_IP_DIR)/clk_pll/clk_pll.xci" \
+		"$(SOC_RUN_DIR)/perf_clock_generated.txt"
 	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch -source create_project.tcl
 
 soc-impl: soc-project
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch -source bit.tcl
+	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch -source bit.tcl \
+		-tclargs perf "$(PERF_CPU_MHZ)"
 	$(MAKE) soc-timing-check
 
 soc-incremental-reference:
@@ -443,22 +448,7 @@ soc-incremental-archive:
 	} > "$$archive/manifest.txt"; \
 	printf 'incremental artifacts archived: %s\n' "$$archive"
 
-soc-perf: chiplab-sync
-	rm -rf "$(SOC_VIO_DIR)/gen" "$(SOC_PLATFORM_IP_DIR)/clk_pll_ddr/gen"
-	rm -rf "$(SOC_VIO_DIR)/hdl" "$(SOC_VIO_DIR)/synth"
-	rm -f "$(SOC_VIO_DIR)/vio_0.dcp" "$(SOC_VIO_DIR)/vio_0.xdc" \
-		"$(SOC_VIO_DIR)/vio_0.xml" "$(SOC_VIO_DIR)/vio_0_ooc.xdc" \
-		"$(SOC_VIO_DIR)/vio_0_sim_netlist.v" \
-		"$(SOC_VIO_DIR)/vio_0_sim_netlist.vhdl" \
-		"$(SOC_VIO_DIR)/vio_0_stub.v" "$(SOC_VIO_DIR)/vio_0_stub.vhdl"
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch \
-		-source generate_perf_pll.tcl -tclargs "$(PERF_CPU_MHZ)" \
-		"$(SOC_PLATFORM_IP_DIR)/clk_pll/clk_pll.xci" \
-		"$(SOC_RUN_DIR)/perf_clock_generated.txt"
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch -source create_project.tcl
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch -source bit.tcl \
-		-tclargs perf "$(PERF_CPU_MHZ)"
-	$(MAKE) soc-timing-check
+soc-perf: soc-impl
 
 soc-timing:
 	@report="$(SOC_TIMING_REPORT)"; \
