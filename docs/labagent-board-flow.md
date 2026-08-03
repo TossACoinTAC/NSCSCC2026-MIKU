@@ -112,3 +112,12 @@ func58 pass or failure. A contemporaneous Moonlight camera observation showed
 the board indicators and attached display powered, which supports possible
 shared use but does not identify the running workload or JTAG owner. Revalidate
 after explicit board coordination.
+
+A later package audit established that both jobs used package SHA256
+`f254f892...` with bitstream SHA256 `5e21422e...`. That bitstream is the
+`2301dde` 100 MHz `perf20` implementation recorded in the CPU iteration, while
+the package profile and program were `func58`. The observations remain useful
+cross-mode diagnostics, but they are not official clean `gen_func` evidence.
+Do not infer the synthesized Chiplab macro or clock from the LabAgent profile;
+future packaging must validate the bit build kind and actual clock against the
+selected board profile.

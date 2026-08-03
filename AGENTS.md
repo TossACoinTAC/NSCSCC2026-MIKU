@@ -155,6 +155,41 @@ experiment record:
 
 Never carry timing or performance evidence across an RTL change.
 
+## Functional And Performance Builds
+
+Chiplab function and performance bitstreams are different synthesized SoC
+configurations, not merely the same CPU running different binaries. See
+`docs/func-perf-build-contract.md` for the complete contract.
+
+- The official c398 function build defines `RUN_FUNC_TEST`, uses the platform
+  default CPU PLL (measured locally as 32.726797 MHz), enables function-test AXI
+  random backpressure/address mapping, and pairs with LabAgent `func58` plus
+  `nscscc_func/obj/main.bin`.
+- The performance build defines `RUN_PERF_TEST`, regenerates the CPU PLL from
+  `perf_clock.json` (100 MHz by default), uses the performance memory-delay and
+  address behavior, and pairs with `perf20` plus
+  `nscscc_perf/obj/allbench/inst_data.bin`.
+- A cross-mode program may execute and provide diagnostic pass/hang evidence,
+  but its timing, cycles, and score are not valid evidence for the selected
+  profile. Never infer bitstream mode from the LabAgent profile alone; package
+  metrics must state a matching `build_kind` and `actual_cpu_mhz`.
+- Use function results for architectural/platform correctness and performance
+  results for cycle, timing, frequency, and optimization decisions. Function
+  slack cannot establish 100 MHz closure, and function-mode cycle counts cannot
+  rank memory-sensitive performance changes.
+- Do not build both locally for every RTL edit. Run the 100 MHz performance SoC
+  for timing/performance iterations, add clean function build/board evidence at
+  correctness milestones, and require both for a release or official CI.
+- Do not run two local Vivado implementations concurrently on the current WSL
+  host; one run already uses eight threads and about 9.5 GB peak aggregate PSS.
+  Run them sequentially, while independent official Runner work may proceed in
+  parallel.
+- Do not use a performance DCP to implement function mode, or a function DCP to
+  implement performance mode, for comparison or acceptance evidence. The macro,
+  PLL, memory wrapper, placement, and routing differ; run clean flows across the
+  boundary. Same-mode incremental implementation remains diagnostic until its
+  reuse and timing reports satisfy the existing incremental-flow contract.
+
 ## Verification Ladder
 
 Use the cheapest decisive checks first, then broaden with risk:
@@ -321,7 +356,11 @@ the nested repositories remain authoritative for implementation details.
 - `make soc-impl`: create and implement the local complete SoC at the default
   100 MHz CPU target in Vivado 2023.2. Override `PERF_CPU_MHZ` only for an
   explicitly recorded frequency experiment; the Chiplab functional-clock
-  default is not a valid performance or board candidate.
+  default is not valid performance, scoring, or 100 MHz timing evidence.
+- `make soc-func`: build the function-test SoC in an ignored Chiplab archive
+  under `build/`. It performs clean synthesis and implementation for the func
+  macro and platform-default PLL so its result remains directly comparable with
+  the official clean CI flow.
 - `make soc-archive`: archive the latest normal implementation with RTL,
   bitstream, probes, routed DCP, timing/DRC evidence, hashes, class, and timing
   status. Normal runs archive as `candidate`; only use

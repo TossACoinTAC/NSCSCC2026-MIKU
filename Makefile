@@ -19,8 +19,13 @@ SOC_INCREMENTAL_REFERENCE_SOURCE ?= $(SOC_IMPL_DIR)/soc_top_routed.dcp
 SOC_INCREMENTAL_REFERENCE_DCP ?= $(SOC_INCREMENTAL_DIR)/reference/soc_top_routed.dcp
 SOC_INCREMENTAL_REFERENCE_MANIFEST ?= $(SOC_INCREMENTAL_DIR)/reference/manifest.txt
 SOC_INCREMENTAL_REUSE_REPORT ?= $(SOC_INCREMENTAL_DIR)/results/incremental_reuse.rpt
+SOC_FUNC_CHIPLAB_DIR ?= $(ROOT_DIR)/build/chiplab-func
+SOC_FUNC_RUN_DIR ?= $(SOC_FUNC_CHIPLAB_DIR)/fpga/nscscc-team/run_vivado
+SOC_FUNC_IMPL_DIR ?= $(SOC_FUNC_RUN_DIR)/project/loongson.runs/impl_1
 SOC_TIMING_POLICY ?= strict
 SOC_ARCHIVE_CLASS ?= candidate
+SOC_ARCHIVE_NAME ?= perf_$(PERF_CPU_MHZ)mhz
+SOC_ARCHIVE_REQUESTED_CPU_MHZ ?= $(PERF_CPU_MHZ)
 GATE_DOCKERFILE ?= $(ROOT_DIR)/docker/nscscc-local-gates.Dockerfile
 GATE_IMAGE ?= nscscc-local-gates:ubuntu24.04-v1
 
@@ -47,7 +52,7 @@ MAIN_CPU_COMMIT ?= d9bab16ef46540eb3348b0781afc4d0949f28adc
 
 .PHONY: help doctor status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-check cpu-generate chiplab-sync \
 	sim-configure sim-build sim-run sim wave soc-project soc-impl soc-timing \
-	soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
+	soc-func soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
 	soc-archive soc-incremental-archive
 
 help:
@@ -67,6 +72,7 @@ help:
 		'  make sim              Build software/model and run Verilator' \
 		'  make wave             Open WAVE in Windows Surfer' \
 		'  make soc-project      Recreate the local nscscc-team Vivado project' \
+		'  make soc-func         Run a clean isolated functional-test SoC implementation' \
 		'  make soc-impl         Run the 100 MHz complete-SoC implementation and timing gate' \
 		'  make soc-archive      Archive the latest implementation with class and timing status' \
 		'  make soc-incremental-reference  Preserve the latest routed DCP outside the Vivado project' \
@@ -321,6 +327,41 @@ soc-impl: soc-project
 	$(MAKE) soc-archive SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"; \
 	exit "$$timing_status"
 
+soc-func: cpu-generate
+	@func_dir="$$(realpath -m -- "$(SOC_FUNC_CHIPLAB_DIR)")"; \
+	case "$$func_dir" in \
+		"$(ROOT_DIR)"/build/*) ;; \
+		*) printf 'SOC_FUNC_CHIPLAB_DIR must be below %s/build\n' "$(ROOT_DIR)" >&2; exit 2 ;; \
+	esac; \
+	rm -rf -- "$$func_dir"; \
+	mkdir -p "$$func_dir"
+	git -C "$(CHIPLAB_HOME)" archive "$(CHIPLAB_COMMIT)" | \
+		tar -xf - -C "$(SOC_FUNC_CHIPLAB_DIR)"
+	rm -rf "$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU"
+	mkdir -p "$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/data_bank_sram"
+	mkdir -p "$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/tagv_sram"
+	install -m 0644 "$(CPU_DIR)/rtl/mycpu_top.v" \
+		"$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/mycpu_top.v"
+	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/data_bank_sram.xcix" \
+		"$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/data_bank_sram/data_bank_sram.xcix"
+	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/tagv_sram.xcix" \
+		"$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/tagv_sram/tagv_sram.xcix"
+	sed -i '2s|.*|`define RUN_FUNC_TEST|' \
+		"$(SOC_FUNC_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/soc_config.vh"
+	sed -i '3s|.*|// `define RUN_PERF_TEST|' \
+		"$(SOC_FUNC_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/soc_config.vh"
+	cd "$(SOC_FUNC_RUN_DIR)" && "$(VIVADO)" -mode batch \
+		-source create_project.tcl
+	cd "$(SOC_FUNC_RUN_DIR)" && "$(VIVADO)" -mode batch \
+		-source bit.tcl -tclargs func
+	$(MAKE) soc-archive \
+		CHIPLAB_HOME="$(SOC_FUNC_CHIPLAB_DIR)" \
+		CHIPLAB_COMMIT="$(CHIPLAB_COMMIT)" \
+		SOC_IMPL_DIR="$(SOC_FUNC_IMPL_DIR)" \
+		SOC_ARCHIVE_NAME=func \
+		SOC_ARCHIVE_REQUESTED_CPU_MHZ=platform-default \
+		SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
+
 soc-archive:
 	@set -eu; \
 	case "$(SOC_ARCHIVE_CLASS)" in \
@@ -329,7 +370,12 @@ soc-archive:
 	esac; \
 	validation="$(SOC_IMPL_DIR)/clock_timing_validation.txt"; \
 	cpu_short="$$(git -C "$(CPU_DIR)" rev-parse --short=12 HEAD)"; \
-	chiplab_short="$$(git -C "$(CHIPLAB_HOME)" rev-parse --short=12 HEAD)"; \
+	if [[ -e "$(CHIPLAB_HOME)/.git" ]]; then \
+		chiplab_commit="$$(git -C "$(CHIPLAB_HOME)" rev-parse HEAD)"; \
+	else \
+		chiplab_commit="$(CHIPLAB_COMMIT)"; \
+	fi; \
+	chiplab_short="$$(printf '%.12s' "$$chiplab_commit")"; \
 	for artifact in \
 		"$(CPU_DIR)/rtl/mycpu_top.v" \
 		"$(SOC_IMPL_DIR)/soc_top.bit" \
@@ -344,7 +390,7 @@ soc-archive:
 		}; \
 	done; \
 	build_time="$$(date -r "$$validation" +%Y%m%d-%H%M%S)"; \
-	archive="$(ROOT_DIR)/Stable_Backup/cpu_$${cpu_short}_chiplab_$${chiplab_short}_perf_$(PERF_CPU_MHZ)mhz_$${build_time}_$(SOC_ARCHIVE_CLASS)"; \
+	archive="$(ROOT_DIR)/Stable_Backup/cpu_$${cpu_short}_chiplab_$${chiplab_short}_$(SOC_ARCHIVE_NAME)_$${build_time}_$(SOC_ARCHIVE_CLASS)"; \
 	if awk -F= ' \
 		$$1 == "setup_wns_ns" { setup=$$2; have_setup=1 } \
 		$$1 == "hold_wns_ns" { hold=$$2; have_hold=1 } \
@@ -372,8 +418,8 @@ soc-archive:
 		printf 'artifact_class=%s\n' "$(SOC_ARCHIVE_CLASS)"; \
 		printf 'timing_status=%s\n' "$$timing_status"; \
 		printf 'cpu_commit=%s\n' "$$(git -C "$(CPU_DIR)" rev-parse HEAD)"; \
-		printf 'chiplab_commit=%s\n' "$$(git -C "$(CHIPLAB_HOME)" rev-parse HEAD)"; \
-		printf 'requested_cpu_mhz=%s\n' "$(PERF_CPU_MHZ)"; \
+		printf 'chiplab_commit=%s\n' "$$chiplab_commit"; \
+		printf 'requested_cpu_mhz=%s\n' "$(SOC_ARCHIVE_REQUESTED_CPU_MHZ)"; \
 		for file in mycpu_top.v soc_top.bit soc_top.ltx soc_top_routed.dcp \
 			timing_summary.rpt clock_timing_validation.txt soc_top_drc_routed.rpt; do \
 			printf '%s_sha256=%s\n' "$${file//./_}" \
