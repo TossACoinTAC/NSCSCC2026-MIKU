@@ -307,12 +307,15 @@ without an independently recorded build manifest.
 
 ## Team Board Flow
 
-The team board is attached to the Windows server at
-`administrator@10.20.213.157`. The server is a shared board endpoint, not a
-remote build machine. LabAgent source and release development belongs in the
-root `fpga-lab-agent/` clone; the installed runtime belongs under
-`D:\fpga-lab\app`. See `docs/labagent-board-flow.md` for the deployment and
-evidence contract.
+The team board is attached to the Windows server at `10.20.213.157`. Use the
+forced-command account `fpga-agent@10.20.213.157` from WSL for routine LabAgent
+`queue`, `upload`, `status`, `logs`, `result`, and `artifact` operations. Use
+`administrator@10.20.213.157` only for interactive server maintenance. The
+server is a shared board endpoint, not a remote build machine. LabAgent source
+and release development belongs in the root `fpga-lab-agent/` clone; the
+installed runtime belongs under `D:\fpga-lab\app`. See
+`docs/labagent-board-flow.md` for the deployment, authentication, and evidence
+contract.
 
 After local gates pass:
 
@@ -342,15 +345,26 @@ After local gates pass:
    in PowerShell rather than `cmd.exe`.
    LabAgent's packaged internal wrappers may invoke `cmd.exe`; do not rewrite
    them merely to satisfy the interactive-shell rule.
-6. Use the remote Vivado 2023.2 executable at
+6. Keep normal board API traffic in WSL with `ssh -T
+   fpga-agent@10.20.213.157 boardctl ...`; this account is restricted by sshd to
+   LabAgent's gateway and is not a general remote shell. If a WSL public key
+   needs pairing, transfer only the existing `id_ed25519.pub` text through the
+   administrator PowerShell session. Add it with duplicate detection and
+   no-BOM UTF-8/ASCII encoding to the sshd-configured file
+   `D:\fpga-lab\keys\fpga-agent_authorized_keys`. Do not use `ssh-copy-id`
+   against the Windows server, and do not assume
+   `C:\Users\fpga-agent\.ssh\authorized_keys` is active.
+7. Use the remote Vivado 2023.2 executable at
    `E:\XilinX\Vivado\2023.2\bin\vivado.bat` only when board programming or a
    hardware-manager interaction requires it. Remote work is limited to steps
    that require the attached development board; preserve Tcl commands and logs.
-7. The paired host Moonlight session may be used to view the server's camera and
+8. The paired host Moonlight session may be used to view the server's camera and
    confirm the board's power, cable, indicator, and other visible physical
    state. Camera observations supplement but do not replace UART output,
    hardware test logs, timing/DRC reports, and artifact hashes.
-8. Copy board logs and reports back with `scp`. Record the exact observable
+9. Copy board logs and reports back through the `fpga-agent` artifact API;
+   reserve administrator `scp` for release deployment, recovery, or another
+   explicitly justified maintenance transfer. Record the exact observable
    milestone, UART/terminal output, test result, remote job/run identifier, and
    hashes before claiming board validation.
 
@@ -419,3 +433,9 @@ may remain between runs when they are clearly identified and do not change the
 fixed platform semantics. Restore only temporary changes that would contaminate
 a submission, alter the next result unintentionally, or modify shared server or
 board state; do not perform cleanup solely to make a test workspace appear clean.
+
+Test-only Chiplab harness fixes may also remain while they are in active use so
+the retained source matches the compiled simulator. Record their diff and hash,
+keep them out of synthesized CPU/SoC inputs, and label results as patched-harness
+evidence. Final CI and submission claims must still be reproduced from a clean
+checkout of the locked Chiplab commit.

@@ -45,6 +45,41 @@ program the FPGA, drive VIO/reset protocols, or capture the board camera. Local
 Vivado remains responsible for synthesis, implementation, timing/DRC reports,
 and bitstream generation; the remote server never rebuilds a candidate.
 
+## Client Authentication And Access
+
+Routine board operations originate in WSL through the restricted SSH account:
+
+```sh
+ssh -T fpga-agent@10.20.213.157 boardctl maintenance status
+ssh -T fpga-agent@10.20.213.157 boardctl queue
+ssh -T fpga-agent@10.20.213.157 boardctl status JOB_ID
+ssh -T fpga-agent@10.20.213.157 boardctl result JOB_ID
+```
+
+The account is bound by sshd `ForceCommand` to LabAgent's gateway; it is the
+normal upload/query/evidence transport, not a general Windows shell. Stream a
+validated package and fetch a terminal artifact directly from WSL as follows:
+
+```sh
+ssh -T fpga-agent@10.20.213.157 boardctl upload \
+  --idempotency KEY --sha256 SHA256 --bytes BYTES < PACKAGE.fpgajob
+ssh -T fpga-agent@10.20.213.157 boardctl artifact JOB_ID ARTIFACT > OUTPUT
+```
+
+Use `administrator@10.20.213.157` only when maintenance requires an unrestricted
+Windows session. Start that SSH connection interactively, enter `powershell` as
+the first remote command, and keep subsequent maintenance in PowerShell.
+
+The active authorized-key file for `fpga-agent`, as selected by the server's
+`Match User fpga-agent` sshd rule, is
+`D:\fpga-lab\keys\fpga-agent_authorized_keys`. To pair a WSL client, inspect its
+existing `~/.ssh/id_ed25519.pub`, pass only that public line through the
+administrator PowerShell session, and append it with duplicate detection using
+no-BOM UTF-8 or ASCII. Do not use `ssh-copy-id` against this Windows server: its
+shell/encoding path can corrupt the key file. The default
+`C:\Users\fpga-agent\.ssh\authorized_keys` is not the active file for this
+account. Never transfer a private key.
+
 ## Release And Deployment
 
 Before deploying a LabAgent update:
