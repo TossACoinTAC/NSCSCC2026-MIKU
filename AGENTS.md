@@ -233,7 +233,8 @@ validation.
 ## Local Scala Toolchain
 
 The only supported local Scala/simulation entry points are the root
-`make cpu-check`, `make cpu-generate`, and `make sim` targets. Do not call a
+`make cpu-test`, `make cpu-check`, `make cpu-generate`, and `make sim` targets. Use
+`make cpu-test CPU_TEST=<fully-qualified-suite>` for a focused Scala contract. Do not call a
 system `sbt` or `verilator`, prepend an ad hoc `/tmp` directory, or switch tool
 versions to work around a failure. Run `make toolchain-check` when diagnosing
 the toolchain.
@@ -398,6 +399,8 @@ the nested repositories remain authoritative for implementation details.
 
 - `make doctor`: check WSL/tool paths/repository revisions.
 - `make status`: show root and nested Git state without changing it.
+- `make cpu-test CPU_TEST=openla500.backend.OooRobSpec`: run one focused
+  Scala suite through the locked workspace wrappers.
 - `make cpu-check`: run the existing CPU local gates.
 - `make gate-image`: build the reusable Ubuntu 24.04 locked RTL gate image.
 - `make cpu-locked-gates`: regenerate RTL and run port/lint/Yosys/publication

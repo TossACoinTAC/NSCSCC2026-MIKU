@@ -94,6 +94,36 @@ make cpu-generate
 只有需要 SoC 行为时再运行 `make sim RUN_SOFTWARE=...`。不要通过系统 `sbt`、系统
 `verilator` 或临时工具版本绕过锁定环境。
 
+### 3.2 2026-08-04 启动 manifest
+
+本轮明确采用“先关闭全部 `C01-C08`，再修改性能 RTL”的执行策略。定向 Scala suite 使用
+`make cpu-test CPU_TEST=<fully-qualified-suite>`；完整 verdict 仍只能由 `make cpu-check` 给出。
+
+| 字段 | 冻结值 |
+| --- | --- |
+| Experiment | `20260804-next-stage-p0-baseline`；`role=baseline` |
+| CPU repository HEAD | `872bbd4e9f16ecdde8b0915316bd0f21976fc5ac`，branch `dev/ECHO` |
+| Functional implementation | `6bbca9b330ba8d886c888e2804f70b95be18e4cd` |
+| Dirty state | 仅保留用户已有的 `D AGENTS.md`；binary diff SHA-256 `4fb5b8c92a389a56a89bd3d5adf5137ea25418806048ade3c157a41df13a86f3` |
+| Generated RTL | `137657aa0c594334568cc386571d13aa9cdc828c8fc45c56ed421be15912c209` |
+| Chiplab | `c398d274812f164d387146fa7d8f612a4a1296d9`；现有生成物/测试补丁不属于 clean baseline |
+| Tools | SBT `1.10.11`；Java `21.0.11`；Verilator `5.020`；Vivado `2023.2` |
+| Reproduced gates | Scala 38 suites / 161 tests；Python 364；locked port/lint/Yosys/publication 全通过 |
+| Software hashes | 尚未生成；必须由隔离的 `sim-prepare` 产物补入，不能沿用工作树临时文件 |
+
+P1 的活动状态如下；`closed` 只能在定向测试、完整 gate 和对应系统回归均通过后填写：
+
+| ID | 状态 | CPU commit | 定向证据 | 系统回归 |
+| --- | --- | --- | --- | --- |
+| C01 | open | - | - | - |
+| C02 | open | - | - | - |
+| C03 | open | - | - | - |
+| C04 | open | - | - | - |
+| C05 | open | - | - | - |
+| C06 | open | - | - | - |
+| C07 | open | - | - | - |
+| C08 | open | - | - | - |
+
 ## 4. P1：正确性 gate
 
 `C01-C08` 的优先级高于全部性能候选。下面的“通过”表示相应定向测试、现有门禁和受影响

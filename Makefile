@@ -42,6 +42,7 @@ VERILATOR_HOME ?= $(LOCAL_TOOL_DIR)/verilator/5.020/share/verilator
 SIM_CPU_DIR ?= $(CPU_DIR)/rtl
 SIM_EXTRA_LIBS ?= -llz4
 CPU_SBT ?= $(ROOT_DIR)/tools/sbt-local
+CPU_TEST ?=
 
 RUN_SOFTWARE ?= func/func_lab19
 TIME_LIMIT ?= 1300000
@@ -56,7 +57,7 @@ OFFICIAL_CI_TEMPLATE_COMMIT ?= 6915882af5c8d3a0c856f570cb914920a3e5ff99
 OFFICIAL_CI_TEMPLATE_URL ?= ssh://git@111.4.16.59:63222/2026nscsccteam/ci-template-sync-lab-20260721/ci-template.git
 MAIN_CPU_COMMIT ?= d9bab16ef46540eb3348b0781afc4d0949f28adc
 
-.PHONY: help doctor toolchain-check chiplab-toolchains status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-check cpu-generate chiplab-sync \
+.PHONY: help doctor toolchain-check chiplab-toolchains status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-test cpu-check cpu-generate chiplab-sync \
 	sim-configure sim-build sim-run sim wave soc-project soc-impl soc-timing \
 	soc-func soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
 	soc-archive soc-incremental-archive
@@ -74,6 +75,7 @@ help:
 		'  make gate-image      Build the reusable locked Verilator/Yosys image' \
 		'  make cpu-locked-gates Refresh version metadata and run RTL gates in that locked image' \
 		'  make cpu-locked-gates-run  Reuse the existing locked image without rebuilding it' \
+		'  make cpu-test        Run one focused Scala suite (CPU_TEST=fully.qualified.Suite)' \
 		'  make cpu-check       Run the nscscc-cpu local correctness/publication gates' \
 		'  make cpu-generate    Generate and publish mycpu_top.v from SpinalHDL' \
 		'  make chiplab-sync    Generate CPU RTL and copy it into Chiplab IP/myCPU' \
@@ -283,6 +285,19 @@ cpu-check:
 		SBT="$(CPU_SBT)"
 	$(MAKE) cpu-locked-gates-run
 	TMPDIR=/tmp $(MAKE) -C "$(CPU_DIR)" python-test
+
+cpu-test:
+	@if [[ -z "$(strip $(CPU_TEST))" ]]; then \
+		printf 'CPU_TEST is required, for example: make cpu-test CPU_TEST=openla500.backend.OooRobSpec\n' >&2; \
+		exit 2; \
+	fi
+	@test_file="$(CPU_DIR)/spinal/src/test/scala/$(subst .,/,$(CPU_TEST)).scala"; \
+	if [[ ! -f "$$test_file" ]]; then \
+		printf 'Scala suite source not found: %s\n' "$$test_file" >&2; \
+		exit 2; \
+	fi
+	cd "$(CPU_DIR)/spinal" && TMPDIR=/tmp "$(CPU_SBT)" -batch \
+		"testOnly $(CPU_TEST)"
 
 cpu-generate:
 	$(MAKE) -C "$(CPU_DIR)" generate-core SBT="$(CPU_SBT)"
