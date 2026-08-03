@@ -97,10 +97,12 @@ missing summary, partial CSV, or a log line containing `PASS` is not a hardware
 pass.
 
 The LabAgent release installed on 2026-08-03 is source commit
-`21cc630` (version 0.3.0), with executable SHA256
-`0d090fc8a9dfab7256b49c24f9ec3c8c45725a7fceecfedc9b7a5e5d5d4091a3`.
-The timestamped pre-update backup is
-`D:\fpga-lab\backup\before-system-reset-20260803-180241`.
+`077daa6` (version 0.3.1), with executable SHA256
+`c094cd545ddbc80caa602ed6237acc769f2f9db090b84a7db5e51607cc6c6d8c`.
+Its offline self-test and server doctor passed after deployment. The immediate
+rollback backup is
+`D:\fpga-lab\backup\before-0.3.1-20260803-211652`; the older
+`D:\fpga-lab\backup\before-system-reset-20260803-180241` remains historical.
 
 The first official-protocol validation job,
 `20260802-201006-ac3bf081`, programmed successfully, observed DDR ready, and
@@ -121,3 +123,13 @@ cross-mode diagnostics, but they are not official clean `gen_func` evidence.
 Do not infer the synthesized Chiplab macro or clock from the LabAgent profile;
 future packaging must validate the bit build kind and actual clock against the
 selected board profile.
+
+The first terminal production-system-reset validation is job
+`20260803-132008-97f48faa`, using CPU commit
+`8594150feb652bd3ef137995858cb9eb5f884580`, Chiplab
+`c398d274812f164d387146fa7d8f612a4a1296d9`, and package SHA256
+`93378d04f3fa8519ecc03c63de168f556e1366403185a4547f9a8c191bad2b6d`.
+It passed `func58` at the package's actual 32.726797 MHz CPU clock. Seeds `F0`,
+`FF`, and `A5` each reached `3A00003A` with both pass indicators asserted. This
+closes the earlier n49/`0x30000030` functional-board symptom for that candidate;
+it is not 100 MHz performance or Linux-boot evidence.
