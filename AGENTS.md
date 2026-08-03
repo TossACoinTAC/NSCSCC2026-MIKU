@@ -413,3 +413,9 @@ the nested repositories remain authoritative for implementation details.
 Long-running simulation or Vivado commands must not be presented as lightweight
 checks. Preserve their logs and report whether they completed, failed, or were
 not run.
+
+Variable test-environment configuration and diagnostically useful generated logs
+may remain between runs when they are clearly identified and do not change the
+fixed platform semantics. Restore only temporary changes that would contaminate
+a submission, alter the next result unintentionally, or modify shared server or
+board state; do not perform cleanup solely to make a test workspace appear clean.
