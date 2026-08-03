@@ -37,23 +37,22 @@ When sources disagree, use this precedence:
 The current production GitLab CI template commit
 `6915882af5c8d3a0c856f570cb914920a3e5ff99` pins Chiplab
 `c398d274812f164d387146fa7d8f612a4a1296d9` from the official `nscscc2026`
-branch. Use the clean `chiplab-nscscc2026/` worktree at that exact commit and
+branch. Use the clean `chiplab/` worktree at that exact commit and
 treat its SoC, clock, DDR, board, and Vivado project files as fixed platform
-inputs. The older `chiplab/` checkout at `68c20a5...` is retained only as build
-history and is not current CI evidence. Re-resolve the production template
-before a submission if its protected `master` advances.
+inputs. The older local `68c20a5...` worktree was removed after its reusable
+toolchain snapshot was copied into the official `chiplab/toolchains/` layout
+and hash-locked; it is not current CI evidence. Re-resolve the production
+template before a submission if its protected `master` advances.
 
 ## Workspace Ownership
 
 - `nscscc-cpu/`: active CPU development repository. CPU RTL is authored in
   SpinalHDL under `spinal/src/main/scala`; tests belong beside the corresponding
   package under `spinal/src/test/scala` or in `tests/`.
-- `chiplab-nscscc2026/`: fixed SoC integration, Verilator harness, FPGA
+- `chiplab/`: fixed SoC integration, Verilator harness, FPGA
   platform logic, and platform IP from official CI snapshot `c398d27...`. Keep
   platform files unmodified during CPU development; populate only the
   student-owned `IP/myCPU` input through the reproducible synchronization flow.
-- `chiplab/`: retained historical `68c20a5...` build worktree. Do not use it for
-  new CI-equivalent claims.
 - `T2026144230012607/`: official GitLab student submission repository. Never
   modify its protected `.gitlab-ci.yml` or competition Tcl files; develop and
   trigger CI from non-`master` submission branches.
@@ -247,8 +246,9 @@ socket path-length failures from deeply nested workspace paths.
 
 Host-side Spinal simulations use the validated Verilator 5.020 installation at
 `tools/.local/verilator/5.020/` through `tools/verilator-local` and
-`tools/bin/verilator`. The wrapper rejects version/hash drift and clears an
-external `VERILATOR_ROOT`; `tools/sbt-local` and the root `sim-build` target
+`tools/bin/verilator`. The wrapper rejects version/hash drift and overrides an
+external `VERILATOR_ROOT` with the matching workspace resource root;
+`tools/sbt-local` and the root `sim-build` target
 prepend this wrapper only for their child processes, and Chiplab receives the
 matching include directory. Direct focused tests through
 `tools/sbt-local` cannot silently select `/usr/local/bin/verilator`.
@@ -267,6 +267,13 @@ Windows-mounted `TEMP` inherited by WSL.
 official-CI `glab` hashes. Use `tools/glab-local` (or the `tools/bin/glab` shim)
 for GitLab CLI access; its ignored configuration remains alongside the pinned
 binary under `tools/.local/glab/`.
+
+Chiplab's LA32 GCC 8.3, NEMU DiffTest library, QEMU, and picolibc snapshot live
+in the official-manual layout under ignored `chiplab/toolchains/`. Run
+`make chiplab-toolchains` to validate their locked hashes. `make sim` depends
+on that check and prepends the compiler/QEMU directories only for its child
+processes. Do not depend on the removed 68c worktree or a user-global
+cross-compiler `PATH`.
 Keep the validated ignored `tools/.local/` cache across candidates. Restore it
 from the known workspace cache if missing; do not rebuild or replace it during
 an RTL debugging task. Refresh the lock only as a separate reviewed toolchain

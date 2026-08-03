@@ -50,7 +50,7 @@ Use `make soc-impl` for the default 100 MHz performance implementation. Use
 `make soc-func` for an isolated clean function implementation. The function
 target extracts exact c398 sources under ignored `build/chiplab-func/`, applies
 only the official function macro selection there, performs clean synthesis and
-implementation, and leaves the fixed `chiplab-nscscc2026/` checkout untouched.
+implementation, and leaves the fixed `chiplab/` checkout untouched.
 
 Do not synthesize both modes after every source edit. Use the cheapest decisive
 verification first:

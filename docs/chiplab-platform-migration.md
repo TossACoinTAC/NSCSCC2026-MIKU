@@ -62,21 +62,24 @@ interrupt tests. This is an architectural reset correction, not a benchmark
 trade-off, so it remains part of the latest candidate.
 
 The platform reset-policy difference can expose incomplete CPU reset state in a
-different way, but static source comparison does not prove that this defect was
-the only cause of the observed board stop. Closure requires the same latest RTL
-on `c398d27...`, using its complete-system reset protocol, to pass all functional
-seeds on the board. Until then, describe the timer reset defect as fixed in RTL
-and the board failure as not yet closed.
+different way, but static source comparison alone does not prove that this
+defect was the only cause of the observed board stop. The later clean c398
+function package for CPU `8594150...` passed board job
+`20260803-132008-97f48faa`: seeds `F0`, `FF`, and `A5` all reached
+`3A00003A`. This closes the observed n49 symptom for the repaired candidate;
+it does not make the earlier cross-mode run a valid A/B experiment and does not
+prove Linux or 100 MHz performance.
 
 ## Local Integration Contract
 
-Use the clean `chiplab-nscscc2026/` worktree at the exact production commit.
+Use the clean `chiplab/` worktree at the exact production commit.
 `make chiplab-sync` generates `mycpu_top.v` from SpinalHDL and stages it together
 with the two CPU-owned SRAM `.xcix` files. The command must not modify Chiplab
 platform sources. `make ci-check` fetches the production template into ignored
 `build/official-ci-template/`, verifies its exact revision, parses the template
 and submission YAML, and checks the Chiplab pin.
 
-The historical `chiplab/` worktree and its build products may remain for
-comparison, but results from it must be labeled with `68c20a5...` and must not
-be called current official-CI evidence.
+The historical 68c worktree was removed after its reusable LA32 compiler,
+NEMU, QEMU, and picolibc files were copied and hash-locked under the official
+manual's ignored `chiplab/toolchains/` layout. Historical 68c result archives
+remain labeled as such and are not current official-CI evidence.
