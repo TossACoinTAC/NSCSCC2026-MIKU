@@ -30,6 +30,7 @@
 /*.fpgajob
 /*.fst
 /*.jou
+/*vivado*.log
 /*.ltx
 /*.pb
 /*.str

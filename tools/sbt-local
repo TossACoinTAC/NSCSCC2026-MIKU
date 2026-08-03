@@ -1,0 +1,40 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+cache_root=${NSCSCC_SBT_CACHE_ROOT:-$workspace_root/build/tool-cache/sbt}
+runtime_dir=${NSCSCC_SBT_RUNTIME_DIR:-/tmp/nscscc-sbt-runtime}
+launcher=${NSCSCC_SBT_LAUNCHER:-$cache_root/sbt-launch.jar}
+sbt_bin=${NSCSCC_SBT_BIN:-$(command -v sbt || true)}
+
+mkdir -p "$cache_root/boot" "$cache_root/coursier" "$cache_root/global" \
+    "$cache_root/home" "$cache_root/ivy2" "$runtime_dir"
+
+batch_arg=
+if [ "${1:-}" = -batch ]; then
+    batch_arg=-batch
+    shift
+fi
+
+if [ -f "$launcher" ]; then
+    exec env HOME="$cache_root/home" XDG_RUNTIME_DIR="$runtime_dir" \
+        COURSIER_CACHE="$cache_root/coursier" \
+        java \
+        -Dsbt.boot.directory="$cache_root/boot" \
+        -Dsbt.global.base="$cache_root/global" \
+        -Dsbt.ivy.home="$cache_root/ivy2" \
+        -jar "$launcher" "$@"
+fi
+
+if [ -z "$sbt_bin" ]; then
+    printf 'sbt executable not found; set NSCSCC_SBT_BIN\n' >&2
+    exit 127
+fi
+
+if [ -n "$batch_arg" ]; then
+    set -- "$batch_arg" "$@"
+fi
+
+exec env HOME="$cache_root/home" XDG_RUNTIME_DIR="$runtime_dir" \
+    COURSIER_CACHE="$cache_root/coursier" "$sbt_bin" "$@"
