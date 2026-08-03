@@ -8,8 +8,10 @@
 
 # Nested repositories and local reference material are managed independently.
 /chiplab/
+/chiplab-nscscc2026/
 /nscscc-cpu/
 /nscscc-team-ci/
+/T2026144230012607/
 /nscscc-linux-kernel/
 /fpga-lab-agent/
 /Info/

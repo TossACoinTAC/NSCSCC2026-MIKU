@@ -3,8 +3,10 @@ SHELL := /bin/zsh
 
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 CPU_DIR ?= $(ROOT_DIR)/nscscc-cpu
-CHIPLAB_HOME ?= $(ROOT_DIR)/chiplab
+CHIPLAB_HOME := $(ROOT_DIR)/chiplab-nscscc2026
 TEAM_CI_DIR ?= $(ROOT_DIR)/nscscc-team-ci
+SUBMISSION_DIR ?= $(ROOT_DIR)/T2026144230012607
+OFFICIAL_CI_TEMPLATE_DIR ?= $(ROOT_DIR)/build/official-ci-template
 SIM_DIR ?= $(CHIPLAB_HOME)/sims/verilator/run_prog
 SOC_RUN_DIR ?= $(CHIPLAB_HOME)/fpga/nscscc-team/run_vivado
 SOC_PLATFORM_IP_DIR ?= $(CHIPLAB_HOME)/chip/soc_demo/nscscc-team/xilinx_ip
@@ -37,9 +39,12 @@ PERF_CPU_MHZ ?= 100
 SIM_CONFIG_ARGS ?= --run $(RUN_SOFTWARE) --disable-simu-trace --output-uart-info --dump-fst
 WAVE ?= $(SIM_DIR)/log/$(RUN_SOFTWARE)_log/simu_trace.fst
 
-CHIPLAB_COMMIT ?= 68c20a539e2be8a05300e714296f5fda8373ee80
+CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
+OFFICIAL_CI_TEMPLATE_COMMIT ?= 6915882af5c8d3a0c856f570cb914920a3e5ff99
+OFFICIAL_CI_TEMPLATE_URL ?= ssh://git@111.4.16.59:63222/2026nscsccteam/ci-template-sync-lab-20260721/ci-template.git
+MAIN_CPU_COMMIT ?= d9bab16ef46540eb3348b0781afc4d0949f28adc
 
-.PHONY: help doctor status ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-check cpu-generate chiplab-sync \
+.PHONY: help doctor status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-check cpu-generate chiplab-sync \
 	sim-configure sim-build sim-run sim wave soc-project soc-impl soc-timing \
 	soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
 	soc-incremental-archive
@@ -50,7 +55,8 @@ help:
 		'' \
 		'  make doctor          Check WSL2, tools, paths, branches, and platform revision' \
 		'  make status          Show root and nested repository state (read-only)' \
-		'  make ci-check        Parse the official CI template YAML' \
+		'  make ci-production-sync  Fetch and verify the production GitLab CI template' \
+		'  make ci-check        Validate the submission include and production CI pins' \
 		'  make gate-image      Build the reusable locked Verilator/Yosys image' \
 		'  make cpu-locked-gates Refresh version metadata and run RTL gates in that locked image' \
 		'  make cpu-locked-gates-run  Reuse the existing locked image without rebuilding it' \
@@ -102,6 +108,7 @@ doctor:
 	check_dir CPU_DIR "$(CPU_DIR)"; \
 	check_dir CHIPLAB_HOME "$(CHIPLAB_HOME)"; \
 	check_dir TEAM_CI_DIR "$(TEAM_CI_DIR)"; \
+	check_dir SUBMISSION "$(SUBMISSION_DIR)"; \
 	check_cmd java; \
 	if [[ -x "$(CPU_SBT)" ]]; then \
 		printf '[ok]      %-12s %s\n' SBTWrapper "$(CPU_SBT)"; \
@@ -130,7 +137,7 @@ doctor:
 			"$$(git -C "$(CPU_DIR)" branch --show-current)" \
 			"$$(git -C "$(CPU_DIR)" rev-parse --short=12 HEAD)"; \
 	fi; \
-	if [[ -d "$(CHIPLAB_HOME)/.git" ]]; then \
+	if git -C "$(CHIPLAB_HOME)" rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
 		chiplab_head="$$(git -C "$(CHIPLAB_HOME)" rev-parse HEAD)"; \
 		chiplab_branch="$$(git -C "$(CHIPLAB_HOME)" branch --show-current)"; \
 		[[ -n "$$chiplab_branch" ]] || chiplab_branch=detached; \
@@ -145,6 +152,11 @@ doctor:
 			missing=1; \
 		fi; \
 	fi; \
+	if git -C "$(SUBMISSION_DIR)" rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+		printf '[info]    %-12s branch=%s head=%s\n' Submission \
+			"$$(git -C "$(SUBMISSION_DIR)" branch --show-current)" \
+			"$$(git -C "$(SUBMISSION_DIR)" rev-parse --short=12 HEAD)"; \
+	fi; \
 	exit "$$missing"
 
 status:
@@ -156,10 +168,39 @@ status:
 	@git -C "$(CHIPLAB_HOME)" status --short --branch
 	@printf '%s\n' '== nscscc-team-ci =='
 	@git -C "$(TEAM_CI_DIR)" status --short --branch
+	@printf '%s\n' '== official submission =='
+	@git -C "$(SUBMISSION_DIR)" status --short --branch
 
-ci-check:
-	ruby -e 'require "yaml"; ARGV.each { |path| YAML.load_file(path) }' \
-		"$(TEAM_CI_DIR)/parent.yml" "$(TEAM_CI_DIR)/child.yml"
+ci-production-sync:
+	@mkdir -p "$(dir $(OFFICIAL_CI_TEMPLATE_DIR))"
+	@if [[ ! -d "$(OFFICIAL_CI_TEMPLATE_DIR)/.git" ]]; then \
+		git clone --no-checkout "$(OFFICIAL_CI_TEMPLATE_URL)" \
+			"$(OFFICIAL_CI_TEMPLATE_DIR)"; \
+	fi
+	@git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" fetch origin master
+	@actual="$$(git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" rev-parse origin/master)"; \
+	if [[ "$$actual" != "$(OFFICIAL_CI_TEMPLATE_COMMIT)" ]]; then \
+		printf 'production CI template moved: expected %s, found %s\n' \
+			"$(OFFICIAL_CI_TEMPLATE_COMMIT)" "$$actual" >&2; \
+		exit 1; \
+	fi; \
+	printf 'production CI template: %s\n' "$$actual"
+
+ci-check: ci-production-sync
+	@ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' \
+		"$(SUBMISSION_DIR)/.gitlab-ci.yml"
+	@git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" show \
+		"$(OFFICIAL_CI_TEMPLATE_COMMIT):parent.yml" | \
+		ruby -e 'require "yaml"; YAML.load(STDIN.read)'
+	@git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" show \
+		"$(OFFICIAL_CI_TEMPLATE_COMMIT):child.yml" | \
+		ruby -e 'require "yaml"; YAML.load(STDIN.read)'
+	@git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" show \
+		"$(OFFICIAL_CI_TEMPLATE_COMMIT):child.yml" | \
+		rg -q 'EXPECTED_CHIPLAB_COMMIT: "$(CHIPLAB_COMMIT)"'
+	@rg -q "project: '2026nscsccteam/ci-template-sync-lab-20260721/ci-template'" \
+		"$(SUBMISSION_DIR)/.gitlab-ci.yml"
+	@printf 'production CI pins Chiplab %s\n' "$(CHIPLAB_COMMIT)"
 
 gate-image:
 	docker build --pull=false -f "$(GATE_DOCKERFILE)" -t "$(GATE_IMAGE)" \
@@ -219,9 +260,16 @@ cpu-generate:
 
 chiplab-sync: cpu-generate
 	@test -f "$(CPU_DIR)/rtl/mycpu_top.v"
-	@mkdir -p "$(CHIPLAB_HOME)/IP/myCPU"
+	@test -f "$(CPU_DIR)/xilinx_ip/sram/data_bank_sram.xcix"
+	@test -f "$(CPU_DIR)/xilinx_ip/sram/tagv_sram.xcix"
+	@mkdir -p "$(CHIPLAB_HOME)/IP/myCPU/xilinx_ip/data_bank_sram"
+	@mkdir -p "$(CHIPLAB_HOME)/IP/myCPU/xilinx_ip/tagv_sram"
 	install -m 0644 "$(CPU_DIR)/rtl/mycpu_top.v" \
 		"$(CHIPLAB_HOME)/IP/myCPU/mycpu_top.v"
+	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/data_bank_sram.xcix" \
+		"$(CHIPLAB_HOME)/IP/myCPU/xilinx_ip/data_bank_sram/data_bank_sram.xcix"
+	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/tagv_sram.xcix" \
+		"$(CHIPLAB_HOME)/IP/myCPU/xilinx_ip/tagv_sram/tagv_sram.xcix"
 
 sim-configure: cpu-generate
 	cd "$(SIM_DIR)" && ./configure.sh $(SIM_CONFIG_ARGS)

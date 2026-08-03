@@ -25,30 +25,42 @@ When sources disagree, use this precedence:
 2. `docs/linux-system-requirements.md` for this project's Linux completion
    contract. It intentionally exceeds the competition's baseline instruction
    subset.
-3. `nscscc-team-ci/` for the official submission layout, clock limits, fixed
-   platform snapshot, full-SoC timing gates, and hardware evaluation behavior.
-4. Executable tests and contracts in the active `nscscc-cpu` checkout.
-5. `Info/CurrentDesign/` and historical material in `nscscc-cpu`; these are
+3. `T2026144230012607/Readme.md` and the production GitLab CI template included
+   by its unmodified `.gitlab-ci.yml` for the current submission layout, clock
+   limits, fixed platform snapshot, timing policy, and hardware evaluation.
+4. `nscscc-team-ci/` as a local mirror/reference; verify its revision against
+   the production GitLab template before relying on it.
+5. Executable tests and contracts in the active `nscscc-cpu` checkout.
+6. `Info/CurrentDesign/` and historical material in `nscscc-cpu`; these are
    evidence and design references, not automatically the current truth.
 
-The `chiplab` integration and evaluation baseline is the exact official CI
-snapshot `68c20a539e2be8a05300e714296f5fda8373ee80`, as named by
-`nscscc-team-ci/child.yml`. Keep the checkout at that commit and treat its SoC,
-clock, DDR, board, and Vivado project files as fixed platform inputs. CPU
-candidates must be verified against a clean copy of this exact snapshot; another
-Chiplab revision or a descendant commit is not equivalent evidence.
+The current production GitLab CI template commit
+`6915882af5c8d3a0c856f570cb914920a3e5ff99` pins Chiplab
+`c398d274812f164d387146fa7d8f612a4a1296d9` from the official `nscscc2026`
+branch. Use the clean `chiplab-nscscc2026/` worktree at that exact commit and
+treat its SoC, clock, DDR, board, and Vivado project files as fixed platform
+inputs. The older `chiplab/` checkout at `68c20a5...` is retained only as build
+history and is not current CI evidence. Re-resolve the production template
+before a submission if its protected `master` advances.
 
 ## Workspace Ownership
 
 - `nscscc-cpu/`: active CPU development repository. CPU RTL is authored in
   SpinalHDL under `spinal/src/main/scala`; tests belong beside the corresponding
   package under `spinal/src/test/scala` or in `tests/`.
-- `chiplab/`: fixed SoC integration, Verilator harness, FPGA platform logic, and
-  platform IP from official CI snapshot `68c20a5...`. Keep platform files
-  unmodified during CPU development; populate only the student-owned `IP/myCPU`
-  input through the reproducible synchronization flow.
-- `nscscc-team-ci/`: authoritative submission and evaluation contract. Do not
-  copy platform PLL XCI files into a student submission.
+- `chiplab-nscscc2026/`: fixed SoC integration, Verilator harness, FPGA
+  platform logic, and platform IP from official CI snapshot `c398d27...`. Keep
+  platform files unmodified during CPU development; populate only the
+  student-owned `IP/myCPU` input through the reproducible synchronization flow.
+- `chiplab/`: retained historical `68c20a5...` build worktree. Do not use it for
+  new CI-equivalent claims.
+- `T2026144230012607/`: official GitLab student submission repository. Never
+  modify its protected `.gitlab-ci.yml` or competition Tcl files; develop and
+  trigger CI from non-`master` submission branches.
+- `nscscc-team-ci/`: local Gitee mirror/reference for the submission and
+  evaluation contract. It may lag the production GitLab template; do not use it
+  to override the template included by the official submission repository. Do
+  not copy platform PLL XCI files into a student submission.
 - `fpga-lab-agent/`: independent source and release repository for the team's
   serialized board service. Develop and test it locally, then push reviewed
   compatible updates to its `main`; do not copy it into the CPU repository or
