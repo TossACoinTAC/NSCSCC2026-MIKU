@@ -20,6 +20,7 @@ SOC_INCREMENTAL_REFERENCE_DCP ?= $(SOC_INCREMENTAL_DIR)/reference/soc_top_routed
 SOC_INCREMENTAL_REFERENCE_MANIFEST ?= $(SOC_INCREMENTAL_DIR)/reference/manifest.txt
 SOC_INCREMENTAL_REUSE_REPORT ?= $(SOC_INCREMENTAL_DIR)/results/incremental_reuse.rpt
 SOC_TIMING_POLICY ?= strict
+SOC_ARCHIVE_CLASS ?= candidate
 GATE_DOCKERFILE ?= $(ROOT_DIR)/docker/nscscc-local-gates.Dockerfile
 GATE_IMAGE ?= nscscc-local-gates:ubuntu24.04-v1
 
@@ -47,7 +48,7 @@ MAIN_CPU_COMMIT ?= d9bab16ef46540eb3348b0781afc4d0949f28adc
 .PHONY: help doctor status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-check cpu-generate chiplab-sync \
 	sim-configure sim-build sim-run sim wave soc-project soc-impl soc-timing \
 	soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
-	soc-incremental-archive
+	soc-archive soc-incremental-archive
 
 help:
 	@printf '%s\n' \
@@ -67,6 +68,7 @@ help:
 		'  make wave             Open WAVE in Windows Surfer' \
 		'  make soc-project      Recreate the local nscscc-team Vivado project' \
 		'  make soc-impl         Run the 100 MHz complete-SoC implementation and timing gate' \
+		'  make soc-archive      Archive the latest implementation with class and timing status' \
 		'  make soc-incremental-reference  Preserve the latest routed DCP outside the Vivado project' \
 		'  make soc-impl-incremental  Re-synthesize, then implement with the preserved routed DCP' \
 		'  make soc-incremental-archive  Archive the current incremental artifacts and hashes' \
@@ -77,6 +79,7 @@ help:
 		'Common overrides:' \
 		'  RUN_SOFTWARE=func/func_lab19  TIME_LIMIT=1300000  JOBS=8  AXI_SEED=5570815' \
 		'  PERF_CPU_MHZ=100' \
+		'  SOC_ARCHIVE_CLASS=candidate|stable' \
 		'  SOC_TIMING_POLICY=strict|report  (report is only for comparison artifacts)' \
 		'  VERILATOR_ROOT=/path/to/verilator/source-or-share-root' \
 		'  WAVE=/absolute/path/to/file.fst  VIVADO_HOME=/path/to/Vivado/2023.2'
@@ -311,7 +314,76 @@ soc-project: chiplab-sync
 soc-impl: soc-project
 	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch -source bit.tcl \
 		-tclargs perf "$(PERF_CPU_MHZ)"
-	$(MAKE) soc-timing-check
+	@set +e; \
+	$(MAKE) soc-timing-check; \
+	timing_status=$$?; \
+	set -e; \
+	$(MAKE) soc-archive SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"; \
+	exit "$$timing_status"
+
+soc-archive:
+	@set -eu; \
+	case "$(SOC_ARCHIVE_CLASS)" in \
+		candidate|stable) ;; \
+		*) printf 'SOC_ARCHIVE_CLASS must be candidate or stable\n' >&2; exit 2 ;; \
+	esac; \
+	validation="$(SOC_IMPL_DIR)/clock_timing_validation.txt"; \
+	cpu_short="$$(git -C "$(CPU_DIR)" rev-parse --short=12 HEAD)"; \
+	chiplab_short="$$(git -C "$(CHIPLAB_HOME)" rev-parse --short=12 HEAD)"; \
+	for artifact in \
+		"$(CPU_DIR)/rtl/mycpu_top.v" \
+		"$(SOC_IMPL_DIR)/soc_top.bit" \
+		"$(SOC_IMPL_DIR)/soc_top.ltx" \
+		"$(SOC_IMPL_DIR)/soc_top_routed.dcp" \
+		"$(SOC_IMPL_DIR)/timing_summary.rpt" \
+		"$$validation" \
+		"$(SOC_IMPL_DIR)/soc_top_drc_routed.rpt"; do \
+		test -s "$$artifact" || { \
+			printf 'implementation artifact missing or empty: %s\n' "$$artifact" >&2; \
+			exit 1; \
+		}; \
+	done; \
+	build_time="$$(date -r "$$validation" +%Y%m%d-%H%M%S)"; \
+	archive="$(ROOT_DIR)/Stable_Backup/cpu_$${cpu_short}_chiplab_$${chiplab_short}_perf_$(PERF_CPU_MHZ)mhz_$${build_time}_$(SOC_ARCHIVE_CLASS)"; \
+	if awk -F= ' \
+		$$1 == "setup_wns_ns" { setup=$$2; have_setup=1 } \
+		$$1 == "hold_wns_ns" { hold=$$2; have_hold=1 } \
+		END { exit !(have_setup && have_hold && setup >= 0 && hold >= 0) } \
+	' "$$validation"; then \
+		timing_status=pass; \
+	else \
+		timing_status=fail; \
+	fi; \
+	if [[ "$(SOC_ARCHIVE_CLASS)" == stable && "$$timing_status" != pass ]]; then \
+		printf 'cannot mark negative-slack implementation as stable\n' >&2; \
+		exit 1; \
+	fi; \
+	if [[ -e "$$archive" ]]; then \
+		printf 'implementation artifacts already archived: %s\n' "$$archive"; \
+		exit 0; \
+	fi; \
+	mkdir -p "$$archive"; \
+	install -m 0644 "$(CPU_DIR)/rtl/mycpu_top.v" "$$archive/mycpu_top.v"; \
+	for file in soc_top.bit soc_top.ltx soc_top_routed.dcp timing_summary.rpt \
+		clock_timing_validation.txt soc_top_drc_routed.rpt; do \
+		install -m 0644 "$(SOC_IMPL_DIR)/$$file" "$$archive/$$file"; \
+	done; \
+	{ \
+		printf 'artifact_class=%s\n' "$(SOC_ARCHIVE_CLASS)"; \
+		printf 'timing_status=%s\n' "$$timing_status"; \
+		printf 'cpu_commit=%s\n' "$$(git -C "$(CPU_DIR)" rev-parse HEAD)"; \
+		printf 'chiplab_commit=%s\n' "$$(git -C "$(CHIPLAB_HOME)" rev-parse HEAD)"; \
+		printf 'requested_cpu_mhz=%s\n' "$(PERF_CPU_MHZ)"; \
+		for file in mycpu_top.v soc_top.bit soc_top.ltx soc_top_routed.dcp \
+			timing_summary.rpt clock_timing_validation.txt soc_top_drc_routed.rpt; do \
+			printf '%s_sha256=%s\n' "$${file//./_}" \
+				"$$(sha256sum "$$archive/$$file" | awk '{print $$1}')"; \
+		done; \
+		printf '%s\n' 'clock_timing_validation:'; \
+		sed 's/^/  /' "$$archive/clock_timing_validation.txt"; \
+	} > "$$archive/manifest.txt"; \
+	printf '%s implementation (%s timing) archived: %s\n' \
+		"$(SOC_ARCHIVE_CLASS)" "$$timing_status" "$$archive"
 
 soc-incremental-reference:
 	@test -f "$(SOC_INCREMENTAL_REFERENCE_SOURCE)" || { \

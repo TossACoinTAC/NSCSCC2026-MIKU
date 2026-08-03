@@ -322,6 +322,11 @@ the nested repositories remain authoritative for implementation details.
   100 MHz CPU target in Vivado 2023.2. Override `PERF_CPU_MHZ` only for an
   explicitly recorded frequency experiment; the Chiplab functional-clock
   default is not a valid performance or board candidate.
+- `make soc-archive`: archive the latest normal implementation with RTL,
+  bitstream, probes, routed DCP, timing/DRC evidence, hashes, class, and timing
+  status. Normal runs archive as `candidate`; only use
+  `SOC_ARCHIVE_CLASS=stable` for a team-selected version with clean setup/hold
+  timing. Stable and non-stable artifacts must remain visibly distinct.
 - `make soc-impl-incremental`: run fresh RTL generation/synthesis followed by
   incremental implementation from the latest preserved routed checkpoint.
 - `make soc-incremental-archive`: archive the current incremental comparison
