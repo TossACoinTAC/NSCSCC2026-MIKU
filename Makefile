@@ -5,7 +5,11 @@ ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 LOCAL_TOOL_DIR := $(ROOT_DIR)/tools/.local
 LOCAL_TOOL_BIN := $(ROOT_DIR)/tools/bin
 CPU_DIR ?= $(ROOT_DIR)/nscscc-cpu
-CHIPLAB_HOME := $(ROOT_DIR)/chiplab-nscscc2026
+CHIPLAB_HOME := $(ROOT_DIR)/chiplab
+CHIPLAB_TOOLCHAIN_DIR := $(CHIPLAB_HOME)/toolchains
+CHIPLAB_GCC_BIN := $(CHIPLAB_TOOLCHAIN_DIR)/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin
+CHIPLAB_QEMU_BIN := $(CHIPLAB_TOOLCHAIN_DIR)/la32r-QEMU-x86_64-ubuntu-22.04
+SIM_PATH := $(LOCAL_TOOL_BIN):$(CHIPLAB_GCC_BIN):$(CHIPLAB_QEMU_BIN)
 TEAM_CI_DIR ?= $(ROOT_DIR)/nscscc-team-ci
 SUBMISSION_DIR ?= $(ROOT_DIR)/T2026144230012607
 OFFICIAL_CI_TEMPLATE_DIR ?= $(ROOT_DIR)/build/official-ci-template
@@ -52,7 +56,7 @@ OFFICIAL_CI_TEMPLATE_COMMIT ?= 6915882af5c8d3a0c856f570cb914920a3e5ff99
 OFFICIAL_CI_TEMPLATE_URL ?= ssh://git@111.4.16.59:63222/2026nscsccteam/ci-template-sync-lab-20260721/ci-template.git
 MAIN_CPU_COMMIT ?= d9bab16ef46540eb3348b0781afc4d0949f28adc
 
-.PHONY: help doctor toolchain-check status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-check cpu-generate chiplab-sync \
+.PHONY: help doctor toolchain-check chiplab-toolchains status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-check cpu-generate chiplab-sync \
 	sim-configure sim-build sim-run sim wave soc-project soc-impl soc-timing \
 	soc-func soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
 	soc-archive soc-incremental-archive
@@ -63,6 +67,7 @@ help:
 		'' \
 		'  make doctor          Check WSL2, tools, paths, branches, and platform revision' \
 		'  make toolchain-check Verify the workspace-local SBT and Verilator lock' \
+		'  make chiplab-toolchains  Verify Chiplab compiler/NEMU/QEMU/picolibc hashes' \
 		'  make status          Show root and nested repository state (read-only)' \
 		'  make ci-production-sync  Fetch and verify the production GitLab CI template' \
 		'  make ci-check        Validate the submission include and production CI pins' \
@@ -94,6 +99,9 @@ help:
 
 toolchain-check:
 	"$(ROOT_DIR)/tools/toolchain-check"
+
+chiplab-toolchains:
+	"$(ROOT_DIR)/tools/chiplab-toolchains-local"
 
 doctor:
 	@set -u; \
@@ -291,20 +299,20 @@ chiplab-sync: cpu-generate
 	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/tagv_sram.xcix" \
 		"$(CHIPLAB_HOME)/IP/myCPU/xilinx_ip/tagv_sram/tagv_sram.xcix"
 
-sim-configure: cpu-generate
+sim-configure: cpu-generate chiplab-toolchains
 	cd "$(SIM_DIR)" && ./configure.sh $(SIM_CONFIG_ARGS)
 
 sim-build: sim-configure
 	$(MAKE) -C "$(SIM_DIR)" clean
-	PATH="$(LOCAL_TOOL_BIN):$$PATH" $(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" verilator \
+	PATH="$(SIM_PATH):$$PATH" $(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" verilator \
 		MYCPU_SRC="$(SIM_CPU_DIR)" VERILATOR_HOME="$(VERILATOR_HOME)"
-	PATH="$(LOCAL_TOOL_BIN):$$PATH" $(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" testbench \
+	PATH="$(SIM_PATH):$$PATH" $(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" testbench \
 		MYCPU_SRC="$(SIM_CPU_DIR)" VERILATOR_HOME="$(VERILATOR_HOME)" \
 		ALL_LIB='./obj_dir/*__ALL.a $(SIM_EXTRA_LIBS)'
-	$(MAKE) -C "$(SIM_DIR)" soft_compile
+	PATH="$(SIM_PATH):$$PATH" $(MAKE) -C "$(SIM_DIR)" soft_compile
 
 sim-run: sim-build
-	$(MAKE) -C "$(SIM_DIR)" simulation_run_prog \
+	PATH="$(SIM_PATH):$$PATH" $(MAKE) -C "$(SIM_DIR)" simulation_run_prog \
 		TIME_LIMIT="$(TIME_LIMIT)" BUS_DELAY_RANDOM_SEED="$(AXI_SEED)"
 
 sim: sim-run

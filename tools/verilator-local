@@ -5,6 +5,7 @@ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 prefix=${NSCSCC_VERILATOR_PREFIX:-$script_dir/.local/verilator/5.020}
 launcher=$prefix/bin/verilator
 backend=$prefix/bin/verilator_bin
+resource_root=$prefix/share/verilator
 expected_launcher_sha256=59a001ed47f9cccfa1b13acb503708f627b65f523667bdbaddbae9db7b8252b1
 expected_backend_sha256=e797e5143f623d3d5a5776e7a5ab1b483ff71e4eb26d73dd7a404c6a9dbee8e7
 
@@ -27,5 +28,5 @@ if [ "$actual_backend_sha256" != "$expected_backend_sha256" ]; then
     exit 1
 fi
 
-unset VERILATOR_ROOT
-exec "$launcher" "$@"
+export VERILATOR_ROOT=$resource_root
+exec "$backend" "$@"

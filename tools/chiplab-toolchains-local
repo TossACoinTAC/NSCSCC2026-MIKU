@@ -1,0 +1,34 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
+toolchain_root=${CHIPLAB_TOOLCHAIN_ROOT:-$workspace_root/chiplab/toolchains}
+gcc_dir=loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0
+
+verify_file() {
+    expected=$1
+    path=$2
+    if [ ! -f "$path" ]; then
+        printf 'missing locked Chiplab toolchain file: %s\n' "$path" >&2
+        exit 127
+    fi
+    actual=$(sha256sum "$path" | awk '{print $1}')
+    if [ "$actual" != "$expected" ]; then
+        printf 'unexpected SHA-256 for %s: expected %s, found %s\n' \
+            "$path" "$expected" "$actual" >&2
+        exit 1
+    fi
+}
+
+[ "$#" -eq 0 ] || { printf 'usage: %s\n' "$0" >&2; exit 2; }
+verify_file 3fa8ddd5c1b11d378caade5a6ab2b428c669c14d0925e2c79e155a767a995a89 \
+    "$toolchain_root/nemu/la32r-nemu-interpreter-so"
+verify_file f29812336f8f0cedfd55a56f834ec9a88178d3bfb31fd67e105342aa8ed2ef7c \
+    "$toolchain_root/$gcc_dir/bin/loongarch32r-linux-gnusf-gcc"
+verify_file a21bba8032e132ca447261415b6f13ac71ebf53f94a2369c5921f51a00a06758 \
+    "$toolchain_root/la32r-QEMU-x86_64-ubuntu-22.04/qemu-system-loongarch32"
+verify_file 2a601edbbca47f45cacc860b6314072e1c5738ea05dcc1b58f89a65fd743f0c5 \
+    "$toolchain_root/picolibc/lib/libc.a"
+
+printf 'Chiplab toolchains: %s\n' "$toolchain_root"
