@@ -184,6 +184,43 @@ publication checks only. It does not contain Vivado, simulate the complete SoC,
 or substitute for implementation, post-implementation simulation, or board
 validation.
 
+## Local Scala Toolchain
+
+Use `tools/sbt-local` through the root `make cpu-check` and
+`make cpu-generate` targets. The wrapper keeps the SBT launcher and dependency
+cache under ignored `build/tool-cache/sbt/`, while using
+`/tmp/nscscc-sbt-runtime` for the short-lived runtime socket. This avoids WSL
+sandbox failures caused by writes to the user's home directory and avoids Unix
+socket path-length failures from deeply nested workspace paths.
+
+Keep a validated workspace cache for reuse across candidates. It is a local
+build acceleration resource, not a submitted source or verification result.
+Refresh it when the SBT launcher or declared Scala dependencies change, and
+still report the actual SBT/Java versions used for each verification run.
+
+## Incremental Vivado Flow
+
+`make soc-impl-incremental` preserves the latest routed SoC checkpoint outside
+the disposable Vivado project, regenerates and synchronizes RTL from SpinalHDL,
+performs normal synthesis, and uses the checkpoint only as an incremental
+implementation reference. It does not reuse an old synthesized CPU as the new
+candidate and does not weaken the complete-SoC timing contract.
+
+The default `SOC_TIMING_POLICY=strict` rejects negative setup or hold slack.
+`SOC_TIMING_POLICY=report` may retain a routed comparison bitstream only when
+the requested/actual clocks are verified and the Vivado failure is specifically
+negative slack. Such a bitstream is diagnostic evidence, not an acceptance or
+board candidate. Review both incremental-reuse reports because high cell match
+does not imply equivalent placement or routing reuse, and incremental results
+may be worse than a clean implementation.
+
+Successful incremental runs archive RTL, bitstream, routed DCP, timing, DRC,
+reuse reports, reference metadata, and SHA-256 hashes under ignored
+`Stable_Backup/cpu_<commit>_chiplab_<commit>_incremental_<clock>mhz/`. The DCP
+does not embed the CPU source commit or RTL hash, so the reference manifest's
+workspace values describe staging context only; never claim stronger provenance
+without an independently recorded build manifest.
+
 ## Team Board Flow
 
 The team board is attached to the Windows server at
@@ -270,6 +307,10 @@ the nested repositories remain authoritative for implementation details.
   Chiplab Verilator simulation.
 - `make wave`: open the default FST in host Surfer; override `WAVE=...` as needed.
 - `make soc-impl`: create and implement the local complete SoC in Vivado 2023.2.
+- `make soc-impl-incremental`: run fresh RTL generation/synthesis followed by
+  incremental implementation from the latest preserved routed checkpoint.
+- `make soc-incremental-archive`: archive the current incremental comparison
+  artifacts and their hashes without rerunning Vivado.
 
 Long-running simulation or Vivado commands must not be presented as lightweight
 checks. Preserve their logs and report whether they completed, failed, or were
