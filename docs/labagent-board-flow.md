@@ -131,13 +131,22 @@ board protocol, exact seed/profile, timestamps, `programming-summary.txt`,
 missing summary, partial CSV, or a log line containing `PASS` is not a hardware
 pass.
 
-The LabAgent release installed on 2026-08-03 is source commit
-`077daa6` (version 0.3.1), with executable SHA256
-`c094cd545ddbc80caa602ed6237acc769f2f9db090b84a7db5e51607cc6c6d8c`.
-Its offline self-test and server doctor passed after deployment. The immediate
-rollback backup is
-`D:\fpga-lab\backup\before-0.3.1-20260803-211652`; the older
-`D:\fpga-lab\backup\before-system-reset-20260803-180241` remains historical.
+The LabAgent release installed on 2026-08-04 is source commit
+`f8a3e3f9a45ed675a88fcdf460227ce8bd6f6c35` (version 0.3.2), with executable
+SHA256 `bde76c72a1c6a68f2ec4f044043c4bf905c67be5c3e726fe90d4ee44efa355a1`.
+Its offline Windows tests, package hash verification, installed self-test, and
+server doctor all passed. The release ZIP SHA256 is
+`b842f035d9e1c8c099fed3b849f9d397f74777477cac9d58896f3ff1ecfba848`;
+the deployed ZIP and complete-history Git bundle remain under
+`D:\fpga-lab\releases`. The immediate rollback backup is
+`D:\fpga-lab\backups\app-20260804-063524`. The earlier 0.3.1 and system-reset
+backups remain historical.
+
+Version 0.3.2 accepts the official c398 func metrics form with an empty
+`requested_cpu_mhz=` field, which means the platform-default PLL is in use. It
+does not relax perf metadata or any other empty metrics field. The first real
+server package exercising this rule retained the unmodified metrics and was
+accepted as job `20260803-223955-1ceb232c`.
 
 The first official-protocol validation job,
 `20260802-201006-ac3bf081`, programmed successfully, observed DDR ready, and
@@ -168,3 +177,12 @@ It passed `func58` at the package's actual 32.726797 MHz CPU clock. Seeds `F0`,
 `FF`, and `A5` each reached `3A00003A` with both pass indicators asserted. This
 closes the earlier n49/`0x30000030` functional-board symptom for that candidate;
 it is not 100 MHz performance or Linux-boot evidence.
+
+The current Linux-semantics candidate also passed the same production flow in
+job `20260803-223955-1ceb232c`. Its package source commit is
+`e26ccfa823e81c41f1191365fdcf8f89395b1248`, generated RTL SHA256 is
+`137657aa0c594334568cc386571d13aa9cdc828c8fc45c56ed421be15912c209`, and
+package SHA256 is
+`4d3ebd3754f165d0af4c2e37e33e54bc67f9f5d7619c8a4467025d549cc30687`.
+At 32.726797 MHz, seeds `F0`, `FF`, and `A5` all reached `3A00003A`; the four
+downloaded evidence files match the hashes in the terminal `passed` result.
