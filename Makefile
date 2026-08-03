@@ -279,9 +279,10 @@ cpu-locked-gates-run: cpu-generate
 		'
 
 cpu-check:
-	TMPDIR=/tmp $(MAKE) -C "$(CPU_DIR)" scala test python-test \
+	TMPDIR=/tmp $(MAKE) -C "$(CPU_DIR)" scala test \
 		SBT="$(CPU_SBT)"
 	$(MAKE) cpu-locked-gates-run
+	TMPDIR=/tmp $(MAKE) -C "$(CPU_DIR)" python-test
 
 cpu-generate:
 	$(MAKE) -C "$(CPU_DIR)" generate-core SBT="$(CPU_SBT)"
