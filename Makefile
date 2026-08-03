@@ -2,6 +2,8 @@ SHELL := /bin/zsh
 .DEFAULT_GOAL := help
 
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+LOCAL_TOOL_DIR := $(ROOT_DIR)/tools/.local
+LOCAL_TOOL_BIN := $(ROOT_DIR)/tools/bin
 CPU_DIR ?= $(ROOT_DIR)/nscscc-cpu
 CHIPLAB_HOME := $(ROOT_DIR)/chiplab-nscscc2026
 TEAM_CI_DIR ?= $(ROOT_DIR)/nscscc-team-ci
@@ -32,7 +34,7 @@ GATE_IMAGE ?= nscscc-local-gates:ubuntu24.04-v1
 VIVADO_HOME ?= /opt/Xilinx/Vivado/2023.2
 VIVADO ?= $(VIVADO_HOME)/bin/vivado
 SURFER ?= /mnt/d/Surfer/surfer.exe
-VERILATOR_HOME ?= $(if $(VERILATOR_ROOT),$(VERILATOR_ROOT),/usr/local/share/verilator)
+VERILATOR_HOME ?= $(LOCAL_TOOL_DIR)/verilator/5.020/share/verilator
 SIM_CPU_DIR ?= $(CPU_DIR)/rtl
 SIM_EXTRA_LIBS ?= -llz4
 CPU_SBT ?= $(ROOT_DIR)/tools/sbt-local
@@ -50,7 +52,7 @@ OFFICIAL_CI_TEMPLATE_COMMIT ?= 6915882af5c8d3a0c856f570cb914920a3e5ff99
 OFFICIAL_CI_TEMPLATE_URL ?= ssh://git@111.4.16.59:63222/2026nscsccteam/ci-template-sync-lab-20260721/ci-template.git
 MAIN_CPU_COMMIT ?= d9bab16ef46540eb3348b0781afc4d0949f28adc
 
-.PHONY: help doctor status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-check cpu-generate chiplab-sync \
+.PHONY: help doctor toolchain-check status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-check cpu-generate chiplab-sync \
 	sim-configure sim-build sim-run sim wave soc-project soc-impl soc-timing \
 	soc-func soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
 	soc-archive soc-incremental-archive
@@ -60,6 +62,7 @@ help:
 		'NSCSCC 2026 workspace entry points' \
 		'' \
 		'  make doctor          Check WSL2, tools, paths, branches, and platform revision' \
+		'  make toolchain-check Verify the workspace-local SBT and Verilator lock' \
 		'  make status          Show root and nested repository state (read-only)' \
 		'  make ci-production-sync  Fetch and verify the production GitLab CI template' \
 		'  make ci-check        Validate the submission include and production CI pins' \
@@ -87,8 +90,10 @@ help:
 		'  PERF_CPU_MHZ=100' \
 		'  SOC_ARCHIVE_CLASS=candidate|stable' \
 		'  SOC_TIMING_POLICY=strict|report  (report is only for comparison artifacts)' \
-		'  VERILATOR_ROOT=/path/to/verilator/source-or-share-root' \
 		'  WAVE=/absolute/path/to/file.fst  VIVADO_HOME=/path/to/Vivado/2023.2'
+
+toolchain-check:
+	"$(ROOT_DIR)/tools/toolchain-check"
 
 doctor:
 	@set -u; \
@@ -125,7 +130,12 @@ doctor:
 		printf '[missing] %-12s %s\n' SBTWrapper "$(CPU_SBT)"; \
 		missing=1; \
 	fi; \
-	check_cmd verilator; \
+	if "$(ROOT_DIR)/tools/verilator-local" --version >/dev/null 2>&1; then \
+		printf '[ok]      %-12s %s\n' Verilator 'workspace lock 5.020'; \
+	else \
+		printf '[missing] %-12s %s\n' Verilator 'tools/.local/verilator/5.020'; \
+		missing=1; \
+	fi; \
 	check_cmd git; \
 	check_cmd make; \
 	check_cmd wslpath; \
@@ -261,8 +271,9 @@ cpu-locked-gates-run: cpu-generate
 		'
 
 cpu-check:
-	$(MAKE) -C "$(CPU_DIR)" all port-check lint yosys-check publish-check \
+	TMPDIR=/tmp $(MAKE) -C "$(CPU_DIR)" scala test python-test \
 		SBT="$(CPU_SBT)"
+	$(MAKE) cpu-locked-gates-run
 
 cpu-generate:
 	$(MAKE) -C "$(CPU_DIR)" generate-core SBT="$(CPU_SBT)"
@@ -285,9 +296,9 @@ sim-configure: cpu-generate
 
 sim-build: sim-configure
 	$(MAKE) -C "$(SIM_DIR)" clean
-	$(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" verilator \
+	PATH="$(LOCAL_TOOL_BIN):$$PATH" $(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" verilator \
 		MYCPU_SRC="$(SIM_CPU_DIR)" VERILATOR_HOME="$(VERILATOR_HOME)"
-	$(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" testbench \
+	PATH="$(LOCAL_TOOL_BIN):$$PATH" $(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" testbench \
 		MYCPU_SRC="$(SIM_CPU_DIR)" VERILATOR_HOME="$(VERILATOR_HOME)" \
 		ALL_LIB='./obj_dir/*__ALL.a $(SIM_EXTRA_LIBS)'
 	$(MAKE) -C "$(SIM_DIR)" soft_compile

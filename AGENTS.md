@@ -233,17 +233,47 @@ validation.
 
 ## Local Scala Toolchain
 
-Use `tools/sbt-local` through the root `make cpu-check` and
-`make cpu-generate` targets. The wrapper keeps the SBT launcher and dependency
-cache under ignored `build/tool-cache/sbt/`, while using
+The only supported local Scala/simulation entry points are the root
+`make cpu-check`, `make cpu-generate`, and `make sim` targets. Do not call a
+system `sbt` or `verilator`, prepend an ad hoc `/tmp` directory, or switch tool
+versions to work around a failure. Run `make toolchain-check` when diagnosing
+the toolchain.
+
+`tools/sbt-local` keeps the pinned SBT 1.10.11 launcher and dependency cache
+under ignored `tools/.local/sbt/`, while using
 `/tmp/nscscc-sbt-runtime` for the short-lived runtime socket. This avoids WSL
 sandbox failures caused by writes to the user's home directory and avoids Unix
 socket path-length failures from deeply nested workspace paths.
 
-Keep a validated workspace cache for reuse across candidates. It is a local
-build acceleration resource, not a submitted source or verification result.
-Refresh it when the SBT launcher or declared Scala dependencies change, and
-still report the actual SBT/Java versions used for each verification run.
+Host-side Spinal simulations use the validated Verilator 5.020 installation at
+`tools/.local/verilator/5.020/` through `tools/verilator-local` and
+`tools/bin/verilator`. The wrapper rejects version/hash drift and clears an
+external `VERILATOR_ROOT`; `tools/sbt-local` and the root `sim-build` target
+prepend this wrapper only for their child processes, and Chiplab receives the
+matching include directory. Direct focused tests through
+`tools/sbt-local` cannot silently select `/usr/local/bin/verilator`.
+
+The host Verilator is a hash-locked 5.020 source build compatible with the WSL
+Ubuntu 22.04 host. It is not the Ubuntu 24.04 package whose binary hashes are in
+the RTL publication manifest. `make cpu-check` therefore runs Scala/Python on
+the host and automatically runs metadata, port, lint, Yosys, and publication
+checks inside `nscscc-local-gates:ubuntu24.04-v1`; never use a host executable
+as a substitute for those exact locked gates. The root `cpu-check` target also
+forces temporary files to `/tmp`, because Python tests requiring POSIX
+directory-descriptor and atomic-rename behavior cannot run correctly through a
+Windows-mounted `TEMP` inherited by WSL.
+
+`tools/toolchain.lock` records the SBT launcher, Verilator executable, and
+official-CI `glab` hashes. Use `tools/glab-local` (or the `tools/bin/glab` shim)
+for GitLab CLI access; its ignored configuration remains alongside the pinned
+binary under `tools/.local/glab/`.
+Keep the validated ignored `tools/.local/` cache across candidates. Restore it
+from the known workspace cache if missing; do not rebuild or replace it during
+an RTL debugging task. Refresh the lock only as a separate reviewed toolchain
+change. The reusable locked-gate Docker image remains the only Yosys/lint gate
+environment and is checked separately. None of these caches are submitted RTL
+or verification results; still report SBT, Java, and Verilator versions for a
+run.
 
 ## Incremental Vivado Flow
 
@@ -298,9 +328,11 @@ After local gates pass:
    teammate has reprogrammed the shared board, including for Linux testing. It
    is an infrastructure/conflict result, not evidence that the DUT passed or
    failed. Do not probe, reprogram, or retry until ownership is confirmed.
-5. For administrator maintenance, connect with
-   `ssh administrator@10.20.213.157`, start `powershell` immediately, and
-   perform subsequent interactive work in PowerShell rather than `cmd.exe`.
+5. For every administrator session, start an interactive
+   `ssh administrator@10.20.213.157` connection. Never try a non-interactive
+   `ssh host command` invocation first. After the Windows prompt appears, enter
+   `powershell` as the first command and perform all subsequent interactive work
+   in PowerShell rather than `cmd.exe`.
    LabAgent's packaged internal wrappers may invoke `cmd.exe`; do not rewrite
    them merely to satisfy the interactive-shell rule.
 6. Use the remote Vivado 2023.2 executable at

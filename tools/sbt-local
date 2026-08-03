@@ -3,10 +3,11 @@ set -eu
 
 script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 workspace_root=$(CDPATH= cd -- "$script_dir/.." && pwd)
-cache_root=${NSCSCC_SBT_CACHE_ROOT:-$workspace_root/build/tool-cache/sbt}
+cache_root=${NSCSCC_SBT_CACHE_ROOT:-$workspace_root/tools/.local/sbt}
 runtime_dir=${NSCSCC_SBT_RUNTIME_DIR:-/tmp/nscscc-sbt-runtime}
 launcher=${NSCSCC_SBT_LAUNCHER:-$cache_root/sbt-launch.jar}
-sbt_bin=${NSCSCC_SBT_BIN:-$(command -v sbt || true)}
+tool_bin=$script_dir/bin
+expected_launcher_sha256=e988d533a020e5b60ec22c3b5df4cd3e3df465f4fdc3951c63036e21483978e4
 
 mkdir -p "$cache_root/boot" "$cache_root/coursier" "$cache_root/global" \
     "$cache_root/home" "$cache_root/ivy2" "$runtime_dir"
@@ -18,8 +19,15 @@ if [ "${1:-}" = -batch ]; then
 fi
 
 if [ -f "$launcher" ]; then
-    exec env HOME="$cache_root/home" XDG_RUNTIME_DIR="$runtime_dir" \
+    actual_launcher_sha256=$(sha256sum "$launcher" | awk '{print $1}')
+    if [ "$actual_launcher_sha256" != "$expected_launcher_sha256" ]; then
+        printf 'unexpected SBT launcher hash: expected %s, found %s\n' \
+            "$expected_launcher_sha256" "$actual_launcher_sha256" >&2
+        exit 1
+    fi
+    exec env -u VERILATOR_ROOT HOME="$cache_root/home" XDG_RUNTIME_DIR="$runtime_dir" \
         COURSIER_CACHE="$cache_root/coursier" \
+        PATH="$tool_bin:$PATH" \
         java \
         -Dsbt.boot.directory="$cache_root/boot" \
         -Dsbt.global.base="$cache_root/global" \
@@ -27,14 +35,6 @@ if [ -f "$launcher" ]; then
         -jar "$launcher" "$@"
 fi
 
-if [ -z "$sbt_bin" ]; then
-    printf 'sbt executable not found; set NSCSCC_SBT_BIN\n' >&2
-    exit 127
-fi
-
-if [ -n "$batch_arg" ]; then
-    set -- "$batch_arg" "$@"
-fi
-
-exec env HOME="$cache_root/home" XDG_RUNTIME_DIR="$runtime_dir" \
-    COURSIER_CACHE="$cache_root/coursier" "$sbt_bin" "$@"
+printf 'locked SBT launcher is missing: %s\n' "$launcher" >&2
+printf 'restore the validated tools/.local cache before running CPU gates\n' >&2
+exit 127

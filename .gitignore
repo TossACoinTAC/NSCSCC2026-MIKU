@@ -5,6 +5,7 @@
 /.bsp/
 /.metals/
 /.scala-build/
+/tools/.local/
 
 # Nested repositories and local reference material are managed independently.
 /chiplab/
