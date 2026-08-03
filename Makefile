@@ -11,6 +11,7 @@ SOC_PLATFORM_IP_DIR ?= $(CHIPLAB_HOME)/chip/soc_demo/nscscc-team/xilinx_ip
 SOC_VIO_DIR ?= $(SOC_PLATFORM_IP_DIR)/vio
 SOC_PROJECT_XPR ?= $(SOC_RUN_DIR)/project/loongson.xpr
 SOC_IMPL_DIR ?= $(SOC_RUN_DIR)/project/loongson.runs/impl_1
+SOC_TIMING_REPORT ?= $(SOC_IMPL_DIR)/timing_summary.rpt
 SOC_INCREMENTAL_DIR ?= $(ROOT_DIR)/build/vivado/incremental
 SOC_INCREMENTAL_REFERENCE_SOURCE ?= $(SOC_IMPL_DIR)/soc_top_routed.dcp
 SOC_INCREMENTAL_REFERENCE_DCP ?= $(SOC_INCREMENTAL_DIR)/reference/soc_top_routed.dcp
@@ -412,19 +413,18 @@ soc-perf: chiplab-sync
 	$(MAKE) soc-timing-check
 
 soc-timing:
-	@report="$(SOC_RUN_DIR)/project/loongson.runs/impl_1/timing_summary.rpt"; \
+	@report="$(SOC_TIMING_REPORT)"; \
 	test -f "$$report" || { printf 'timing report not found: %s\n' "$$report" >&2; exit 1; }; \
 	rg -n 'Design Timing Summary|WNS\(ns\)|TNS\(ns\)|WHS\(ns\)|THS\(ns\)|Timing constraints are not met|All user specified timing constraints are met' "$$report"
 
 soc-timing-check:
-	@report="$(SOC_RUN_DIR)/project/loongson.runs/impl_1/timing_summary.rpt"; \
+	@report="$(SOC_TIMING_REPORT)"; \
 	test -f "$$report" || { printf 'timing report not found: %s\n' "$$report" >&2; exit 1; }; \
-	summary="$$(awk ' \
-		/^[[:space:]]+WNS\(ns\).*WHS\(ns\)/ { found=1; next } \
-		found && /^[[:space:]]+-/ { next } \
-		found && NF >= 6 { print $$1, $$2, $$5, $$6; exit } \
-	' "$$report")"; \
-	test -n "$$summary" || { printf 'cannot parse timing summary: %s\n' "$$report" >&2; exit 1; }; \
+	summary="$$(awk -f "$(ROOT_DIR)/tools/vivado/parse_timing_summary.awk" \
+		"$$report")" || { \
+		printf 'cannot parse timing summary: %s\n' "$$report" >&2; \
+		exit 1; \
+	}; \
 	read -r wns tns whs ths <<< "$$summary"; \
 	printf 'complete-SoC timing: WNS=%s ns TNS=%s ns WHS=%s ns THS=%s ns\n' \
 		"$$wns" "$$tns" "$$whs" "$$ths"; \
