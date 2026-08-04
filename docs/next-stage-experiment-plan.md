@@ -44,7 +44,8 @@ source commit 和 generated RTL hash：
 | M01 观测基线 | `9de316494fc0` / `00d37c5b...` | 完整 `make cpu-check`；func 两套各 3 seeds；Linux clean/instrumented 50 ms；M0/M1 无扰动和守恒合同 | 不能代表其后性能 RTL 的周期、时序或板测结果 |
 | 冻结软件/时序对照 | `5141e9bc1d7a` / `53ac072b...` | 三项性能候选的完整 gates、func58 3 seeds、perf20 20/20（含 stringsearch）、Linux random-AXI 200 ms 3 seeds；对应 Vivado 结果仍作为旧候选证据 | 不能继承到后续 H01 RTL 的周期、时序或板测结论 |
 | H01 已实现候选 | `3822c78bb0a6` / `abbf89d2...` | DIV common-operand fast path 默认关闭；L2 真 write-back；完整 `cpu-check` 与 19 项 perf20 通过；matching 100 MHz bitstream/DRC 完成 | setup `WNS -0.323 ns`，只作 diagnostic；不能把时序、周期或板测结论继承给后续 RTL |
-| 当前组合热候选 | `758181a01c5b`（功能终点 `e622625`）/ `04d6e4b2...` | R01 unused-source 规范化、LSQ Store/forwarding 仲裁切分、16 KiB L1I、16 KiB L1D；19 个短 perf20、完整 gates、func58 random-AXI 3 seeds、Linux instrumented 200 ms × 3 seeds 全通过 | matching 100 MHz implementation 正在运行；route 与板测仍待闭合 |
+| 当前 100 MHz milestone | `758181a01c5b`（功能终点 `e622625`）/ `04d6e4b2...` | R01 unused-source 规范化、LSQ Store/forwarding 仲裁切分、16 KiB L1I、16 KiB L1D；完整 gates、func58/Linux 三 seeds；100 MHz setup `+0.041 ns`、hold `+0.050 ns`、DRC 0；团队板 perf20 20/20 且总周期相对同 profile 基线约 `-12.65%` | 这是下一批冻结基线；任何 RTL 变化均不得继承其 timing、bitstream 或板测结论 |
+| L04 已停止候选 | experiment `c30fc470de4a` / generated RTL `8ae0b9ea...`；retired by `2765433e82e0` | age-aware 单 owner Load/Store translation 仲裁；完整 LSQ suite 32/32；19 项 paired perf20 均通过 | 7 项改善、8 项不变、4 项退化；总 cycles 约 `-0.054%`；实验移除后 published RTL 精确恢复为 `04d6e4b2...` |
 
 Chiplab 对上述各候选均固定为 `c398d274812f164d387146fa7d8f612a4a1296d9`。CPU 源提交始终
 保留用户已有的 `D AGENTS.md`；生成/门禁期间 `rtl/mycpu_top.v` 可呈现 matching publication
@@ -135,7 +136,7 @@ CPU HEAD、generated RTL、prepared model 输入的操作不与读取这些身�
 | Experiment | `20260804-next-stage-p0-baseline`；`role=baseline` |
 | 启动 CPU repository HEAD | `872bbd4e9f16ecdde8b0915316bd0f21976fc5ac`，branch `dev/ECHO` |
 | M01 baseline CPU | `9de316494fc03d746b597afb1f4f271e9762114f`，branch `dev/ECHO` |
-| 当前 CPU repository HEAD | `758181a01c5bb53156157bc7946bc37d6057f3ec`，branch `dev/ECHO`；功能终点 `e6226250bdb1` |
+| 当前 CPU repository HEAD | `2765433e82e0ecffa3d65e9cf4688bca47f9102c`，branch `dev/ECHO`；生产 RTL 与 100 MHz/团队板冻结基线 `758181a01c5b` 相同 |
 | Functional implementation | `6bbca9b330ba8d886c888e2804f70b95be18e4cd` |
 | Dirty state | 仅保留用户已有的 `D AGENTS.md`；binary diff SHA-256 `4fb5b8c92a389a56a89bd3d5adf5137ea25418806048ade3c157a41df13a86f3` |
 | M01 baseline generated RTL | `00d37c5bc78fe0052cabf7e9d3ae665f31e0a7a0c238ea181ab935957b4c40c1` |
@@ -398,7 +399,7 @@ top-N 与频率共同决定。
 `73,932,910` 降到 `71,588,939` cycles，减少 `2,343,971`（-3.1704%），19 项全部改善。
 纯 R01 为 `71,559,876`，因此 LSQ 仲裁与两级 cache 扩容合计相对 R01 为 `+29,063`
 （+0.0406%），不能把组合总收益归给 H02。代表集显示 LSQ 的局部代价被 cache 小收益部分
-抵消；最终取舍必须等 matching route。完整 `make cpu-check` 已通过 Scala/Verilator
+抵消；最终取舍还需结合 matching route。完整 `make cpu-check` 已通过 Scala/Verilator
 `183/183`、Python `364/364` 和 locked port/lint/Yosys/publication；lint 为 876 warnings，
 signature `b021ae6a...`。clean func58 model 为 `7462840b...`；random-AXI seeds
 `240/255/141` 均通过 58 点、`num_data=0x3a00003a`、LED `1/1` 和 DiffTest，整段 cycles
@@ -408,8 +409,37 @@ seeds `1/19557/5570815` 的 200 ms 固定窗口均通过，无 DiffTest/trace er
 IPC 为 `0.449017/0.448713/0.450989`，M01 守恒检查全部通过。对应 counter hash 为
 `92e964fc.../0ab44a75.../4d1369d0...`，矩阵摘要为
 `build/sim/runs/cpu_758181a01c5b_chiplab_c398d274812f/instrumented/random/matrix_702d500d09d1_summary.txt`。
-matching 100 MHz implementation 已启动但尚未闭合，因此这里不提前给出最终保留结论。
-`stringsearch` 继续留给该组合成为 correctness/timing milestone 后再跑。
+
+matching 100 MHz performance SoC 已完成并闭合：actual CPU/system/DDR clocks 为
+`100/100/200 MHz`，setup `WNS +0.041 ns`、`TNS 0`，hold `WHS +0.050 ns`、`THS 0`，
+DRC `0 error`，bitstream 成功。placed full-SoC 资源为 LUT `89,972`（67.24%）、FF
+`53,724`（19.96%）、BRAM tile `68.5`（18.77%）、DSP `8`（1.08%）；相对 H01 仅增加
+332 LUT、126 FF，BRAM/DSP 不变。当前组合因此整体保留为新的 100 MHz local milestone，
+但这不证明 LSQ cut 或两级 cache 扩容单独改善周期；单项结论仍以各自 A/B 为准。
+
+最差 CPU setup 路径族由 ROB `stagedPdst_2` 经 early-wakeup/ready 广播到 IQ0 queue 6 的
+payload clock-enable，WNS `+0.041 ns`，data delay `9.627 ns`，其中 logic `1.483 ns`、route
+`8.144 ns`（84.60%），10 个 LUT level。两个最差独立 endpoint 都属于该族且 slack 相同；
+第一条不同路径族为 LSQ scheduled-load physical address 到 load completion/issue operand，
+WNS `+0.164 ns`，只多 `0.123 ns`。旧 H01 的 scheduled-load ROB pointer 到 ROB staged
+completion 已不再主导，但当前余量仍很小，后续 E02 或 wakeup 变更不得增加该广播扇出。
+归档为
+`Stable_Backup/cpu_758181a01c5b_chiplab_c398d274812f_perf_100mhz_20260805-021058_candidate/`；
+bitstream、routed DCP、timing report hash 分别为 `a59257ad.../4ada5b08.../f310a836...`。
+本轮没有补跑 matching clean `stringsearch`，因此本地软件证据明确记为 19 项，而不虚标
+20/20。matching bitstream 已进入团队板 perf20：job
+`20260804-182327-8f1c8193` 通过 20/20，总 SoC/CPU cycles 为
+`69,476,960/69,466,027`；同板、同 c398、同 100 MHz profile 基线 job
+`20260803-220447-d9b5b478` 为 `79,537,915/79,524,833`，两种口径均下降约
+`12.65%`。19 项改善，test 4 约退化 `0.14%`，所以这是一项明确的组合整体收益，但仍不
+拆分归因给 LSQ 或 cache 单项。板测 package SHA-256 为 `84ea549e...`，bitstream hash 为
+`a59257ad...`，artifacts 保存在 `build/board-jobs/cpu_758181a01c5b_perf20/artifacts/`。
+
+达到“板上性能确实提升”条件后，submission repository 已在同名 `dev/ECHO` 分支提交并
+推送 `0a8ef8caf08c`，其中 CPU source/两份 generated RTL 均对应 `758181a` 与
+`04d6e4b...`；`make ci-check` 验证 production template `6915882...` 固定 c398。推送已
+触发 official CI；本地 `glab` token 已撤销且没有取得 pipeline ID，最终 verdict 无可记录
+证据，不得写成 official CI passed。
 
 首次完整 gate 的 Scala/Verilator 结果为 `182/183`：失败来自
 `OooDataCacheHierarchySpec` 仍把 memory MSHR ID 固定为 0，并用旧 64-set L1D 的固定
@@ -588,8 +618,10 @@ cycle_speedup_upper = C0 / (C0 - opportunity_cycles)
    16 KiB L1D；强回退的 Store fast-completion-off 消融已恢复。19 个短 perf20 全部通过且
    相对 H01 合计 -3.1704%；相对纯 R01 +0.0406%。完整 gates、func58 random-AXI 三 seeds
    以及 Linux instrumented random-AXI 200 ms 三 seeds 均已通过。
-5. 当前组合唯一一次 matching 100 MHz implementation 已启动，用于同时评价 R01 周期收益、
-   LSQ route cut 和两级 cache 容量的资源/频率代价。长尾 `stringsearch` 留给组合 milestone；
+5. 当前组合的 matching 100 MHz implementation 已以 setup `+0.041 ns`、hold `+0.050 ns`、
+   DRC 0 error 和 bitstream success 闭合，整体成为新的 local milestone；首要路径转为 ROB
+   staged wakeup 到 IQ ready/payload CE 的高扇出路径族。matching 团队板 perf20 已以
+   总周期约 `-12.65%` 通过 20/20；本地长尾 `stringsearch` 按调度决定不再补跑；
    ROB/PRF 扩容仍要求 ROB-full exposed 和 hidden independent work 同时显著。
 
 ## 8. 单次 A/B 实验合同
@@ -679,11 +711,23 @@ WNS/TNS、top-N path 和资源后可继续下一轮微架构/时序协同修改�
 5. E01 默认关闭；Store completion bypass 与 Store translation lookahead 保留。第二批 H01
    真 write-back 已完成完整 gates、19 项与 matching 实现；周期收益保留，负 setup slack
    作为后续时序输入。
-6. 当前 R01/LSQ/H02 组合已完成逐项代表集归因、组合 19 项、完整 gates、func58 和 Linux
-   三种子门禁；唯一一次 matching 100 MHz 实现正在运行。
+6. 当前 R01/LSQ/H02 组合已完成逐项代表集归因、组合 19 项本地软件、完整 gates、func58、
+   Linux 三种子门禁、matching 100 MHz timing closure 和团队板 perf20 20/20；板上总周期
+   相对同 profile 基线下降约 `12.65%`。已在 official submission 的同名 `dev/ECHO` 分支
+   推送 `0a8ef8c` 触发 CI；本地没有取得 pipeline ID，official CI verdict 尚无可记录证据，
+   因此不能宣称通过。
 7. Vivado 保持单实例，软件门禁通过的批次进入下一次 100 MHz 实现；实现期间继续准备和验证
    下一独立候选。每次最终 route 报告重新决定时序方向，不沿用历史 critical path 名称。
 
-当前组合完成门禁和 matching route 后，再由测量数据选择保留项以及
-`F01/H03/H07`、branch、queue/cache 或当前 routed top-N 对应的下一轮 RTL 实验。候选 ID 的定义始终
-回到理论笔记的“5. 优化候选账本”；具体选择写入新的 experiment contract，不重写账本历史。
+下一批先验证 age-aware Load/Store translation（L04）并测量 D01 的真实暴露；E02 因当前
+top path 已位于 ROB staged wakeup 到 IQ 的广播网络，先补 head-only/source-class 证据再决定
+是否实现。候选 ID 的定义始终回到理论笔记的“5. 优化候选账本”；具体选择写入新的
+experiment contract，不重写账本历史。
+
+首轮执行结果：L04 独立 experiment commit `c30fc470de4a` 的完整 LSQ suite 通过 32/32；19 项 paired
+perf20 均通过，但总 cycles 只从 `71,588,939` 降到 `71,550,342`（约 `-0.054%`），且有
+4 项退化，故停止在软件 A/B 阶段；`2765433e82e0` 移除实验实现后，published RTL 精确恢复
+为冻结基线哈希 `04d6e4b2...`。D01 的严格下界 observer 在
+`stream_copy/coremark/inner_product/quick_sort` 合计 `41,501,656` 个观测周期中只发现
+`27` 个最老 Load 因 SDQ 单独阻塞的周期（约 `0.65 ppm`），因此停止 D01 RTL 化；不为该
+候选增加 ready 组合逻辑或支付 Vivado implementation。
