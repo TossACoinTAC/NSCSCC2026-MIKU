@@ -18,7 +18,7 @@ try:
 except (OSError, json.JSONDecodeError) as error:
     fail(str(error))
 
-if counters.get("schema_version") != "nscc-m01-v4":
+if counters.get("schema_version") != "nscc-m01-v5":
     fail(f"unexpected schema {counters.get('schema_version')!r}")
 if counters.get("commit_observation_lag_cycles") != 4:
     fail("unexpected DiffTest commit observation lag")
@@ -50,6 +50,48 @@ if not isinstance(d01_blocked, int) or d01_blocked < 0:
 if d01_blocked > d01_candidates:
     fail("D01 SDQ-blocked cycles exceed oldest-Load candidate cycles")
 
+e02 = counters.get("e02", {})
+e02_cycles = e02.get("head_staged_cycles")
+e02_lanes = e02.get("by_lane")
+e02_classes = e02.get("by_class", {})
+e02_class_names = {
+    "load", "store", "branch", "multiplier",
+    "lane0_other", "lane1_other", "lane2_other", "lane3_other",
+}
+if not isinstance(e02_cycles, int) or e02_cycles < 0:
+    fail("E02 head-staged cycles must be a nonnegative integer")
+if not isinstance(e02_lanes, list) or len(e02_lanes) != 5 or not all(
+    isinstance(value, int) and value >= 0 for value in e02_lanes
+):
+    fail("E02 lane counts must contain five nonnegative integers")
+if sum(e02_lanes) != e02_cycles:
+    fail("E02 lane counts do not conserve head-staged cycles")
+if not isinstance(e02_classes, dict) or set(e02_classes) != e02_class_names or not all(
+    isinstance(value, int) and value >= 0 for value in e02_classes.values()
+):
+    fail("E02 class counts must contain eight nonnegative integers")
+if sum(e02_classes.values()) != e02_cycles:
+    fail("E02 class counts do not conserve head-staged cycles")
+
+w01 = counters.get("w01", {})
+w01_conflicts = w01.get("conflict_cycles_by_lane")
+w01_affected = w01.get("affected_cycles_by_lane")
+w01_consumers = w01.get("affected_consumer_entries_by_lane")
+for name, values in (
+    ("conflict", w01_conflicts),
+    ("affected", w01_affected),
+    ("affected consumer", w01_consumers),
+):
+    if not isinstance(values, list) or len(values) != 3 or not all(
+        isinstance(value, int) and value >= 0 for value in values
+    ):
+        fail(f"W01 {name} counts must contain three nonnegative integers")
+for lane in range(3):
+    if w01_affected[lane] > w01_conflicts[lane]:
+        fail(f"W01 lane {lane} affected cycles exceed conflict cycles")
+    if w01_consumers[lane] < w01_affected[lane]:
+        fail(f"W01 lane {lane} affected consumer entries are below affected cycles")
+
 invariants = counters.get("invariants", {})
 for name in ("retire_hist_cycles", "retire_hist_instructions", "commit_observation", "source_retire_alignment", "queue_identity"):
     if invariants.get(name) is not True:
@@ -68,6 +110,8 @@ zero_total = sum(zero.get(name, 0) for name in (
 ))
 if zero_total != hist[0]:
     fail(f"zero-retire causes sum to {zero_total}, histogram is {hist[0]}")
+if e02_cycles > zero.get("head_incomplete", 0):
+    fail("E02 head-staged cycles exceed the head-incomplete parent bucket")
 
 head_incomplete = counters.get("head_incomplete_detail", {})
 if sum(head_incomplete.values()) != zero.get("head_incomplete"):

@@ -49,6 +49,15 @@ using Root = Vsimu_top___024root;
 #define ISSUE(q, name) BACKEND(NSCC_JOIN(issueQueues_##q##__DOT__, name))
 #define ISSUE_COUNT(q) BACKEND(issueQueues_##q##__DOT__count)
 #define ISSUE_ENTRY(q, e, name) BACKEND(issueQueues_##q##__DOT__queue_##e##_##name)
+#define ISSUE_ROW(q, name) { \
+    static_cast<std::uint8_t>(ISSUE_ENTRY(q, 0, name)), \
+    static_cast<std::uint8_t>(ISSUE_ENTRY(q, 1, name)), \
+    static_cast<std::uint8_t>(ISSUE_ENTRY(q, 2, name)), \
+    static_cast<std::uint8_t>(ISSUE_ENTRY(q, 3, name)), \
+    static_cast<std::uint8_t>(ISSUE_ENTRY(q, 4, name)), \
+    static_cast<std::uint8_t>(ISSUE_ENTRY(q, 5, name)), \
+    static_cast<std::uint8_t>(ISSUE_ENTRY(q, 6, name)), \
+    static_cast<std::uint8_t>(ISSUE_ENTRY(q, 7, name)) }
 #define COMMIT(name) CLUSTER(NSCC_JOIN(commitAdapter_io_, name))
 
 const char *const kAxiNames[5] = {"aw", "w", "b", "ar", "r"};
@@ -118,6 +127,29 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
         const bool head_is_store = ((head_payload[3] >> 8U) & 1U) != 0;
         const unsigned head_load_index = (head_payload[3] >> 29U) & 0x7U;
         const unsigned head_store_index = head_payload[4] & 0x7U;
+        const std::uint8_t staged_valid = static_cast<std::uint8_t>(
+            ROB(stagedCompletionValid) & ROB(stagedCompletionCurrent));
+        const std::uint8_t staged_pointer[5] = {
+            static_cast<std::uint8_t>(ROB(stagedRobPointer_0)),
+            static_cast<std::uint8_t>(ROB(stagedRobPointer_1)),
+            static_cast<std::uint8_t>(ROB(stagedRobPointer_2)),
+            static_cast<std::uint8_t>(ROB(stagedRobPointer_3)),
+            static_cast<std::uint8_t>(ROB(stagedRobPointer_4))};
+        const bool staged_branch[5] = {
+            static_cast<bool>(ROB(stagedBranchResolved_0)),
+            static_cast<bool>(ROB(stagedBranchResolved_1)),
+            static_cast<bool>(ROB(stagedBranchResolved_2)),
+            static_cast<bool>(ROB(stagedBranchResolved_3)),
+            static_cast<bool>(ROB(stagedBranchResolved_4))};
+        for (unsigned lane = 0; lane < 5 && ROB(_zz_candidates_0_state_valid_1); lane++) {
+            if ((staged_valid & (1U << lane)) == 0 || staged_pointer[lane] != head_pointer) {
+                continue;
+            }
+            snapshot.e02_head_staged_lane = static_cast<std::uint8_t>(lane);
+            snapshot.e02_head_staged_class = head_is_load ? 0 : head_is_store ? 1 :
+                staged_branch[lane] ? 2 : lane == 4 ? 3 : static_cast<std::uint8_t>(4 + lane);
+            break;
+        }
         const bool load_valid[8] = {
             static_cast<bool>(LSQ(loads_0_valid)), static_cast<bool>(LSQ(loads_1_valid)),
             static_cast<bool>(LSQ(loads_2_valid)), static_cast<bool>(LSQ(loads_3_valid)),
@@ -318,14 +350,6 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
                 }
             }
         }
-        const std::uint8_t staged_valid = static_cast<std::uint8_t>(
-            ROB(stagedCompletionValid) & ROB(stagedCompletionCurrent));
-        const std::uint8_t staged_pointer[5] = {
-            static_cast<std::uint8_t>(ROB(stagedRobPointer_0)),
-            static_cast<std::uint8_t>(ROB(stagedRobPointer_1)),
-            static_cast<std::uint8_t>(ROB(stagedRobPointer_2)),
-            static_cast<std::uint8_t>(ROB(stagedRobPointer_3)),
-            static_cast<std::uint8_t>(ROB(stagedRobPointer_4))};
         for (unsigned lane = 0; lane < 5 && !classified; lane++) {
             if ((staged_valid & (1U << lane)) != 0 && staged_pointer[lane] == head_pointer) {
                 snapshot.head_incomplete_reason = 18;
@@ -414,6 +438,55 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
     snapshot.d01_oldest_load_blocked_by_sdq =
         snapshot.d01_oldest_load_candidate && !p3_ready;
 
+    const std::uint8_t registered_wake =
+        static_cast<std::uint8_t>(BACKEND(rob_io_completionWakeupCandidateValid));
+    const std::uint8_t direct_wake =
+        static_cast<std::uint8_t>(CLUSTER(execution_io_directWakeupValid));
+    const std::uint8_t registered_pdst[3] = {
+        static_cast<std::uint8_t>(ROB(stagedPdst_0)),
+        static_cast<std::uint8_t>(ROB(stagedPdst_1)),
+        static_cast<std::uint8_t>(ROB(stagedPdst_2))};
+    const std::uint8_t direct_pdst[3] = {
+        static_cast<std::uint8_t>(BACKEND(issueOperandUop_0_pdst)),
+        static_cast<std::uint8_t>(BACKEND(issueOperandUop_1_pdst)),
+        static_cast<std::uint8_t>(BACKEND(issueOperandUop_2_pdst))};
+    const unsigned issue_entries[4] = {
+        static_cast<unsigned>(ISSUE_COUNT(0)), static_cast<unsigned>(ISSUE_COUNT(1)),
+        static_cast<unsigned>(ISSUE_COUNT(2)), static_cast<unsigned>(ISSUE_COUNT(3))};
+    const std::uint8_t issue_psrc1[4][8] = {
+        ISSUE_ROW(0, psrc1), ISSUE_ROW(1, psrc1), ISSUE_ROW(2, psrc1), ISSUE_ROW(3, psrc1)};
+    const std::uint8_t issue_psrc2[4][8] = {
+        ISSUE_ROW(0, psrc2), ISSUE_ROW(1, psrc2), ISSUE_ROW(2, psrc2), ISSUE_ROW(3, psrc2)};
+    const std::uint8_t issue_src1_ready[4][8] = {
+        ISSUE_ROW(0, source1Ready), ISSUE_ROW(1, source1Ready),
+        ISSUE_ROW(2, source1Ready), ISSUE_ROW(3, source1Ready)};
+    const std::uint8_t issue_src2_ready[4][8] = {
+        ISSUE_ROW(0, source2Ready), ISSUE_ROW(1, source2Ready),
+        ISSUE_ROW(2, source2Ready), ISSUE_ROW(3, source2Ready)};
+    for (unsigned lane = 0; lane < 3 && !snapshot.recovery; lane++) {
+        const bool conflict = (registered_wake & (1U << lane)) != 0 &&
+            (direct_wake & (1U << lane)) != 0 && direct_pdst[lane] != 0 &&
+            direct_pdst[lane] != registered_pdst[lane];
+        if (!conflict) {
+            continue;
+        }
+        snapshot.w01_conflict_mask |= static_cast<std::uint8_t>(1U << lane);
+        unsigned affected = 0;
+        for (unsigned queue = 0; queue < 4; queue++) {
+            for (unsigned entry = 0; entry < issue_entries[queue] && entry < 8; entry++) {
+                const bool waits_for_source1 = !issue_src1_ready[queue][entry] &&
+                    issue_psrc1[queue][entry] == direct_pdst[lane];
+                const bool waits_for_source2 = !issue_src2_ready[queue][entry] &&
+                    issue_psrc2[queue][entry] == direct_pdst[lane];
+                affected += waits_for_source1 || waits_for_source2;
+            }
+        }
+        snapshot.w01_affected_consumers[lane] = static_cast<std::uint8_t>(affected);
+        if (affected != 0) {
+            snapshot.w01_affected_mask |= static_cast<std::uint8_t>(1U << lane);
+        }
+    }
+
     const bool lsq_signals[8] = {
         static_cast<bool>(LSQ(translationRequestFire)), static_cast<bool>(LSQ(translationResponseFire)),
         static_cast<bool>(LSQ(translationCompletionFire)), static_cast<bool>(LSQ(loadRequestFire)),
@@ -498,6 +571,16 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot, std::uint8_
     d01_oldest_load_candidate_cycles_ += bit(snapshot.d01_oldest_load_candidate);
     d01_oldest_load_blocked_by_sdq_cycles_ +=
         bit(snapshot.d01_oldest_load_blocked_by_sdq);
+    if (snapshot.e02_head_staged_lane != kNoReason) {
+        e02_head_staged_cycles_++;
+        e02_head_staged_lane_[snapshot.e02_head_staged_lane]++;
+        e02_head_staged_class_[snapshot.e02_head_staged_class]++;
+    }
+    for (unsigned lane = 0; lane < 3; lane++) {
+        w01_conflict_cycles_[lane] += bit((snapshot.w01_conflict_mask & (1U << lane)) != 0);
+        w01_affected_cycles_[lane] += bit((snapshot.w01_affected_mask & (1U << lane)) != 0);
+        w01_affected_consumers_[lane] += snapshot.w01_affected_consumers[lane];
+    }
     for (unsigned event = 0; event < 8; event++) {
         lsq_events_[event] += bit((snapshot.lsq_events & (1U << event)) != 0);
     }
@@ -597,7 +680,7 @@ void PerfMonitor::write_json(const char *path) const {
     const bool commit_count_ok = observed_instructions_ == sampled_instructions_;
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v4\",\n");
+    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v5\",\n");
     std::fprintf(file, "  \"roi\": \"difftest-observation-window-source-aligned\",\n");
     std::fprintf(file, "  \"commit_observation_lag_cycles\": %u,\n", kCommitObservationLag);
     std::fprintf(file, "  \"cycles\": %llu,\n", static_cast<unsigned long long>(cycles_));
@@ -667,6 +750,31 @@ void PerfMonitor::write_json(const char *path) const {
     std::fprintf(file, "  \"dispatch\": {\"d01_oldest_load_candidate_cycles\": %llu, \"d01_oldest_load_blocked_by_sdq_cycles\": %llu},\n",
                  static_cast<unsigned long long>(d01_oldest_load_candidate_cycles_),
                  static_cast<unsigned long long>(d01_oldest_load_blocked_by_sdq_cycles_));
+    std::fprintf(file, "  \"e02\": {\"head_staged_cycles\": %llu, \"by_lane\": [%llu, %llu, %llu, %llu, %llu], \"by_class\": {\"load\": %llu, \"store\": %llu, \"branch\": %llu, \"multiplier\": %llu, \"lane0_other\": %llu, \"lane1_other\": %llu, \"lane2_other\": %llu, \"lane3_other\": %llu}},\n",
+                 static_cast<unsigned long long>(e02_head_staged_cycles_),
+                 static_cast<unsigned long long>(e02_head_staged_lane_[0]),
+                 static_cast<unsigned long long>(e02_head_staged_lane_[1]),
+                 static_cast<unsigned long long>(e02_head_staged_lane_[2]),
+                 static_cast<unsigned long long>(e02_head_staged_lane_[3]),
+                 static_cast<unsigned long long>(e02_head_staged_lane_[4]),
+                 static_cast<unsigned long long>(e02_head_staged_class_[0]),
+                 static_cast<unsigned long long>(e02_head_staged_class_[1]),
+                 static_cast<unsigned long long>(e02_head_staged_class_[2]),
+                 static_cast<unsigned long long>(e02_head_staged_class_[3]),
+                 static_cast<unsigned long long>(e02_head_staged_class_[4]),
+                 static_cast<unsigned long long>(e02_head_staged_class_[5]),
+                 static_cast<unsigned long long>(e02_head_staged_class_[6]),
+                 static_cast<unsigned long long>(e02_head_staged_class_[7]));
+    std::fprintf(file, "  \"w01\": {\"conflict_cycles_by_lane\": [%llu, %llu, %llu], \"affected_cycles_by_lane\": [%llu, %llu, %llu], \"affected_consumer_entries_by_lane\": [%llu, %llu, %llu]},\n",
+                 static_cast<unsigned long long>(w01_conflict_cycles_[0]),
+                 static_cast<unsigned long long>(w01_conflict_cycles_[1]),
+                 static_cast<unsigned long long>(w01_conflict_cycles_[2]),
+                 static_cast<unsigned long long>(w01_affected_cycles_[0]),
+                 static_cast<unsigned long long>(w01_affected_cycles_[1]),
+                 static_cast<unsigned long long>(w01_affected_cycles_[2]),
+                 static_cast<unsigned long long>(w01_affected_consumers_[0]),
+                 static_cast<unsigned long long>(w01_affected_consumers_[1]),
+                 static_cast<unsigned long long>(w01_affected_consumers_[2]));
     std::fprintf(file, "  \"execution\": {\"divider_busy_cycles\": %llu, \"p1_ready_while_divider_busy\": %llu, \"divide_operand_classes\": {\"divisor_zero\": %llu, \"divisor_abs_one\": %llu, \"dividend_zero\": %llu, \"divisor_power_of_two\": %llu, \"ordinary\": %llu}},\n",
                  static_cast<unsigned long long>(divider_busy_cycles_),
                  static_cast<unsigned long long>(p1_ready_while_divider_busy_),

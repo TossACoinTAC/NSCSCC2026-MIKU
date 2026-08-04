@@ -44,6 +44,11 @@ private:
         std::uint8_t issue_ready[4] = {};
         bool d01_oldest_load_candidate = false;
         bool d01_oldest_load_blocked_by_sdq = false;
+        std::uint8_t e02_head_staged_lane = kNoReason;
+        std::uint8_t e02_head_staged_class = kNoReason;
+        std::uint8_t w01_conflict_mask = 0;
+        std::uint8_t w01_affected_mask = 0;
+        std::uint8_t w01_affected_consumers[3] = {};
         bool divider_busy = false;
         bool p1_ready_while_divider_busy = false;
         std::uint8_t divide_class = kNoReason;
@@ -91,6 +96,12 @@ private:
     std::uint64_t issue_ready_entries_[4] = {0, 0, 0, 0};
     std::uint64_t d01_oldest_load_candidate_cycles_ = 0;
     std::uint64_t d01_oldest_load_blocked_by_sdq_cycles_ = 0;
+    std::uint64_t e02_head_staged_cycles_ = 0;
+    std::uint64_t e02_head_staged_lane_[5] = {};
+    std::uint64_t e02_head_staged_class_[8] = {};
+    std::uint64_t w01_conflict_cycles_[3] = {};
+    std::uint64_t w01_affected_cycles_[3] = {};
+    std::uint64_t w01_affected_consumers_[3] = {};
     std::uint64_t divider_busy_cycles_ = 0;
     std::uint64_t p1_ready_while_divider_busy_ = 0;
     std::uint64_t divide_classes_[5] = {0, 0, 0, 0, 0};
