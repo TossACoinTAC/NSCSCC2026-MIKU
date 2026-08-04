@@ -38,7 +38,10 @@ official CI verdict 无可记录证据，因此不得记为通过。
 | ID | 假设与触发信号 | 首次实现边界 | 正确性门禁 | 进入合并实现的条件 |
 | --- | --- | --- | --- | --- |
 | L04（已停止） | Store translation 只在 `!loadNeedsTranslation` 时 lookahead；当前 Linux 三 seed 的 head Store translation 暴露约 `9.718M--9.765M` cycles，head request/response fire 各约 `4.66M--4.71M` | 只改变 Load/Store translation owner 的 age-aware 选择；保留单 owner、cancel、SC 和 exception 身份，不增加第二 walker | C04/C06 相关 LSQ/TLB/flush/uncached 回归；func58 固定三 seed并保留额外三 seed；Linux instrumented 三 seed；代表 perf20 | 被移出 head 的 Store translation 周期增加，且 paired cycles 不退化；被推迟 Load 的额外等待单独报告；新 route 不使当前关键路径恶化到不可接受 |
-| E02 | 当前 seed 1 有 `4,612,723` 个零退休周期为 head staged completion，理论最多省一拍；新 WNS 已落在 `stagedPdst -> IQ early-wakeup` 广播族 | 暂不进入首轮 RTL；先按 completion source 精化 head-only opportunity。若实现，只旁路 ROB head 的 exact pointer/epoch，不旁路年轻 commit lane | ROB flush/epoch/wrap、精确异常、三宽 stop/recovery、所有 completion source；func58/Linux/代表 perf20 | head-only bubble 的 paired cycles 明确下降，且不增加 staged wakeup 扇出；完整 SoC 的 cycle×frequency 不劣于基线 |
+| W01（软件 A/B 通过） | v5 observer 在四个代表项的 `43,190,065` 个观测周期中发现 `484,314` 个冲突且存在等待消费者的周期，占 `1.1214%` | 对已经成功 direct wakeup 的同 lane completion 回声做有界抑制；保留 registered/direct 仲裁优先级和原有 wakeup lane 数 | producer acceptance、flush、exactly-once wakeup、长依赖链与完整后端回归；func58/Linux/代表 perf20 | 19 项 paired cycles 有稳定正收益且无功能失败；不得用新增 wakeup lane 放大全局比较网 |
+| E02（软件 A/B 通过） | v5 observer 对四个代表项只统计 exact head/current-epoch staged completion，严格上界为 `7,454,851 / 43,190,065 = 17.2606%` | 仅允许普通 head 指令使用 matching staged completion 提前退休；年轻 lane 保持 `entry.complete` prefix，branch、exception、serializing 和 system operation 排除 | ROB flush/epoch/wrap、精确异常、三宽能力和所有排除边界；func58/Linux/代表 perf20 | head-only bubble 的 paired cycles 明确下降，且不增加 staged wakeup 扇出；完整 SoC 的 cycle×frequency 不劣于基线 |
+| L05（observer 通过） | 四个代表项 `5,194,524` 次 D-side translation 中只有 5 次走 TLB；direct/DMW 往返事件数相当于观测周期的 `12.0803%` | 在已有 `scheduledLoad`/Store entry 寄存边界填入运行时判定的 PA/MAT/translationDone；不把 AGU 组合地址直接接入 L1D | direct/DMW/TLB、Load/Store、PLV/MAT/DisableCache、CRMD/DMW 切换、flush/epoch、C04/C06 与 func/MMU/Linux | 先做 L05 独立 A/B；只有周期收益成立才允许与 W01/E02 合并 |
+| W02（observer 通过） | `3,517,657` 次合格 Load completion 中，`2,922,347` 次在 P0-P2 已有等待 consumer，占 completion 的 `83.0765%` | 第一版只考虑 current-epoch、无异常、有效 LQ identity 的 Load completion，并区分 P0-P2 与需要额外数据旁路审计的 P3 consumer | cache/forward/uncached、exception、flush/epoch、ROB/LQ reuse、completion collision、实际 operand data | L05 A/B 后再做 W02 独立增量 A/B；不得以 waiting count 直接宣称 cycle 收益 |
 | D01 | P3 `portReady` 当前对 Load/Store 都要求 IQ 与 SDQ ready；SDQ 满时 Load 可能被无关阻塞 | 第一阶段只增加 `SDQ-full && P3 load candidate` 计数，不改变 router；第二阶段再按 Load/Store 类型拆分 ready，Store 仍保持 IQ+SDQ 原子接受 | Router prefix、Store 双队列原子性、flush/backpressure、LSQ/SDQ 定向和随机 AXI；func58/Linux/代表 perf20 | 计数确认有可观暴露且 paired cycles 有收益；否则不进入 RTL。新 ready 网络不得形成组合环或显著恶化 route |
 
 每项都先独立提交、独立运行最小相关测试和代表 perf20；通过后才允许把多项放入一个组合
@@ -63,9 +66,11 @@ request/response fire 数相加作为收益：必须报告 Load 被推迟、ATU 
 2. D01 已增加严格下界 observer：只统计最老 dispatch lane 为 Load、IQ3 已 ready、但 P3
    仅因 SDQ not-ready 被阻塞的周期，不改 production RTL。先在代表 perf20 上测暴露；不足时
    直接停止 D01。
-3. E02 保留为独立候选，但当前不与 L04 合并。新 WNS 已位于 staged wakeup 广播族，先把
-   `rob_staged_completion` 按 source/head-only 精化，再设计不会增加该网络扇出的 bypass。
-4. 只有后续具有独立、可复现正收益的候选才进入下一次合并 implementation；不为
+3. v5 observer 已按 exact head/current epoch 精化 E02，并确认 W01 冲突中存在等待消费者。
+   W01 与 E02 分别完成独立 RTL、定向测试和 19 项 paired perf20；二者均保留进入组合候选。
+4. L05/W02 的无扰动 perf20 observer 已证明两段都有高权重暴露。先做 L05 独立 A/B，再在其
+   结果冻结后做 W02 独立增量 A/B；禁止首次同时打开，以保留归因。
+5. 只有具有独立、可复现正收益的候选才进入下一次合并 implementation；不为
    observer-only、已停止候选或负收益消融单独支付一次完整 Vivado。
 
 ## First Measurements
@@ -85,6 +90,51 @@ D01 observer 在 `stream_copy/coremark/inner_product/quick_sort` 的观测窗口
 阻塞的周期分别为 `0/5/0/22`。合计 `27 / 41,501,656`，约 `0.65 ppm`；即使全部消除，
 周期收益上界也不可观。D01 因此停止在 observer 阶段，不修改 dispatch ready 网络，不进入
 下一次 implementation。
+
+M01 v5 observer 固定于 workspace commit `babeac9e4c63`，在冻结 RTL
+`2765433e82e0` 上运行 `coremark/inner_product/lookup_table/quick_sort`。四项合计
+`43,190,065` 个观测周期，所有 retire、source alignment、queue identity 和 sampling
+守恒式通过。E02 exact-head staged completion 合计 `7,454,851` cycles，严格理论上界为
+`17.2606%`；这是“一拍全部可消除”的上界，不是收益预测。W01 registered/direct tag 冲突且
+IQ 中确有等待 direct tag 消费者的周期合计 `484,314`，占 `1.1214%`；该证据足以启动有界
+回声抑制实验，但同样不等价于可直接消除的 cycles。
+
+W01 源提交为 `b44eaffcefade`，published RTL 提交为 `15d06c98ef32`，RTL SHA-256 为
+`afe3c5dfcff8cd3c795a2738e1aec6c6e7e89c7e2e42e10f4ee7321f760cf26d`。19 个短
+perf20 项全部通过，冻结 milestone 的 `71,588,939` cycles 降到 `71,515,650`，减少
+`73,289`（`-0.102375%`）；17 项改善、2 项退化。收益较小但分布广，且实现不增加 wakeup
+lane，因此保留为组合候选。
+
+E02 源提交为 `08fbf1120115`，published RTL 提交为 `71577a4fa0db`，RTL SHA-256 为
+`f59c5273c94e6a70f7fb5f73ee0fc2097806385b0718fdd6460db5cbeeaaab93`。候选只旁路
+普通 ROB head 的 matching staged completion，精确排除 exception、branch、serializing 和
+system operation；年轻 commit lane 的顺序 prefix 不变。以 W01 为 paired baseline 的 19
+个短 perf20 项全部通过，cycles 从 `71,515,650` 降到 `71,083,365`，减少 `432,285`
+（`-0.6045%`）；17 项改善、2 项退化。W01+E02 相对冻结 milestone 合计减少 `505,574`
+cycles（`-0.7063%`）。ROB 定向测试明确观察到 `commitValid=0b111`，证明三宽能力仍在；
+短程序不再要求每个特定指令排列都必须出现三宽批次。test-contract 提交 `64bf153347fd`
+后，matching 完整 `make cpu-check` 通过 Scala/Verilator `186/186`、Python `364/364` 和
+locked port/lint/Yosys/publication；lint 为 876 条锁定 warning，signature `b021ae6a...`。
+matching gate metadata 提交为 `572588e`。该结果仍不替代 func58/Linux 系统回归或 Vivado。
+
+matching clean func58 随后以 random-AXI seeds `240/255/141` 全部通过 `58/58`，
+`num_data=0x3a00003a`、LED `1/1`，无 DiffTest mismatch；总 cycles 分别为
+`636390/636760/637596`。证据位于
+`build/sim/runs/cpu_572588ee1774_chiplab_c398d274812f/clean-func58/random/`。
+这补齐了 W01+E02 的轻量系统正确性置信来源；Linux、matching Vivado 和板测仍未由该结果覆盖。
+
+L05/W02 observer 固定于 workspace commit `7e50f16`、schema `nscc-m01-v6`，绑定 CPU
+`572588e` 和 RTL `f59c5273...`。四个代表项合计 `42,999,823` 个观测周期，benchmark
+cycles 与 clean E02 逐项一致，所有守恒式通过。`5,194,524` 次 D-side translation request 中
+DMW0 Load/Store 为 `2,822,126/1,560,994`，DMW1 为 `809,770/1,629`，TLB Load 只有 5 次；
+非 TLB 比例 `99.99990374%`。direct/DMW Store translation 严格阻塞年轻 Load 共 `80,028`
+cycles（观测周期的 `0.1861%`）。
+
+W02 共识别 `3,517,657` 次 current-epoch、无异常、有效 LQ identity 的 Load completion；
+`3,000,948` 次存在任意 IQ waiting consumer，`2,922,347` 次在 P0--P2 存在 waiting consumer，
+分别占 Load completion 的 `85.3110%/83.0765%`。P0--P2 保守机会数相当于观测周期的
+`6.7962%`。这些计数证明两项都值得进入独立 RTL A/B，但 translation 和 load-use 等待可被
+乱序执行隐藏，不能把 `12.0803%` 与 `6.7962%` 相加成预期加速比。
 
 ## Scheduling
 
