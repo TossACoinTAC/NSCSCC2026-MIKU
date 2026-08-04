@@ -123,6 +123,16 @@ if [[ $profile == instrumented ]]; then
   install -m 0444 "$workspace/tools/sim-instrumentation/perf_monitor.cpp" \
     "$staging/sims/verilator/testbench/perf_monitor.cpp"
   TMPDIR=/tmp patch -d "$staging" -p1 --forward --batch < "$m01_patch_file"
+  if ! awk '
+    previous == "    top = new Vtop;" &&
+      $0 == "    perf_monitor = new PerfMonitor(top);" { found = 1 }
+    { previous = $0 }
+    END { exit !found }
+  ' "$staging/sims/verilator/testbench/testbench.cpp"; then
+    printf '%s\n' \
+      'M01 patch did not initialize PerfMonitor immediately after Vtop construction' >&2
+    exit 1
+  fi
 fi
 
 run_dir="$staging/sims/verilator/run_prog"
