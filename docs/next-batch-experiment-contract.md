@@ -26,8 +26,13 @@ bitstream 上通过 20/20，总 SoC/CPU cycles 为 `69,476,960/69,466,027`。同
 `79,537,915/79,524,833`，因此总 SoC/CPU cycles 分别下降 `10,060,955/10,058,806`，
 约 `12.65%`；20 项中 19 项改善，test 4 约退化 `0.14%`。该结果证明当前组合整体有实际
 板上性能提升，不能用于拆分 R01、LSQ cut 和 cache 扩容的单项贡献。随后已把同一 CPU/RTL
-提交到官方仓库同名分支 `dev/ECHO @ 0a8ef8caf08c` 触发 CI。本地没有取得 pipeline ID，
-official CI verdict 无可记录证据，因此不得记为通过。
+提交到官方仓库同名分支 `dev/ECHO @ 0a8ef8caf08c`。官方父流水线 `2185` 与子流水线
+`2192` 均成功：function `58/58`、三个 seed 全过；performance `20/20`，IPC ratio
+`0.858661920`，100 MHz performance build setup/hold WNS 为 `+0.011/+0.050 ns`，function
+build 为 `+0.978/+0.050 ns`，两种模式均为 0 DRC error 并成功生成 bitstream。该 official CI
+证据只绑定 submission `0a8ef8c`、CPU/RTL milestone `758181a/04d6e4b...`，不能继承给
+后续 L05/W02。原始 metadata、trace、artifact 与完整哈希归档在
+`build/official-ci/pipeline_2185_child_2192_commit_0a8ef8ca/`。
 
 作为不改变官方固定矩阵的额外软件置信证据，当前 prepared model 又以 seed
 `17/65537/99991` 通过 func58 `58/58`，`num_data=0x3a00003a`、LED `1/1`，endpoint

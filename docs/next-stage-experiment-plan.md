@@ -445,8 +445,14 @@ bitstream、routed DCP、timing report hash 分别为 `a59257ad.../4ada5b08.../f
 达到“板上性能确实提升”条件后，submission repository 已在同名 `dev/ECHO` 分支提交并
 推送 `0a8ef8caf08c`，其中 CPU source/两份 generated RTL 均对应 `758181a` 与
 `04d6e4b...`；`make ci-check` 验证 production template `6915882...` 固定 c398。推送已
-触发 official CI；本地 `glab` token 已撤销且没有取得 pipeline ID，最终 verdict 无可记录
-证据，不得写成 official CI passed。
+触发 official CI。父流水线 `2185`、桥接任务 `7589` 和子流水线 `2192` 均成功；子任务
+`gen_func/gen_perf/program_perf/program_func/upload_score` 全部通过。function 为 `58/58`、
+三个 seed 全过；performance 为 `20/20`，每项两轮都通过，IPC ratio `0.858661920`，选定
+CPU cycles 合计 `69,466,995`。performance actual CPU/system/DDR 为 `100/100/200 MHz`，
+setup/hold WNS `+0.011/+0.050 ns`；function CPU 为 `32.726797 MHz`，setup/hold WNS
+`+0.978/+0.050 ns`；两种模式均 0 DRC error 且 bitstream 成功。归档位于
+`build/official-ci/pipeline_2185_child_2192_commit_0a8ef8ca/`。该 verdict 严格绑定 submission
+`0a8ef8c` 与 CPU/RTL milestone `758181a/04d6e4b...`，不覆盖后续 W01/E02/L05/W02 RTL。
 
 首次完整 gate 的 Scala/Verilator 结果为 `182/183`：失败来自
 `OooDataCacheHierarchySpec` 仍把 memory MSHR ID 固定为 0，并用旧 64-set L1D 的固定
@@ -775,8 +781,9 @@ WNS/TNS、top-N path 和资源后可继续下一轮微架构/时序协同修改�
 6. 当前 R01/LSQ/H02 组合已完成逐项代表集归因、组合 19 项本地软件、完整 gates、func58、
    Linux 三种子门禁、matching 100 MHz timing closure 和团队板 perf20 20/20；板上总周期
    相对同 profile 基线下降约 `12.65%`。已在 official submission 的同名 `dev/ECHO` 分支
-   推送 `0a8ef8c` 触发 CI；本地没有取得 pipeline ID，official CI verdict 尚无可记录证据，
-   因此不能宣称通过。
+   推送 `0a8ef8c`；official parent/child pipelines `2185/2192` 已成功，function `58/58`、
+   performance `20/20`，100 MHz performance setup/hold WNS 为 `+0.011/+0.050 ns`，0 DRC
+   error 且 bitstream 成功。该证据只绑定 `758181a/04d6e4b...`，不得继承给后续 RTL。
 7. Vivado 保持单实例，软件门禁通过的批次进入下一次 100 MHz 实现；实现期间继续准备和验证
    下一独立候选。每次最终 route 报告重新决定时序方向，不沿用历史 critical path 名称。
 8. `nscc-m01-v5` 已把 E02 严格上界和 W01 affected conflict 闭合；W01/E02 的 19 项独立
