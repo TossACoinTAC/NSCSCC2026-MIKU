@@ -14,8 +14,9 @@ TEAM_CI_DIR ?= $(ROOT_DIR)/nscscc-team-ci
 SUBMISSION_DIR ?= $(ROOT_DIR)/T2026144230012607
 OFFICIAL_CI_TEMPLATE_DIR ?= $(ROOT_DIR)/build/official-ci-template
 SIM_DIR ?= $(CHIPLAB_HOME)/sims/verilator/run_prog
-SOC_RUN_DIR ?= $(CHIPLAB_HOME)/fpga/nscscc-team/run_vivado
-SOC_PLATFORM_IP_DIR ?= $(CHIPLAB_HOME)/chip/soc_demo/nscscc-team/xilinx_ip
+SOC_PERF_CHIPLAB_DIR ?= $(ROOT_DIR)/build/chiplab-perf
+SOC_RUN_DIR ?= $(SOC_PERF_CHIPLAB_DIR)/fpga/nscscc-team/run_vivado
+SOC_PLATFORM_IP_DIR ?= $(SOC_PERF_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/xilinx_ip
 SOC_VIO_DIR ?= $(SOC_PLATFORM_IP_DIR)/vio
 SOC_PROJECT_XPR ?= $(SOC_RUN_DIR)/project/loongson.xpr
 SOC_IMPL_DIR ?= $(SOC_RUN_DIR)/project/loongson.runs/impl_1
@@ -90,7 +91,7 @@ help:
 		'  make sim-prepare      Build one isolated, hash-locked Verilator model/profile' \
 		'  make sim-matrix       Run prepared workloads/seeds in isolated runtime directories' \
 		'  make wave             Open WAVE in Windows Surfer' \
-		'  make soc-project      Recreate the local nscscc-team Vivado project' \
+		'  make soc-project      Recreate an isolated c398 performance Vivado project' \
 		'  make soc-func         Run a clean isolated functional-test SoC implementation' \
 		'  make soc-impl         Run the 100 MHz complete-SoC implementation and timing gate' \
 		'  make soc-archive      Archive the latest implementation with class and timing status' \
@@ -376,14 +377,29 @@ wave:
 	@test -f "$(SURFER)" || { printf 'Surfer not found: %s\n' "$(SURFER)" >&2; exit 1; }
 	"$(SURFER)" "$$(wslpath -w "$(WAVE)")"
 
-soc-project: chiplab-sync
-	rm -rf "$(SOC_VIO_DIR)/gen" "$(SOC_PLATFORM_IP_DIR)/clk_pll_ddr/gen"
-	rm -rf "$(SOC_VIO_DIR)/hdl" "$(SOC_VIO_DIR)/synth"
-	rm -f "$(SOC_VIO_DIR)/vio_0.dcp" "$(SOC_VIO_DIR)/vio_0.xdc" \
-		"$(SOC_VIO_DIR)/vio_0.xml" "$(SOC_VIO_DIR)/vio_0_ooc.xdc" \
-		"$(SOC_VIO_DIR)/vio_0_sim_netlist.v" \
-		"$(SOC_VIO_DIR)/vio_0_sim_netlist.vhdl" \
-		"$(SOC_VIO_DIR)/vio_0_stub.v" "$(SOC_VIO_DIR)/vio_0_stub.vhdl"
+soc-project: cpu-generate
+	@perf_dir="$$(realpath -m -- "$(SOC_PERF_CHIPLAB_DIR)")"; \
+	case "$$perf_dir" in \
+		"$(ROOT_DIR)"/build/*) ;; \
+		*) printf 'SOC_PERF_CHIPLAB_DIR must be below %s/build\n' "$(ROOT_DIR)" >&2; exit 2 ;; \
+	esac; \
+	rm -rf -- "$$perf_dir"; \
+	mkdir -p "$$perf_dir"
+	git -C "$(CHIPLAB_HOME)" archive "$(CHIPLAB_COMMIT)" | \
+		tar -xf - -C "$(SOC_PERF_CHIPLAB_DIR)"
+	rm -rf "$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU"
+	mkdir -p "$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/data_bank_sram"
+	mkdir -p "$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/tagv_sram"
+	install -m 0644 "$(CPU_DIR)/rtl/mycpu_top.v" \
+		"$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/mycpu_top.v"
+	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/data_bank_sram.xcix" \
+		"$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/data_bank_sram/data_bank_sram.xcix"
+	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/tagv_sram.xcix" \
+		"$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/tagv_sram/tagv_sram.xcix"
+	sed -i '2s|.*|// `define RUN_FUNC_TEST|' \
+		"$(SOC_PERF_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/soc_config.vh"
+	sed -i '3s|.*|`define RUN_PERF_TEST|' \
+		"$(SOC_PERF_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/soc_config.vh"
 	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch \
 		-source generate_perf_pll.tcl -tclargs "$(PERF_CPU_MHZ)" \
 		"$(SOC_PLATFORM_IP_DIR)/clk_pll/clk_pll.xci" \

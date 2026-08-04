@@ -418,8 +418,9 @@ the nested repositories remain authoritative for implementation details.
   verdict, and resource measurements. Three lanes require the documented
   measured-memory opt-in; a process exit code of zero is not by itself a pass.
 - `make wave`: open the default FST in host Surfer; override `WAVE=...` as needed.
-- `make soc-impl`: create and implement the local complete SoC at the default
-  100 MHz CPU target in Vivado 2023.2. Override `PERF_CPU_MHZ` only for an
+- `make soc-impl`: create an isolated clean c398 performance snapshot under
+  `build/chiplab-perf/` and implement the complete SoC at the default 100 MHz
+  CPU target in Vivado 2023.2. Override `PERF_CPU_MHZ` only for an
   explicitly recorded frequency experiment; the Chiplab functional-clock
   default is not valid performance, scoring, or 100 MHz timing evidence.
 - `make soc-func`: build the function-test SoC in an ignored Chiplab archive
