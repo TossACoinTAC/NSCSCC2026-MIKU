@@ -97,6 +97,18 @@ run_root="$workspace/build/sim/runs/cpu_${cpu_short}_chiplab_${chiplab_commit:0:
 mkdir -p "$run_root"
 IFS=',' read -r -a workload_list <<< "$workloads"
 IFS=',' read -r -a seed_list <<< "$seeds"
+for workload in "${workload_list[@]}"; do
+  if [[ -z $workload || $workload =~ [[:space:]] ]]; then
+    printf 'each workload must be a nonempty CSV item without whitespace: %q\n' "$workload" >&2
+    exit 2
+  fi
+done
+for seed in "${seed_list[@]}"; do
+  if [[ ! $seed =~ ^[0-9]+$ ]]; then
+    printf 'each seed must be a decimal integer in a comma-separated list: %q\n' "$seed" >&2
+    exit 2
+  fi
+done
 
 run_one() {
   local workload=$1
@@ -151,7 +163,21 @@ run_one() {
     printf '%s\n' "$model_result" > model-exit-code.txt
     result=$model_result
     verdict=pass
-    if grep -Eqi 'Error\(Code:|different at pc|Store commit wrong|difftest.*(abort|mismatch)' run.log run.stderr.log; then
+    counter_status=0
+    if [[ $profile == instrumented ]]; then
+      if [[ ! -f m01-counters.json ]]; then
+        printf 'instrumented model did not produce m01-counters.json\n' > m01-check.txt
+        counter_status=1
+      elif ! "$workspace/tools/check-m01-counters" m01-counters.json > m01-check.txt 2>&1; then
+        counter_status=1
+      else
+        printf 'm01_counters_sha256=%s\n' "$(sha256sum m01-counters.json | awk '{print $1}')" >> run-manifest.txt
+      fi
+    fi
+    if ((counter_status != 0)); then
+      result=1
+      verdict=counter-invariant-error
+    elif grep -Eqi 'Error\(Code:|different at pc|Store commit wrong|difftest.*(abort|mismatch)' run.log run.stderr.log; then
       result=1
       verdict=difftest-or-trace-error
     elif [[ $workload == linux ]]; then

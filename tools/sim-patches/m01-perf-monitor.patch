@@ -1,0 +1,95 @@
+diff --git a/sims/verilator/testbench/difftest.cpp b/sims/verilator/testbench/difftest.cpp
+index 08c914d..dad5910 100644
+--- a/sims/verilator/testbench/difftest.cpp
++++ b/sims/verilator/testbench/difftest.cpp
+@@ -2,6 +2,7 @@
+ #include <sys/mman.h>
+ #include "difftest.h"
+ #include "cpu_tool.h"
++#include "perf_monitor.h"
+ 
+ std::chrono::nanoseconds nemu_nano_seconds = std::chrono::nanoseconds(0);
+ 
+@@ -52,6 +53,7 @@ int Difftest::step(vluint64_t &main_time) {
+ 
+     if (sim_over) {
++        perf_monitor_cancel_cycle();
+         printf("==============================================================\n");
+         printf("test end!!\n");
+ #ifdef SIMU_TRACE
+         fprintf(trace_out, "==============================================================\n");
+@@ -61,5 +62,6 @@ int Difftest::step(vluint64_t &main_time) {
+     while (idx_commit < DIFFTEST_COMMIT_WIDTH && dut.commit[idx_commit].valid) {
+         inst_total += 1;
++        perf_monitor_record_commit(dut.commit[idx_commit].pc, dut.commit[idx_commit].inst, idx_commit);
+ #ifndef TRACE_COMP
+         dut.commit[idx_commit].valid = 0;
+ #endif
+@@ -88,7 +90,8 @@ int Difftest::step(vluint64_t &main_time) {
+         // fflush(NULL);
+         idx_commit++;
+     }
++    perf_monitor_record_commit_cycle(idx_commit);
+ 
+     if(idx_commit == 0 && !dut.excp.excp_valid){
+ #ifdef DEAD_CLOCK_EN
+         dead_clock++;
+diff --git a/sims/verilator/testbench/include/testbench.h b/sims/verilator/testbench/include/testbench.h
+index b6db142..aa4a2b4 100644
+--- a/sims/verilator/testbench/include/testbench.h
++++ b/sims/verilator/testbench/include/testbench.h
+@@ -9,6 +9,7 @@
+ #include "time_limit.h"
+ #include "rand64.h"
+ #include "emu.h"
++#include "perf_monitor.h"
+ 
+ class CpuTestbench:CpuTool {
+ public:
+@@ -16,6 +17,7 @@ public:
+     CpuTimeLimit* time_limit;
+     Rand64* rand64; 
+     UARTSIM* uart;
++    PerfMonitor* perf_monitor;
+     #ifdef DUMP_VCD
+     VerilatedVcdC	*m_trace; 
+     #endif 
+diff --git a/sims/verilator/testbench/testbench.cpp b/sims/verilator/testbench/testbench.cpp
+index 105635f..1139fa4 100644
+--- a/sims/verilator/testbench/testbench.cpp
++++ b/sims/verilator/testbench/testbench.cpp
+@@ -7,6 +7,7 @@ CpuTestbench::CpuTestbench(int argc, char **argv, char **env, vluint64_t *main_t
+     this->parse_args(argc, argv, env);
+     rand64 = new Rand64(rand_path);
+     top = new Vtop;
++    perf_monitor = new PerfMonitor(top);
+     struct UART_STA uart_status;
+     if (restore_bp_time != 0) {
+         restore_model(main_time, top_restore_bp_file);
+@@ -209,6 +210,9 @@ void CpuTestbench::simulate(vluint64_t& main_time) {
+             }
+             if(EVAL)break;
+             emask |= time_limit->process(main_time);
++            if (!emask) {
++                perf_monitor->begin_cycle();
++            }
+             emask |= emu->process();
+     #ifdef TRACE_COMP
+             if(emu->dm->check_end()) {
+@@ -238,6 +242,7 @@ void CpuTestbench::simulate(vluint64_t& main_time) {
+     printf("verilator eval time \tis %lf s\n", total_nano_seconds.count() / 1000000000.0);
+     printf("==============================================================\n");
+ 
++    perf_monitor->write_json("m01-counters.json");
+     EVAL;
+ #undef EVAL
+     display_exit_cause(main_time,emask);
+@@ -259,6 +264,8 @@ void CpuTestbench::close(void) {
+ }
+ 
+ CpuTestbench::~CpuTestbench() {
++    delete perf_monitor;
++    perf_monitor = nullptr;
+     // Final model cleanup
+     top->final();
+     //  Coverage analysis (since test passed)

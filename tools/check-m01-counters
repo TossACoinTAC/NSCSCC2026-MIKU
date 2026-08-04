@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+import json
+import sys
+from pathlib import Path
+
+
+def fail(message: str) -> None:
+    print(f"M01 counter check failed: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+if len(sys.argv) != 2:
+    fail("usage: check-m01-counters FILE")
+
+path = Path(sys.argv[1])
+try:
+    counters = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, json.JSONDecodeError) as error:
+    fail(str(error))
+
+if counters.get("schema_version") != "nscc-m01-v2":
+    fail(f"unexpected schema {counters.get('schema_version')!r}")
+if counters.get("commit_observation_lag_cycles") != 4:
+    fail("unexpected DiffTest commit observation lag")
+
+hist = counters.get("retire_width_histogram")
+if not isinstance(hist, list) or len(hist) != 4 or not all(isinstance(value, int) and value >= 0 for value in hist):
+    fail("retire_width_histogram must contain four nonnegative integers")
+
+cycles = counters.get("cycles")
+instructions = counters.get("retired_instructions")
+observed = counters.get("observed_commit_instructions")
+if sum(hist) != cycles:
+    fail(f"retire histogram sums to {sum(hist)}, cycles is {cycles}")
+weighted = sum(width * count for width, count in enumerate(hist))
+if weighted != instructions:
+    fail(f"retire histogram represents {weighted} instructions, counter is {instructions}")
+if observed != instructions:
+    fail(f"difftest observed {observed} instructions, sampled {instructions}")
+if counters.get("unused_commit_slots") != 3 * cycles - instructions:
+    fail("unused_commit_slots does not conserve commit width")
+
+invariants = counters.get("invariants", {})
+for name in ("retire_hist_cycles", "retire_hist_instructions", "commit_observation", "source_retire_alignment"):
+    if invariants.get(name) is not True:
+        fail(f"invariant {name} is not true")
+if invariants.get("non_prefix_retire_cycles") != 0:
+    fail("non-prefix retire mask observed")
+if invariants.get("sampling_protocol_errors") != 0:
+    fail("monitor/DPI cycle alignment protocol failed")
+if invariants.get("source_retire_alignment_errors") != 0:
+    fail("source snapshot retired width differs from its DiffTest commit packet")
+zero = counters.get("zero_retire_loss", {})
+zero_total = sum(zero.get(name, 0) for name in (
+    "recovery", "rob_empty", "head_incomplete", "head_complete_blocked", "unclassified"
+))
+if zero_total != hist[0]:
+    fail(f"zero-retire causes sum to {zero_total}, histogram is {hist[0]}")
+
+head_incomplete = counters.get("head_incomplete_detail", {})
+if sum(head_incomplete.values()) != zero.get("head_incomplete"):
+    fail("head-incomplete detail does not conserve its parent loss bucket")
+head_complete = counters.get("head_complete_blocked_detail", {})
+if sum(head_complete.values()) != zero.get("head_complete_blocked"):
+    fail("head-complete-blocked detail does not conserve its parent loss bucket")
+
+print(
+    f"M01 counters pass: cycles={cycles} instructions={instructions} "
+    f"ipc={instructions / cycles if cycles else 0:.6f} "
+    f"trace={counters.get('commit_trace_signature_fnv1a64')}"
+)

@@ -86,10 +86,24 @@ export CHIPLAB_HOME="$staging"
 patch_file="$workspace/tools/sim-patches/difftest-interrupt-memory-order.patch"
 patch_lock="$patch_file.sha256"
 patch_sha=none
+m01_patch_file="$workspace/tools/sim-patches/m01-perf-monitor.patch"
+m01_patch_lock="$m01_patch_file.sha256"
+m01_source_lock="$workspace/tools/sim-instrumentation/manifest.sha256"
+m01_patch_sha=none
+m01_source_sha=none
 if [[ $profile == instrumented ]]; then
   (cd "$workspace" && sha256sum -c "$patch_lock")
   patch_sha=$(sha256sum "$patch_file" | awk '{print $1}')
   TMPDIR=/tmp patch -d "$staging" -p1 --forward --batch < "$patch_file"
+  (cd "$workspace" && sha256sum -c "$m01_patch_lock")
+  (cd "$workspace" && sha256sum -c "$m01_source_lock")
+  m01_patch_sha=$(sha256sum "$m01_patch_file" | awk '{print $1}')
+  m01_source_sha=$(sha256sum "$m01_source_lock" | awk '{print $1}')
+  install -m 0444 "$workspace/tools/sim-instrumentation/perf_monitor.h" \
+    "$staging/sims/verilator/testbench/include/perf_monitor.h"
+  install -m 0444 "$workspace/tools/sim-instrumentation/perf_monitor.cpp" \
+    "$staging/sims/verilator/testbench/perf_monitor.cpp"
+  TMPDIR=/tmp patch -d "$staging" -p1 --forward --batch < "$m01_patch_file"
 fi
 
 run_dir="$staging/sims/verilator/run_prog"
@@ -130,6 +144,8 @@ rtl_sha256=$(sha256sum "$rtl" | awk '{print $1}')
 model_sha256=$(sha256sum "$run_dir/output" | awk '{print $1}')
 difftest_sha256=$(sha256sum "$staging/sims/verilator/testbench/difftest.cpp" | awk '{print $1}')
 instrumentation_patch_sha256=$patch_sha
+m01_patch_sha256=$m01_patch_sha
+m01_source_manifest_sha256=$m01_source_sha
 verilator=$($workspace/tools/verilator-local --version | head -n 1)
 java=$(java -version 2>&1 | head -n 1)
 EOF
