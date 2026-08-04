@@ -161,7 +161,32 @@ random-AXI seeds `1/19557/5570815` 的 200 ms 窗口均通过，未见 DiffTest/
 `48,574,350/48,542,696/48,575,829`，IPC 为 `0.485744/0.485427/0.485758`，M01 守恒检查
 全部通过。矩阵摘要位于
 `build/sim/runs/cpu_03a466a39d80_chiplab_c398d274812f/instrumented/random/matrix_702d500d09d1_summary.txt`。
-100 MHz route 仍需按组合 HEAD 重新建立。
+matching 100 MHz performance implementation 已完成并生成 bitstream，DRC 为 0 error、hold
+`WHS/THS +0.053 ns/0`，但 setup `WNS/TNS -0.601 ns/-85.196 ns`，因此只作为 diagnostic，
+不能进入板测。placed full-SoC 资源为 LUT `90,797`、FF `53,735`、BRAM tile `68.5`、DSP
+`8`。前六条 setup path 都从 LSQ Store physical-address/overlap/order cone 进入 IQ3 operand
+capture，最差 data path `9.819 ns`，其中 route `7.354 ns`（`74.9%`）；路径经过 fanout 166
+的 `loadStoreQueue_io_completionValid` 网络。其余前十路径从 ROB pointer 进入 privileged
+redirect target。归档位于
+`Stable_Backup/cpu_03a466a39d80_chiplab_c398d274812f_perf_100mhz_20260805-070729_candidate/`。
+
+该 route 只能归因给 W01+E02+L05+W02 的整体组合。与 `758181a` 相比四项同时变化，而且
+L05-only 没有 matching route；尽管 completion-to-IQ 终点与 W02 的风险一致，现有证据不能
+断言 `-0.601 ns` 由 W02 单独造成。必须在相同 source、工具、策略和 100 MHz profile 下仅
+关闭 `enableLoadCompletionEarlyWakeup` 后重跑 route，才能把 W02 从 L05、既有 LSQ cone 与
+布局交互中分离。
+
+workspace `ad148e9` 的 `nscc-m01-v7` observer 在 `03a466a/50b460f...` 上新增前端请求
+interval、IQ/dispatch/issue 和 branch resolve-to-recovery 统计。ideal-memory seed 0 的
+`fireye_I2/coremark/quick_sort/inner_product` 全部通过，实际 retire IPC 分别为
+`0.3569/0.3175/0.3221/0.4355`。相邻 I-cache request 没有 1--2 cycle interval，最短为
+3 cycles，且 3-cycle 桶占各项 request interval 的 `81.69%/51.79%/68.41%/65.95%`；frontend
+empty cycles 分别占 `53.95%/24.32%/55.85%/36.53%`。branch matching recovery 的平均
+resolve-to-recovery latency 为 `1.89/3.59/2.31/6.63` cycles，累计 latency 分别相当于总
+观测周期的 `2.28%/1.97%/3.23%/0.05%`。这些窗口包含共同启动段，约 `1.19M` 次 uncached
+request 不能解释成 benchmark ROI；它们足以把 F01/H03 与 B01 的 ROI-aware 测量提升为下一轮
+高优先级，但还不是可直接相加的 speedup 预测。结构化证据位于
+`build/sim/runs/cpu_03a466a39d80_chiplab_c398d274812f/instrumented-perf20/ideal/`。
 
 ## Scheduling
 

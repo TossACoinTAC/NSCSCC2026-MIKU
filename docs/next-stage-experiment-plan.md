@@ -234,6 +234,7 @@ manifest。早期 endpoint 失败来自 c398 新 testbench 未消费 `--end-pc`�
 | `08fbf11` E02 head completion bypass | exact pointer/current epoch 的普通 head staged completion 可提前一拍退休；branch、exception、serializing、system operation 排除，年轻 lane 仍走既有 complete prefix | 19 项相对 W01 `-0.6045%`；ROB 测试覆盖 wrap/epoch/flush、结果值和所有排除边界，并显式证明三宽 commit 能力；matching func58 三 seed 58/58 | Linux；matching implementation 联合评价周期与 ROB/IQ top-N |
 | `2894e04` / `3531af7` L05 direct/DMW pretranslation | 在已有 `scheduledLoad`/Store entry 寄存边界写入 ATU 动态 preview 的 PA、MAT 与 translationDone；TLB 路径和平台接口不变 | 19 项相对 W01+E02 `71,083,365 -> 62,580,196`（`-11.962249%`），19 项全部改善 | 与 W02 组合的完整 gates、func58/Linux 已通过；继续 matching route，不能继承旧 WNS |
 | `f2dfd1e` / `7f12340` W02 Load completion wakeup | LSQ 把已通过 identity/exception/write 资格的 Load completion 注册为 P3 early wake；backend 再检查 current epoch，复用原 wakeup lane 与 PRF write-through，不增加全局广播 lane | 19 项相对 L05 `62,580,196 -> 61,817,068`（约 `-1.219%`），18 项改善、`stream_copy` 持平；组合完整 gates、func58/Linux 已通过 | matching route；重点检查 completion-to-IQ path family |
+| `03a466a` W01+E02+L05+W02 diagnostic route | matching RTL `50b460f...`，100 MHz performance SoC bitstream 成功、DRC 0、hold `+0.053 ns` | setup `WNS/TNS -0.601/-85.196 ns`；前六条为 LSQ Store PA/order 到 IQ3 operand，route 约 75%，并经过 fanout 166 的 completion network；LUT `90,797` | 四项同时变化，不能单独归因 W02；用同配置只关闭 W02 做 matching route 消融 |
 
 Vivado 调度采用合并里程碑：同一轮可以并行准备多个高优先级、相互较独立的候选，但每项
 必须先有独立配置开关、同 workload/seed 的软件 A/B 和相关正确性回归。只把各自已有正收益、
@@ -544,6 +545,17 @@ IPC 为 `0.485744/0.485427/0.485758`，M01 守恒检查全部通过。counter ha
 `34108db6.../31adaf6f.../e693719c...`，矩阵摘要为
 `build/sim/runs/cpu_03a466a39d80_chiplab_c398d274812f/instrumented/random/matrix_702d500d09d1_summary.txt`。
 
+随后 workspace `ad148e9` 把 observer 扩展到 `nscc-m01-v7`，生产 RTL 不变。绑定
+`03a466a/50b460f...` 的 ideal-memory seed 0 四项矩阵
+`fireye_I2/coremark/quick_sort/inner_product` 全部通过并满足新增守恒式，retire IPC 为
+`0.3569/0.3175/0.3221/0.4355`。相邻 I-cache request 的最短 interval 为 3 cycles，3-cycle
+桶占 `81.69%/51.79%/68.41%/65.95%`；frontend empty 占
+`53.95%/24.32%/55.85%/36.53%`。matching branch recovery 的平均 execute-resolve 到
+commit-recovery latency 为 `1.89/3.59/2.31/6.63` cycles，累计 latency 相当于总窗口的
+`2.28%/1.97%/3.23%/0.05%`。由于窗口包含共同启动段，约 `1.19M` 次 uncached request
+不得算入 benchmark ROI 收益。结论是 F01/H03 与 B01 获得高优先级 ROI-aware 原型/测量资格；
+现有百分比仍只是含启动段的结构证据，不能直接预测最终 cycles。
+
 ## 4. P1：正确性 gate
 
 `C01-C08` 的优先级高于全部性能候选。下面的“通过”表示相应定向测试、现有门禁和受影响
@@ -724,8 +736,12 @@ cycle_speedup_upper = C0 / (C0 - opportunity_cycles)
    milestone 继承。
 7. L05、W02 已由 observer 机会计数进入独立实现和软件 A/B。L05 19 项全部改善并相对
    W01+E02 降低 `11.962249%`；W02 在其上再降低约 `1.219%`，18 项改善、1 项持平。
-   当前组合的完整 gates、func58 与 Linux 三 seed 已通过；继续 matching route。
-   两项归因绑定各自提交与 CSV，机会计数仍不直接代表 speedup。
+   当前组合的完整 gates、func58 与 Linux 三 seed 已通过；matching 100 MHz implementation
+   setup 为 `-0.601 ns`，不能板测。该 route 只能归因整体组合，W02 是否导致退化必须由
+   单变量关闭后的 matching route 判断。两项周期归因仍绑定各自提交与 CSV。
+8. M01 v7 表明 I-cache request 的结构最短间隔为 3 cycles，代表项前端 empty 比例为
+   `24.32%--55.85%`；分支 resolve-to-recovery 累计窗口在三项 branch-heavy workload 中约占
+   `1.97%--3.23%`。下一批提高 F01/H03 与 B01 优先级，同时保留启动段污染限定。
 
 ## 8. 单次 A/B 实验合同
 
@@ -828,7 +844,10 @@ WNS/TNS、top-N path 和资源后可继续下一轮微架构/时序协同修改�
 9. `nscc-m01-v6` 已关闭 L05/W02 observer：L05 分类四种翻译模式及 Load/Store owner，W02
    只接受 current-epoch、无异常且匹配有效 LQ 的 completion，并单列 P0--P2 保守子集。两项
    已按 L05 后 W02 的顺序完成独立实现和 19 项 paired A/B，当前组合完整 gates、func58
-   与 Linux 三 seed 已通过；matching 100 MHz route 是下一门禁。
+   与 Linux 三 seed 已通过；matching 100 MHz route setup 为 `-0.601 ns`，只作 diagnostic。
+10. `nscc-m01-v7` 在相同 RTL 上补齐 frontend interval、IQ/dispatch/issue 与 branch
+    resolve-to-recovery。四个代表项全部通过守恒检查；F01/H03 和 B01 进入下一轮高优先级，
+    但必须用 benchmark ROI 或 paired cycles 排除共同启动段影响。
 
 下一组合以 W01+E02 为已经独立归因的周期候选；L05/W02 已完成测量，按顺序分别 A/B 后决定
 是否成为新增独立候选。若加入时序候选，必须保持同拍语义、给出结构保留证明，并针对当前 ROB staged
