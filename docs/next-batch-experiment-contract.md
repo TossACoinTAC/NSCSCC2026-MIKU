@@ -15,11 +15,15 @@ Linux instrumented random-AXI 的三个 200 ms seed 已通过，perf20 的 19 �
 func58 三个固定 seed 已通过；`stringsearch` 留给组合 correctness/timing milestone。
 当前 route 结果未产生前，任何候选都不继承历史 WNS、资源或 top path。
 
+作为不改变官方固定矩阵的额外软件置信证据，当前 prepared model 又以 seed
+`17/65537/99991` 通过 func58 `58/58`，`num_data=0x3a00003a`、LED `1/1`，endpoint
+`0x1c00020c`，整段 cycles 为 `642766/642331/642589`；三份 verdict 和 DiffTest 均正常。
+
 ## Candidate Cards
 
 | ID | 假设与触发信号 | 首次实现边界 | 正确性门禁 | 进入合并实现的条件 |
 | --- | --- | --- | --- | --- |
-| L04 | Store translation 只在 `!loadNeedsTranslation` 时 lookahead；当前 Linux 三 seed 的 head Store translation 暴露约 `9.718M--9.765M` cycles，head request/response fire 各约 `4.66M--4.71M` | 只改变 Load/Store translation owner 的 age-aware 选择；保留单 owner、cancel、SC 和 exception 身份，不增加第二 walker | C04/C06 相关 LSQ/TLB/flush/uncached 回归；func58 三 seed；Linux instrumented 三 seed；代表 perf20 | 被移出 head 的 Store translation 周期增加，且 paired cycles 不退化；被推迟 Load 的额外等待单独报告；新 route 不使当前关键路径恶化到不可接受 |
+| L04 | Store translation 只在 `!loadNeedsTranslation` 时 lookahead；当前 Linux 三 seed 的 head Store translation 暴露约 `9.718M--9.765M` cycles，head request/response fire 各约 `4.66M--4.71M` | 只改变 Load/Store translation owner 的 age-aware 选择；保留单 owner、cancel、SC 和 exception 身份，不增加第二 walker | C04/C06 相关 LSQ/TLB/flush/uncached 回归；func58 固定三 seed并保留额外三 seed；Linux instrumented 三 seed；代表 perf20 | 被移出 head 的 Store translation 周期增加，且 paired cycles 不退化；被推迟 Load 的额外等待单独报告；新 route 不使当前关键路径恶化到不可接受 |
 | E02 | 当前 seed 1 有 `4,612,723` 个零退休周期为 head staged completion，理论最多省一拍 | 只研究 ROB head lane 的 exact pointer/epoch staged-completion bypass；不旁路年轻 commit lane，不改 completion source | ROB flush/epoch/wrap、精确异常、三宽 stop/recovery、所有 completion source；func58/Linux/代表 perf20 | head-only bubble 的 paired cycles 明确下降，且完整 SoC 的 ROB/commit 路径和 cycle×frequency 不劣于组合基线 |
 | D01 | P3 `portReady` 当前对 Load/Store 都要求 IQ 与 SDQ ready；SDQ 满时 Load 可能被无关阻塞 | 第一阶段只增加 `SDQ-full && P3 load candidate` 计数，不改变 router；第二阶段再按 Load/Store 类型拆分 ready，Store 仍保持 IQ+SDQ 原子接受 | Router prefix、Store 双队列原子性、flush/backpressure、LSQ/SDQ 定向和随机 AXI；func58/Linux/代表 perf20 | 计数确认有可观暴露且 paired cycles 有收益；否则不进入 RTL。新 ready 网络不得形成组合环或显著恶化 route |
 
