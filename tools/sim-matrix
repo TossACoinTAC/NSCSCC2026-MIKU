@@ -118,7 +118,7 @@ run_one() {
   local test_finish
   if [[ $workload != linux && -f $object_dir/main.elf ]]; then
     test_finish=$(PATH="$sim_path:$PATH" loongarch32r-linux-gnusf-readelf -s "$object_dir/main.elf" |
-      awk '$8 == "test_finish" {print $2; exit}')
+      awk '$8 == "test_finish" && !found {print $2; found = 1}')
     if [[ $test_finish =~ ^[0-9a-fA-F]+$ ]]; then
       printf -v end_pc '%x' "$((16#$test_finish + 0x30))"
     fi
