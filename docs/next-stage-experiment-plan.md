@@ -232,8 +232,8 @@ manifest。早期 endpoint 失败来自 c398 新 testbench 未消费 `--end-pc`�
 | `e622625` H02-D 16 KiB L1D | 默认 L1D 从 8 KiB 扩至 16 KiB，CPUCFG 同步更新；测试按实际初始化周期与 set 数参数化 | L1D `12/12`、配置/core/CSR 通过；代表 5 项相对上一候选 -0.0560%，无单项回退；当前组合 19 项相对 H01 合计 -3.1704% | 完整 gates、func58/Linux 和 matching route；检查额外存储是否进入 BRAM、是否加重 cache mux/布线 |
 | `b44eaff` W01 completion 回声抑制 | direct wakeup 已被 IQ 接受时，不再让同一 completion 在下一拍占用同 lane registered wakeup；不增加 wakeup lane | 19 项相对 milestone `-0.102375%`，17 项改善、2 项退化；matching func58 三 seed 58/58 | Linux；matching route 必须确认没有恶化当前 staged-wakeup 关键路径族 |
 | `08fbf11` E02 head completion bypass | exact pointer/current epoch 的普通 head staged completion 可提前一拍退休；branch、exception、serializing、system operation 排除，年轻 lane 仍走既有 complete prefix | 19 项相对 W01 `-0.6045%`；ROB 测试覆盖 wrap/epoch/flush、结果值和所有排除边界，并显式证明三宽 commit 能力；matching func58 三 seed 58/58 | Linux；matching implementation 联合评价周期与 ROB/IQ top-N |
-| L05 observer 通过 | `nscc-m01-v6` 分类 direct/DMW0/DMW1/TLB 的 Load/Store request，并累计 request-to-response latency 与 direct/DMW 老 Store 阻塞年轻 Load | 四项中非 TLB 占 `99.99990374%`，request 数相当于观测周期的 `12.0803%`；老 Store 严格阻塞占 `0.1861%` | 实现保留 `scheduledLoad` timing cut、同时覆盖 Load/Store 的独立 A/B；不能把 request 比例直接当作可消除周期 |
-| W02 observer 通过 | 对 current-epoch、无异常且匹配有效 LQ 的 Load completion，统计 IQ0--IQ3 中真实等待 pdst 的 consumer | `3,517,657` 次合格 completion 中，P0--P2 waiting-consumer 为 `2,922,347`（`83.0765%`） | L05 归因冻结后，再实现不扩大敏感广播网络的独立增量 A/B；P3 需单独证明数据旁路时序 |
+| `2894e04` / `3531af7` L05 direct/DMW pretranslation | 在已有 `scheduledLoad`/Store entry 寄存边界写入 ATU 动态 preview 的 PA、MAT 与 translationDone；TLB 路径和平台接口不变 | 19 项相对 W01+E02 `71,083,365 -> 62,580,196`（`-11.962249%`），19 项全部改善 | 与 W02 组合的完整 gates、func58 已通过；继续 Linux 与 matching route，不能继承旧 WNS |
+| `f2dfd1e` / `7f12340` W02 Load completion wakeup | LSQ 把已通过 identity/exception/write 资格的 Load completion 注册为 P3 early wake；backend 再检查 current epoch，复用原 wakeup lane 与 PRF write-through，不增加全局广播 lane | 19 项相对 L05 `62,580,196 -> 61,817,068`（约 `-1.219%`），18 项改善、`stream_copy` 持平；组合完整 gates、func58 已通过 | Linux 与 matching route；重点检查 completion-to-IQ path family |
 
 Vivado 调度采用合并里程碑：同一轮可以并行准备多个高优先级、相互较独立的候选，但每项
 必须先有独立配置开关、同 workload/seed 的软件 A/B 和相关正确性回归。只把各自已有正收益、
@@ -509,6 +509,33 @@ W02 共识别 `3,517,657` 次 current-epoch、无异常、有效 LQ identity 的
 把 `12.0803%` 与 `6.7962%` 相加成预期加速比。首次 RTL 实验先做 L05，再在其结果冻结后
 独立比较 W02，以保留归因并单独审计 P3 数据旁路。
 
+L05 随后以源提交 `2894e04`、published RTL 提交 `3531af7` 独立实现，RTL SHA-256 为
+`d6879d79985de52ef652ffdaea3b7261463fa2ca8f376d0566ef5784aa0c81d3`。实现只在既有
+`scheduledLoad` 与 Store-entry 边界使用 ATU 的动态 direct/DMW preview，不把 AGU 地址
+组合接入 L1D，也不改变 TLB fallback。相同 software、ideal memory、seed 0 的 19 个短
+perf20 项全部通过并全部改善，W01+E02 的 `71,083,365` 降到 `62,580,196` cycles，减少
+`8,503,169`（`-11.962249%`）。四项首轮证据为
+`build/sim/runs/cpu_3531af751f27_chiplab_c398d274812f/clean-perf20/ideal/matrix_7039a93958ba_perf20.csv`，
+其余 15 项为同目录 `matrix_3a5f5dab703f_perf20.csv`。
+
+W02 在 L05 结果冻结后以源提交 `f2dfd1e`、published RTL 提交 `7f12340` 独立增量实现，
+RTL SHA-256 为 `50b460f99c791d7033723e6023d16a8e904eb1dbb06f5857245ad3abe1ca43f8`。
+LSQ 只把 live identity 已匹配、无异常且写非零 pdst 的 Load completion 资格注册到现有 P3
+wakeup lane；backend 再做 current-epoch 检查。消费者提前 issue 后在下一拍从既有 PRF
+write-through 取得数据。资格在 completion 寄存器前形成，wakeup 当拍不再异步读取 LQ。
+LSQ `32/32`、backend dispatch `15/15`、cache integration `1/1`、core `14/14` 和 integration
+`4/4` 定向回归通过。19 项相对 L05 降至 `61,817,068`，减少 `763,128`（约 `-1.219%`）；
+18 项改善、`stream_copy` 持平。对应两份 CSV 位于
+`build/sim/runs/cpu_7f12340e090d_chiplab_c398d274812f/clean-perf20/ideal/`。L05+W02 相对
+W01+E02 合计减少 `9,266,297` cycles（约 `-13.036%`）。这些软件结果不携带旧版本的
+Linux、资源或 WNS 结论。组合 matching `make cpu-check` 随后通过 Scala/Verilator
+`189/189`、Python `364/364` 和 locked port/lint/Yosys/publication；lint 保持 876 条锁定
+warning、signature `b021ae6a...`。matching gate metadata 提交为 `03a466a`。matching clean
+func58 model hash 为 `5fef1d7cfa71118ad9f04130aa8519bac31184bd478baeffdd2c62510883499d`；
+random-AXI seeds `240/255/141` 均到达 endpoint 并通过 `58/58`，返回 `0x3a00003a`、LED
+`1/1`，无 DiffTest mismatch，cycles 分别为 `635293/635562/635932`。结构化结果位于
+`build/sim/runs/cpu_03a466a39d80_chiplab_c398d274812f/clean-func58/random/matrix_1892a80af7f5_func58.csv`。
+
 ## 4. P1：正确性 gate
 
 `C01-C08` 的优先级高于全部性能候选。下面的“通过”表示相应定向测试、现有门禁和受影响
@@ -687,9 +714,10 @@ cycle_speedup_upper = C0 / (C0 - opportunity_cycles)
    相对 W01 `-0.6045%`，组合相对 milestone `-0.7063%`；matching func58 三 seed 58/58。
    两项均保留；其 timing、Linux 和板测结论必须绑定后续 matching 组合 RTL，不能从
    milestone 继承。
-7. L05、W02 的 simulation-only observer 均已通过启动门槛。L05 非 TLB translation 占
-   `99.99990374%`；W02 P0--P2 waiting-consumer 占合格 completion 的 `83.0765%`。先做
-   L05 独立 A/B，再做 W02 独立增量 A/B；机会计数只用于排序，不直接代表 speedup。
+7. L05、W02 已由 observer 机会计数进入独立实现和软件 A/B。L05 19 项全部改善并相对
+   W01+E02 降低 `11.962249%`；W02 在其上再降低约 `1.219%`，18 项改善、1 项持平。
+   当前组合的完整 gates 与 func58 三 seed 已通过；继续 Linux 三 seed 和 matching route。
+   两项归因绑定各自提交与 CSV，机会计数仍不直接代表 speedup。
 
 ## 8. 单次 A/B 实验合同
 
@@ -791,7 +819,8 @@ WNS/TNS、top-N path 和资源后可继续下一轮微架构/时序协同修改�
    implementation 仍按本文门禁补齐，不将轻量软件结果写成完整验收。
 9. `nscc-m01-v6` 已关闭 L05/W02 observer：L05 分类四种翻译模式及 Load/Store owner，W02
    只接受 current-epoch、无异常且匹配有效 LQ 的 completion，并单列 P0--P2 保守子集。两项
-   都达到 RTL 启动门槛，按 L05 后 W02 的顺序做独立 A/B。
+   已按 L05 后 W02 的顺序完成独立实现和 19 项 paired A/B，当前组合完整 gates 与 func58
+   三 seed 已通过；Linux 三 seed 和 matching 100 MHz route 是下一门禁。
 
 下一组合以 W01+E02 为已经独立归因的周期候选；L05/W02 已完成测量，按顺序分别 A/B 后决定
 是否成为新增独立候选。若加入时序候选，必须保持同拍语义、给出结构保留证明，并针对当前 ROB staged

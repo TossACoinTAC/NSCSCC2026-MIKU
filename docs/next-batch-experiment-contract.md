@@ -45,8 +45,8 @@ build 为 `+0.978/+0.050 ns`，两种模式均为 0 DRC error 并成功生成 bi
 | L04（已停止） | Store translation 只在 `!loadNeedsTranslation` 时 lookahead；当前 Linux 三 seed 的 head Store translation 暴露约 `9.718M--9.765M` cycles，head request/response fire 各约 `4.66M--4.71M` | 只改变 Load/Store translation owner 的 age-aware 选择；保留单 owner、cancel、SC 和 exception 身份，不增加第二 walker | C04/C06 相关 LSQ/TLB/flush/uncached 回归；func58 固定三 seed并保留额外三 seed；Linux instrumented 三 seed；代表 perf20 | 被移出 head 的 Store translation 周期增加，且 paired cycles 不退化；被推迟 Load 的额外等待单独报告；新 route 不使当前关键路径恶化到不可接受 |
 | W01（软件 A/B 通过） | v5 observer 在四个代表项的 `43,190,065` 个观测周期中发现 `484,314` 个冲突且存在等待消费者的周期，占 `1.1214%` | 对已经成功 direct wakeup 的同 lane completion 回声做有界抑制；保留 registered/direct 仲裁优先级和原有 wakeup lane 数 | producer acceptance、flush、exactly-once wakeup、长依赖链与完整后端回归；func58/Linux/代表 perf20 | 19 项 paired cycles 有稳定正收益且无功能失败；不得用新增 wakeup lane 放大全局比较网 |
 | E02（软件 A/B 通过） | v5 observer 对四个代表项只统计 exact head/current-epoch staged completion，严格上界为 `7,454,851 / 43,190,065 = 17.2606%` | 仅允许普通 head 指令使用 matching staged completion 提前退休；年轻 lane 保持 `entry.complete` prefix，branch、exception、serializing 和 system operation 排除 | ROB flush/epoch/wrap、精确异常、三宽能力和所有排除边界；func58/Linux/代表 perf20 | head-only bubble 的 paired cycles 明确下降，且不增加 staged wakeup 扇出；完整 SoC 的 cycle×frequency 不劣于基线 |
-| L05（observer 通过） | 四个代表项 `5,194,524` 次 D-side translation 中只有 5 次走 TLB；direct/DMW 往返事件数相当于观测周期的 `12.0803%` | 在已有 `scheduledLoad`/Store entry 寄存边界填入运行时判定的 PA/MAT/translationDone；不把 AGU 组合地址直接接入 L1D | direct/DMW/TLB、Load/Store、PLV/MAT/DisableCache、CRMD/DMW 切换、flush/epoch、C04/C06 与 func/MMU/Linux | 先做 L05 独立 A/B；只有周期收益成立才允许与 W01/E02 合并 |
-| W02（observer 通过） | `3,517,657` 次合格 Load completion 中，`2,922,347` 次在 P0-P2 已有等待 consumer，占 completion 的 `83.0765%` | 第一版只考虑 current-epoch、无异常、有效 LQ identity 的 Load completion，并区分 P0-P2 与需要额外数据旁路审计的 P3 consumer | cache/forward/uncached、exception、flush/epoch、ROB/LQ reuse、completion collision、实际 operand data | L05 A/B 后再做 W02 独立增量 A/B；不得以 waiting count 直接宣称 cycle 收益 |
+| L05（软件 A/B 通过） | 四个代表项 `5,194,524` 次 D-side translation 中只有 5 次走 TLB；direct/DMW 往返事件数相当于观测周期的 `12.0803%` | `2894e04` 在已有 `scheduledLoad`/Store entry 寄存边界填入动态 PA/MAT/translationDone；不把 AGU 组合地址直接接入 L1D | ATU `6/6`、LSQ `32/32`、core `14/14`、integration `4/4`；19 项软件、组合完整 gates 与 func58 全过 | `71,083,365 -> 62,580,196`（`-11.962249%`）；保留并进入 Linux/时序门禁 |
+| W02（软件 A/B 通过） | `3,517,657` 次合格 Load completion 中，`2,922,347` 次在 P0-P2 已有等待 consumer，占 completion 的 `83.0765%` | `f2dfd1e` 注册 LSQ completion 资格，复用 P3 wakeup lane 与 PRF write-through；backend 检查 current epoch，不增加广播 lane | cache/forward、exception、flush/epoch、LQ reuse 和实际 operand data；LSQ `32/32`、backend `15/15`；组合完整 gates 与 func58 通过 | 相对 L05 `62,580,196 -> 61,817,068`（约 `-1.219%`）；18 项改善、1 项持平，进入 Linux/时序门禁 |
 | D01 | P3 `portReady` 当前对 Load/Store 都要求 IQ 与 SDQ ready；SDQ 满时 Load 可能被无关阻塞 | 第一阶段只增加 `SDQ-full && P3 load candidate` 计数，不改变 router；第二阶段再按 Load/Store 类型拆分 ready，Store 仍保持 IQ+SDQ 原子接受 | Router prefix、Store 双队列原子性、flush/backpressure、LSQ/SDQ 定向和随机 AXI；func58/Linux/代表 perf20 | 计数确认有可观暴露且 paired cycles 有收益；否则不进入 RTL。新 ready 网络不得形成组合环或显著恶化 route |
 
 每项都先独立提交、独立运行最小相关测试和代表 perf20；通过后才允许把多项放入一个组合
@@ -73,8 +73,9 @@ request/response fire 数相加作为收益：必须报告 Load 被推迟、ATU 
    直接停止 D01。
 3. v5 observer 已按 exact head/current epoch 精化 E02，并确认 W01 冲突中存在等待消费者。
    W01 与 E02 分别完成独立 RTL、定向测试和 19 项 paired perf20；二者均保留进入组合候选。
-4. L05/W02 的无扰动 perf20 observer 已证明两段都有高权重暴露。先做 L05 独立 A/B，再在其
-   结果冻结后做 W02 独立增量 A/B；禁止首次同时打开，以保留归因。
+4. L05/W02 已按 observer 排序完成独立 RTL 与 paired A/B。L05 19 项全部改善并降低
+   `11.962249%`；W02 在其上再降低约 `1.219%`，18 项改善、1 项持平。二者进入同一组合
+   correctness/timing gate，归因仍由独立提交和两组 CSV 保留。
 5. 只有具有独立、可复现正收益的候选才进入下一次合并 implementation；不为
    observer-only、已停止候选或负收益消融单独支付一次完整 Vivado。
 
@@ -140,6 +141,21 @@ W02 共识别 `3,517,657` 次 current-epoch、无异常、有效 LQ identity 的
 分别占 Load completion 的 `85.3110%/83.0765%`。P0--P2 保守机会数相当于观测周期的
 `6.7962%`。这些计数证明两项都值得进入独立 RTL A/B，但 translation 和 load-use 等待可被
 乱序执行隐藏，不能把 `12.0803%` 与 `6.7962%` 相加成预期加速比。
+
+L05 源提交 `2894e04`、published RTL `3531af7` 的 19 项短 perf20 从 W01+E02
+`71,083,365` 降到 `62,580,196`，减少 `8,503,169`（`-11.962249%`），19 项全部改善。
+W02 源提交 `f2dfd1e`、published RTL `7f12340` 在同一条件下进一步降到 `61,817,068`，
+减少 `763,128`（约 `-1.219%`），18 项改善、`stream_copy` 持平。W02 不增加 wakeup lane；
+LSQ 在 completion 入寄存器前锁定 identity/exception/write 资格，backend 检查 current epoch，
+consumer 通过既有 PRF write-through 得到实际数据。两项合计相对 W01+E02 约 `-13.036%`；
+这些周期结果本身不能替代 matching full gates、func58/Linux 或 100 MHz route。
+matching `make cpu-check` 已通过 Scala/Verilator `189/189`、Python `364/364` 和 locked
+port/lint/Yosys/publication；lint 仍为 876 条锁定 warning、signature `b021ae6a...`，gate
+metadata 提交为 `03a466a`。matching clean func58 model hash 为 `5fef1d7c...`；random-AXI
+seeds `240/255/141` 均通过 `58/58`，返回 `0x3a00003a`、LED `1/1`，无 DiffTest mismatch，
+cycles 分别为 `635293/635562/635932`。证据位于
+`build/sim/runs/cpu_03a466a39d80_chiplab_c398d274812f/clean-func58/random/matrix_1892a80af7f5_func58.csv`。
+Linux 与 100 MHz route 仍需按组合 HEAD 重新建立。
 
 ## Scheduling
 
