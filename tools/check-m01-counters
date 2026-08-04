@@ -18,7 +18,7 @@ try:
 except (OSError, json.JSONDecodeError) as error:
     fail(str(error))
 
-if counters.get("schema_version") != "nscc-m01-v2":
+if counters.get("schema_version") != "nscc-m01-v3":
     fail(f"unexpected schema {counters.get('schema_version')!r}")
 if counters.get("commit_observation_lag_cycles") != 4:
     fail("unexpected DiffTest commit observation lag")
@@ -41,7 +41,7 @@ if counters.get("unused_commit_slots") != 3 * cycles - instructions:
     fail("unused_commit_slots does not conserve commit width")
 
 invariants = counters.get("invariants", {})
-for name in ("retire_hist_cycles", "retire_hist_instructions", "commit_observation", "source_retire_alignment"):
+for name in ("retire_hist_cycles", "retire_hist_instructions", "commit_observation", "source_retire_alignment", "queue_identity"):
     if invariants.get(name) is not True:
         fail(f"invariant {name} is not true")
 if invariants.get("non_prefix_retire_cycles") != 0:
@@ -50,6 +50,8 @@ if invariants.get("sampling_protocol_errors") != 0:
     fail("monitor/DPI cycle alignment protocol failed")
 if invariants.get("source_retire_alignment_errors") != 0:
     fail("source snapshot retired width differs from its DiffTest commit packet")
+if invariants.get("queue_identity_mismatches") != 0:
+    fail("ROB head payload does not identify a matching LQ/SQ entry")
 zero = counters.get("zero_retire_loss", {})
 zero_total = sum(zero.get(name, 0) for name in (
     "recovery", "rob_empty", "head_incomplete", "head_complete_blocked", "unclassified"
@@ -60,6 +62,10 @@ if zero_total != hist[0]:
 head_incomplete = counters.get("head_incomplete_detail", {})
 if sum(head_incomplete.values()) != zero.get("head_incomplete"):
     fail("head-incomplete detail does not conserve its parent loss bucket")
+if sum(counters.get("store_translation_detail", {}).values()) != head_incomplete.get("store_translation"):
+    fail("store-translation detail does not conserve its parent bucket")
+if sum(counters.get("store_completion_detail", {}).values()) != head_incomplete.get("store_completion_to_rob"):
+    fail("store-completion detail does not conserve its parent bucket")
 head_complete = counters.get("head_complete_blocked_detail", {})
 if sum(head_complete.values()) != zero.get("head_complete_blocked"):
     fail("head-complete-blocked detail does not conserve its parent loss bucket")

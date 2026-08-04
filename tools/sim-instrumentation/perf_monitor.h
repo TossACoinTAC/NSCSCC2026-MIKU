@@ -34,6 +34,8 @@ private:
         bool refetch = false;
         std::uint8_t zero_reason = 1;
         std::uint8_t head_incomplete_reason = kNoReason;
+        std::uint8_t store_translation_reason = kNoReason;
+        std::uint8_t store_completion_reason = kNoReason;
         std::uint8_t head_complete_reason = kNoReason;
         std::uint8_t rob_occupancy = 0;
         std::uint8_t decode_valid = 0;
@@ -67,7 +69,10 @@ private:
     std::uint64_t recovery_cycles_ = 0;
     std::uint64_t recovery_cause_[8] = {0, 0, 0, 0, 0, 0, 0, 0};
     std::uint64_t zero_retire_[5] = {0, 0, 0, 0, 0};
-    std::uint64_t head_incomplete_[19] = {};
+    std::uint64_t head_incomplete_[23] = {};
+    std::uint64_t store_translation_[14] = {};
+    std::uint64_t store_completion_[9] = {};
+    std::uint64_t queue_identity_mismatches_ = 0;
     std::uint64_t head_complete_blocked_[6] = {};
     std::uint64_t exception_cycles_ = 0;
     std::uint64_t ertn_cycles_ = 0;

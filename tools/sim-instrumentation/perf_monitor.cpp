@@ -43,6 +43,9 @@ using Root = Vsimu_top___024root;
 #define BACKEND(name) SYS(NSCC_JOIN(backend__DOT__backend__DOT__backend__DOT__, name))
 #define ROB(name) BACKEND(NSCC_JOIN(rob__DOT__, name))
 #define LSQ(name) CLUSTER(NSCC_JOIN(loadStoreQueue__DOT__, name))
+#define LSQ_IO(name) CLUSTER(NSCC_JOIN(loadStoreQueue_io_, name))
+#define ATU(name) CORE(NSCC_JOIN(systemArea_addressTranslation__DOT__, name))
+#define ATU_TLB(name) ATU(NSCC_JOIN(area_tlb__DOT__, name))
 #define ISSUE(q, name) BACKEND(NSCC_JOIN(issueQueues_##q##__DOT__, name))
 #define ISSUE_COUNT(q) BACKEND(issueQueues_##q##__DOT__count)
 #define ISSUE_ENTRY(q, e, name) BACKEND(issueQueues_##q##__DOT__queue_##e##_##name)
@@ -109,6 +112,12 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
 
     if (snapshot.zero_reason == 2) {
         const std::uint8_t head_pointer = static_cast<std::uint8_t>(ROB(_zz_candidates_0_state_pointer) & 0x3fU);
+        const auto &head_payload = ROB(_zz___05Fzz_candidates_0_payload_pc);
+        const bool head_payload_ready = static_cast<bool>(ROB(_zz_candidates_0_state_payloadReady));
+        const bool head_is_load = ((head_payload[3] >> 7U) & 1U) != 0;
+        const bool head_is_store = ((head_payload[3] >> 8U) & 1U) != 0;
+        const unsigned head_load_index = (head_payload[3] >> 29U) & 0x7U;
+        const unsigned head_store_index = head_payload[4] & 0x7U;
         const bool load_valid[8] = {
             static_cast<bool>(LSQ(loads_0_valid)), static_cast<bool>(LSQ(loads_1_valid)),
             static_cast<bool>(LSQ(loads_2_valid)), static_cast<bool>(LSQ(loads_3_valid)),
@@ -183,34 +192,101 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
 
         bool classified = false;
         if (!ROB(_zz_candidates_0_state_valid_1)) {
-            snapshot.head_incomplete_reason = 12;
+            snapshot.head_incomplete_reason = 14;
             classified = true;
-        }
-        for (unsigned entry = 0; entry < 8 && !classified; entry++) {
-            if (load_valid[entry] && load_pointer[entry] == head_pointer) {
-                unsigned reason = !load_address[entry] ? 0 : !load_translation[entry] ? 1 :
-                    !load_sent[entry] ? 2 : !load_completed[entry] ? 3 : 4;
-                snapshot.head_incomplete_reason = static_cast<std::uint8_t>(reason);
-                classified = true;
+        } else if (!head_payload_ready) {
+            snapshot.head_incomplete_reason = 15;
+            classified = true;
+        } else if (head_is_load) {
+            const unsigned entry = head_load_index;
+            if (!load_valid[entry] || load_pointer[entry] != head_pointer) {
+                snapshot.head_incomplete_reason = 5;
+            } else {
+                snapshot.head_incomplete_reason = !load_address[entry] ? 0 :
+                    !load_translation[entry] ? 1 : !load_sent[entry] ? 2 :
+                    !load_completed[entry] ? 3 : 4;
             }
-        }
-        for (unsigned entry = 0; entry < 8 && !classified; entry++) {
-            if (store_valid[entry] && store_pointer[entry] == head_pointer) {
-                unsigned reason = !store_address[entry] ? 5 : !store_data[entry] ? 6 :
-                    !store_translation[entry] ? 7 :
-                    (store_uncached[entry] && store_sent[entry] && !store_completed[entry]) ? 8 : 9;
-                snapshot.head_incomplete_reason = static_cast<std::uint8_t>(reason);
-                classified = true;
+            classified = true;
+        } else if (head_is_store) {
+            const unsigned entry = head_store_index;
+            if (!store_valid[entry] || store_pointer[entry] != head_pointer) {
+                snapshot.head_incomplete_reason = 11;
+            } else if (!store_address[entry]) {
+                snapshot.head_incomplete_reason = 6;
+            } else if (!store_data[entry]) {
+                snapshot.head_incomplete_reason = 7;
+            } else if (!store_translation[entry]) {
+                snapshot.head_incomplete_reason = 8;
+                if (static_cast<unsigned>(LSQ(storeHead)) != entry) {
+                    snapshot.store_translation_reason = 0;
+                } else if (LSQ(translationCancelPending)) {
+                    snapshot.store_translation_reason = 1;
+                } else if (LSQ(translationActive)) {
+                    if (LSQ(translationOwnerStore) &&
+                        static_cast<unsigned>(LSQ(translationOwnerStoreIndex)) == entry &&
+                        static_cast<std::uint8_t>(LSQ(translationOwnerRobPointer)) == head_pointer) {
+                        if (LSQ_IO(translationResponse_valid)) {
+                            snapshot.store_translation_reason = LSQ(translationResponseFire) ? 7 : 6;
+                        } else if (ATU_TLB(area_dataWalkPending)) {
+                            snapshot.store_translation_reason = 3;
+                        } else if (ATU_TLB(area_dataProbePending)) {
+                            snapshot.store_translation_reason = 2;
+                        } else if (ATU(area_dataSearchPending)) {
+                            snapshot.store_translation_reason = 4;
+                        } else if (ATU(area_dataResponseValid)) {
+                            snapshot.store_translation_reason = 5;
+                        } else {
+                            snapshot.store_translation_reason = 8;
+                        }
+                    } else if (LSQ(translationOwnerStore)) {
+                        snapshot.store_translation_reason = 9;
+                    } else {
+                        snapshot.store_translation_reason = 10;
+                    }
+                } else if (LSQ(translationRequestFire)) {
+                    snapshot.store_translation_reason = 11;
+                } else if (LSQ_IO(translationRequest_valid)) {
+                    snapshot.store_translation_reason = 12;
+                } else {
+                    snapshot.store_translation_reason = 13;
+                }
+            } else if (store_uncached[entry] && !store_completed[entry]) {
+                snapshot.head_incomplete_reason = store_sent[entry] ? 9 : 22;
+            } else {
+                snapshot.head_incomplete_reason = 10;
+                if (static_cast<unsigned>(LSQ(storeHead)) != entry) {
+                    snapshot.store_completion_reason = 0;
+                } else if (!store_completed[entry]) {
+                    if (LSQ(storeCompletionFire)) {
+                        snapshot.store_completion_reason = 3;
+                    } else if (LSQ(storeCompletionCandidate)) {
+                        snapshot.store_completion_reason = LSQ(forwardCandidate) ? 2 : 1;
+                    } else {
+                        snapshot.store_completion_reason = 8;
+                    }
+                } else if (LSQ(completionValid) &&
+                           static_cast<std::uint8_t>(LSQ(completion_robPointer)) == head_pointer) {
+                    snapshot.store_completion_reason = 4;
+                } else if ((CLUSTER(execution_io_completionValid) & (1U << 3)) != 0 &&
+                           static_cast<std::uint8_t>(CLUSTER(execution_io_completion_3_robPointer)) == head_pointer) {
+                    snapshot.store_completion_reason = 5;
+                } else if ((ROB(stagedCompletionValid) & ROB(stagedCompletionCurrent) & (1U << 3)) != 0 &&
+                           static_cast<std::uint8_t>(ROB(stagedRobPointer_3)) == head_pointer) {
+                    snapshot.store_completion_reason = 6;
+                } else {
+                    snapshot.store_completion_reason = 7;
+                }
             }
+            classified = true;
         }
         if (!classified && divider_busy &&
             static_cast<std::uint8_t>(CLUSTER(execution__DOT__divider__DOT__uop_robPointer)) == head_pointer) {
-            snapshot.head_incomplete_reason = 10;
+            snapshot.head_incomplete_reason = 12;
             classified = true;
         }
         if (!classified && static_cast<bool>(CLUSTER(execution__DOT__multiplier__DOT__valid)) &&
             static_cast<std::uint8_t>(CLUSTER(execution__DOT__multiplier__DOT__uop_robPointer)) == head_pointer) {
-            snapshot.head_incomplete_reason = 11;
+            snapshot.head_incomplete_reason = 13;
             classified = true;
         }
         const unsigned issue_count[4] = {
@@ -237,7 +313,7 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
             for (unsigned entry = 0; entry < issue_count[queue] && !classified; entry++) {
                 if (issue_pointer[queue][entry] == head_pointer) {
                     snapshot.head_incomplete_reason =
-                        (ready_maps[queue] & (1U << entry)) != 0 ? 14 : 13;
+                        (ready_maps[queue] & (1U << entry)) != 0 ? 17 : 16;
                     classified = true;
                 }
             }
@@ -252,7 +328,7 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
             static_cast<std::uint8_t>(ROB(stagedRobPointer_4))};
         for (unsigned lane = 0; lane < 5 && !classified; lane++) {
             if ((staged_valid & (1U << lane)) != 0 && staged_pointer[lane] == head_pointer) {
-                snapshot.head_incomplete_reason = 15;
+                snapshot.head_incomplete_reason = 18;
                 classified = true;
             }
         }
@@ -264,7 +340,7 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
             static_cast<std::uint8_t>(BACKEND(issueOperandUop_3_robPointer))};
         for (unsigned port = 0; port < 4 && !classified; port++) {
             if ((operand_valid & (1U << port)) != 0 && operand_pointer[port] == head_pointer) {
-                snapshot.head_incomplete_reason = 16;
+                snapshot.head_incomplete_reason = 19;
                 classified = true;
             }
         }
@@ -278,12 +354,12 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
             static_cast<std::uint8_t>(BACKEND(issueAddressUop_2_robPointer))};
         for (unsigned stage = 0; stage < 3 && !classified; stage++) {
             if (address_valid[stage] && address_pointer[stage] == head_pointer) {
-                snapshot.head_incomplete_reason = 17;
+                snapshot.head_incomplete_reason = 20;
                 classified = true;
             }
         }
         if (!classified) {
-            snapshot.head_incomplete_reason = 18;
+            snapshot.head_incomplete_reason = 21;
         }
     }
 
@@ -423,6 +499,14 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot, std::uint8_
         if (snapshot.head_incomplete_reason != kNoReason) {
             head_incomplete_[snapshot.head_incomplete_reason]++;
         }
+        if (snapshot.store_translation_reason != kNoReason) {
+            store_translation_[snapshot.store_translation_reason]++;
+        }
+        if (snapshot.store_completion_reason != kNoReason) {
+            store_completion_[snapshot.store_completion_reason]++;
+        }
+        queue_identity_mismatches_ += bit(snapshot.head_incomplete_reason == 5 ||
+                                          snapshot.head_incomplete_reason == 11);
         if (snapshot.head_complete_reason != kNoReason) {
             head_complete_blocked_[snapshot.head_complete_reason]++;
         }
@@ -494,7 +578,7 @@ void PerfMonitor::write_json(const char *path) const {
     const bool commit_count_ok = observed_instructions_ == sampled_instructions_;
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v2\",\n");
+    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v3\",\n");
     std::fprintf(file, "  \"roi\": \"difftest-observation-window-source-aligned\",\n");
     std::fprintf(file, "  \"commit_observation_lag_cycles\": %u,\n", kCommitObservationLag);
     std::fprintf(file, "  \"cycles\": %llu,\n", static_cast<unsigned long long>(cycles_));
@@ -516,17 +600,33 @@ void PerfMonitor::write_json(const char *path) const {
                  static_cast<unsigned long long>(zero_retire_[0]), static_cast<unsigned long long>(zero_retire_[1]),
                  static_cast<unsigned long long>(zero_retire_[2]), static_cast<unsigned long long>(zero_retire_[3]),
                  static_cast<unsigned long long>(zero_retire_[4]));
-    std::fprintf(file, "  \"head_incomplete_detail\": {\"load_address\": %llu, \"load_translation\": %llu, \"load_order_or_request\": %llu, \"load_response\": %llu, \"load_completion_to_rob\": %llu, \"store_address\": %llu, \"store_data\": %llu, \"store_translation\": %llu, \"store_uncached_response\": %llu, \"store_completion_to_rob\": %llu, \"divider\": %llu, \"multiplier\": %llu, \"rob_candidate_not_valid\": %llu, \"issue_operand_wait\": %llu, \"issue_ready_wait\": %llu, \"rob_staged_completion\": %llu, \"issue_operand_stage\": %llu, \"issue_address_stage\": %llu, \"execution_dispatch_or_untracked\": %llu},\n",
+    std::fprintf(file, "  \"head_incomplete_detail\": {\"load_address\": %llu, \"load_translation\": %llu, \"load_order_or_request\": %llu, \"load_response\": %llu, \"load_completion_to_rob\": %llu, \"load_queue_identity_mismatch\": %llu, \"store_address\": %llu, \"store_data\": %llu, \"store_translation\": %llu, \"store_uncached_request\": %llu, \"store_uncached_response\": %llu, \"store_completion_to_rob\": %llu, \"store_queue_identity_mismatch\": %llu, \"divider\": %llu, \"multiplier\": %llu, \"rob_candidate_not_valid\": %llu, \"rob_payload_not_ready\": %llu, \"issue_operand_wait\": %llu, \"issue_ready_wait\": %llu, \"rob_staged_completion\": %llu, \"issue_operand_stage\": %llu, \"issue_address_stage\": %llu, \"execution_dispatch_or_untracked\": %llu},\n",
                  static_cast<unsigned long long>(head_incomplete_[0]), static_cast<unsigned long long>(head_incomplete_[1]),
                  static_cast<unsigned long long>(head_incomplete_[2]), static_cast<unsigned long long>(head_incomplete_[3]),
                  static_cast<unsigned long long>(head_incomplete_[4]), static_cast<unsigned long long>(head_incomplete_[5]),
                  static_cast<unsigned long long>(head_incomplete_[6]), static_cast<unsigned long long>(head_incomplete_[7]),
-                 static_cast<unsigned long long>(head_incomplete_[8]), static_cast<unsigned long long>(head_incomplete_[9]),
-                 static_cast<unsigned long long>(head_incomplete_[10]), static_cast<unsigned long long>(head_incomplete_[11]),
+                 static_cast<unsigned long long>(head_incomplete_[8]), static_cast<unsigned long long>(head_incomplete_[22]),
+                 static_cast<unsigned long long>(head_incomplete_[9]), static_cast<unsigned long long>(head_incomplete_[10]),
+                 static_cast<unsigned long long>(head_incomplete_[11]),
                  static_cast<unsigned long long>(head_incomplete_[12]), static_cast<unsigned long long>(head_incomplete_[13]),
                  static_cast<unsigned long long>(head_incomplete_[14]), static_cast<unsigned long long>(head_incomplete_[15]),
                  static_cast<unsigned long long>(head_incomplete_[16]), static_cast<unsigned long long>(head_incomplete_[17]),
-                 static_cast<unsigned long long>(head_incomplete_[18]));
+                 static_cast<unsigned long long>(head_incomplete_[18]), static_cast<unsigned long long>(head_incomplete_[19]),
+                 static_cast<unsigned long long>(head_incomplete_[20]), static_cast<unsigned long long>(head_incomplete_[21]));
+    std::fprintf(file, "  \"store_translation_detail\": {\"older_store_queue_entry\": %llu, \"cancel_pending\": %llu, \"active_head_tlb_probe\": %llu, \"active_head_tlb_walk\": %llu, \"active_head_atu_search\": %llu, \"active_head_atu_response\": %llu, \"active_head_response_blocked\": %llu, \"active_head_response_fire\": %llu, \"active_head_other\": %llu, \"active_other_store\": %llu, \"active_load\": %llu, \"request_fire\": %llu, \"request_blocked\": %llu, \"request_not_formed\": %llu},\n",
+                 static_cast<unsigned long long>(store_translation_[0]), static_cast<unsigned long long>(store_translation_[1]),
+                 static_cast<unsigned long long>(store_translation_[2]), static_cast<unsigned long long>(store_translation_[3]),
+                 static_cast<unsigned long long>(store_translation_[4]), static_cast<unsigned long long>(store_translation_[5]),
+                 static_cast<unsigned long long>(store_translation_[6]), static_cast<unsigned long long>(store_translation_[7]),
+                 static_cast<unsigned long long>(store_translation_[8]), static_cast<unsigned long long>(store_translation_[9]),
+                 static_cast<unsigned long long>(store_translation_[10]), static_cast<unsigned long long>(store_translation_[11]),
+                 static_cast<unsigned long long>(store_translation_[12]), static_cast<unsigned long long>(store_translation_[13]));
+    std::fprintf(file, "  \"store_completion_detail\": {\"older_store_queue_entry\": %llu, \"blocked_by_data_response\": %llu, \"blocked_by_load_forward\": %llu, \"completion_fire\": %llu, \"lsq_completion_register\": %llu, \"execution_lane3\": %llu, \"rob_staged_lane3\": %llu, \"completed_waiting_other\": %llu, \"candidate_not_ready\": %llu},\n",
+                 static_cast<unsigned long long>(store_completion_[0]), static_cast<unsigned long long>(store_completion_[1]),
+                 static_cast<unsigned long long>(store_completion_[2]), static_cast<unsigned long long>(store_completion_[3]),
+                 static_cast<unsigned long long>(store_completion_[4]), static_cast<unsigned long long>(store_completion_[5]),
+                 static_cast<unsigned long long>(store_completion_[6]), static_cast<unsigned long long>(store_completion_[7]),
+                 static_cast<unsigned long long>(store_completion_[8]));
     std::fprintf(file, "  \"head_complete_blocked_detail\": {\"redirect\": %llu, \"payload_not_ready\": %llu, \"exception\": %llu, \"serializing\": %llu, \"commit_offered_not_observed\": %llu, \"other\": %llu},\n",
                  static_cast<unsigned long long>(head_complete_blocked_[0]), static_cast<unsigned long long>(head_complete_blocked_[1]),
                  static_cast<unsigned long long>(head_complete_blocked_[2]), static_cast<unsigned long long>(head_complete_blocked_[3]),
@@ -566,10 +666,12 @@ void PerfMonitor::write_json(const char *path) const {
     std::fprintf(file, "  },\n");
     std::fprintf(file, "  \"axi_error\": {\"bresp\": %llu, \"rresp\": %llu},\n",
                  static_cast<unsigned long long>(axi_error_[0]), static_cast<unsigned long long>(axi_error_[1]));
-    std::fprintf(file, "  \"invariants\": {\"retire_hist_cycles\": %s, \"retire_hist_instructions\": %s, \"commit_observation\": %s, \"source_retire_alignment\": %s, \"source_retire_alignment_errors\": %llu, \"sampling_protocol_errors\": %llu, \"non_prefix_retire_cycles\": %llu, \"commit_offer_vs_retired_cycles\": %llu}\n",
+    std::fprintf(file, "  \"invariants\": {\"retire_hist_cycles\": %s, \"retire_hist_instructions\": %s, \"commit_observation\": %s, \"source_retire_alignment\": %s, \"queue_identity\": %s, \"queue_identity_mismatches\": %llu, \"source_retire_alignment_errors\": %llu, \"sampling_protocol_errors\": %llu, \"non_prefix_retire_cycles\": %llu, \"commit_offer_vs_retired_cycles\": %llu}\n",
                  hist_cycles_ok ? "true" : "false", hist_instructions_ok ? "true" : "false",
                  commit_count_ok ? "true" : "false",
                  source_retire_alignment_errors_ == 0 ? "true" : "false",
+                 queue_identity_mismatches_ == 0 ? "true" : "false",
+                 static_cast<unsigned long long>(queue_identity_mismatches_),
                  static_cast<unsigned long long>(source_retire_alignment_errors_),
                  static_cast<unsigned long long>(sampling_protocol_errors_), static_cast<unsigned long long>(non_prefix_retire_),
                  static_cast<unsigned long long>(commit_offer_vs_retired_cycles_));
