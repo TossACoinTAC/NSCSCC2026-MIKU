@@ -51,6 +51,13 @@ AXI_SEED ?= 5570815
 PERF_CPU_MHZ ?= 100
 SIM_CONFIG_ARGS ?= --run $(RUN_SOFTWARE) --disable-simu-trace --output-uart-info --dump-fst
 WAVE ?= $(SIM_DIR)/log/$(RUN_SOFTWARE)_log/simu_trace.fst
+SIM_PROFILE ?= clean
+SIM_WORKLOADS ?= $(RUN_SOFTWARE)
+SIM_SEEDS ?= $(AXI_SEED)
+SIM_LANES ?= 2
+SIM_ALLOW_THREE ?= 0
+SIM_LANE_PEAK_MB ?=
+SIM_PREPARE_CONFIG_ARGS ?= --run $(SIM_WORKLOADS) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst
 
 CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
 OFFICIAL_CI_TEMPLATE_COMMIT ?= 6915882af5c8d3a0c856f570cb914920a3e5ff99
@@ -58,7 +65,7 @@ OFFICIAL_CI_TEMPLATE_URL ?= ssh://git@111.4.16.59:63222/2026nscsccteam/ci-templa
 MAIN_CPU_COMMIT ?= d9bab16ef46540eb3348b0781afc4d0949f28adc
 
 .PHONY: help doctor toolchain-check chiplab-toolchains status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-test cpu-check cpu-generate chiplab-sync \
-	sim-configure sim-build sim-run sim wave soc-project soc-impl soc-timing \
+	sim-configure sim-build sim-run sim sim-prepare sim-matrix wave soc-project soc-impl soc-timing \
 	soc-func soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
 	soc-archive soc-incremental-archive
 
@@ -80,6 +87,8 @@ help:
 		'  make cpu-generate    Generate and publish mycpu_top.v from SpinalHDL' \
 		'  make chiplab-sync    Generate CPU RTL and copy it into Chiplab IP/myCPU' \
 		'  make sim              Build software/model and run Verilator' \
+		'  make sim-prepare      Build one isolated, hash-locked Verilator model/profile' \
+		'  make sim-matrix       Run prepared workloads/seeds in isolated runtime directories' \
 		'  make wave             Open WAVE in Windows Surfer' \
 		'  make soc-project      Recreate the local nscscc-team Vivado project' \
 		'  make soc-func         Run a clean isolated functional-test SoC implementation' \
@@ -94,6 +103,7 @@ help:
 		'' \
 		'Common overrides:' \
 		'  RUN_SOFTWARE=func/func_lab19  TIME_LIMIT=1300000  JOBS=8  AXI_SEED=5570815' \
+		'  SIM_PROFILE=clean|instrumented  SIM_WORKLOADS=a,b  SIM_SEEDS=1,2  SIM_LANES=2' \
 		'  PERF_CPU_MHZ=100' \
 		'  SOC_ARCHIVE_CLASS=candidate|stable' \
 		'  SOC_TIMING_POLICY=strict|report  (report is only for comparison artifacts)' \
@@ -332,6 +342,34 @@ sim-run: sim-build
 		TIME_LIMIT="$(TIME_LIMIT)" BUS_DELAY_RANDOM_SEED="$(AXI_SEED)"
 
 sim: sim-run
+
+sim-prepare: cpu-generate chiplab-toolchains
+	"$(ROOT_DIR)/tools/sim-prepare" \
+		--workspace "$(ROOT_DIR)" \
+		--cpu-dir "$(CPU_DIR)" \
+		--chiplab-dir "$(CHIPLAB_HOME)" \
+		--chiplab-commit "$(CHIPLAB_COMMIT)" \
+		--profile "$(SIM_PROFILE)" \
+		--workloads "$(SIM_WORKLOADS)" \
+		--config-args "$(SIM_PREPARE_CONFIG_ARGS)" \
+		--jobs "$(JOBS)" \
+		--sim-path "$(SIM_PATH)" \
+		--verilator-home "$(VERILATOR_HOME)" \
+		--extra-libs "$(SIM_EXTRA_LIBS)"
+
+sim-matrix:
+	"$(ROOT_DIR)/tools/sim-matrix" \
+		--workspace "$(ROOT_DIR)" \
+		--cpu-dir "$(CPU_DIR)" \
+		--chiplab-commit "$(CHIPLAB_COMMIT)" \
+		--profile "$(SIM_PROFILE)" \
+		--workloads "$(SIM_WORKLOADS)" \
+		--seeds "$(SIM_SEEDS)" \
+		--lanes "$(SIM_LANES)" \
+		--time-limit "$(TIME_LIMIT)" \
+		--sim-path "$(SIM_PATH)" \
+		--allow-three "$(SIM_ALLOW_THREE)" \
+		--lane-peak-mb "$(SIM_LANE_PEAK_MB)"
 
 wave:
 	@test -f "$(WAVE)" || { printf 'waveform not found: %s\n' "$(WAVE)" >&2; exit 1; }

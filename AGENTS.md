@@ -233,7 +233,8 @@ validation.
 ## Local Scala Toolchain
 
 The only supported local Scala/simulation entry points are the root
-`make cpu-test`, `make cpu-check`, `make cpu-generate`, and `make sim` targets. Use
+`make cpu-test`, `make cpu-check`, `make cpu-generate`, `make sim`,
+`make sim-prepare`, and `make sim-matrix` targets. Use
 `make cpu-test CPU_TEST=<fully-qualified-suite>` for a focused Scala contract. Do not call a
 system `sbt` or `verilator`, prepend an ad hoc `/tmp` directory, or switch tool
 versions to work around a failure. Run `make toolchain-check` when diagnosing
@@ -408,6 +409,14 @@ the nested repositories remain authoritative for implementation details.
 - `make cpu-generate`: generate and publish `mycpu_top.v` through SpinalHDL.
 - `make sim RUN_SOFTWARE=func/func_lab19`: synchronize generated RTL and run
   Chiplab Verilator simulation.
+- `make sim-prepare SIM_PROFILE=clean SIM_WORKLOADS=func/func_lab19`: create a
+  clean c398 snapshot, generate RTL once, and compile a hash-locked model plus
+  software inputs without modifying the active Chiplab worktree.
+- `make sim-matrix SIM_PROFILE=clean SIM_WORKLOADS=func/func_lab19
+  SIM_SEEDS=1,19557 SIM_LANES=2`: reuse the prepared read-only model while each
+  workload/seed/time-limit runs with independent RAM, temporary files, logs,
+  verdict, and resource measurements. Three lanes require the documented
+  measured-memory opt-in; a process exit code of zero is not by itself a pass.
 - `make wave`: open the default FST in host Surfer; override `WAVE=...` as needed.
 - `make soc-impl`: create and implement the local complete SoC at the default
   100 MHz CPU target in Vivado 2023.2. Override `PERF_CPU_MHZ` only for an

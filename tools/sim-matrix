@@ -1,0 +1,193 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf '%s\n' \
+    'usage: sim-matrix --workspace DIR --cpu-dir DIR --chiplab-commit HASH' \
+    '                  --profile clean|instrumented --workloads CSV --seeds CSV' \
+    '                  --lanes N --time-limit N --sim-path PATH [lane-3 evidence]'
+}
+
+workspace=
+cpu_dir=
+chiplab_commit=
+profile=
+workloads=
+seeds=
+lanes=
+time_limit=
+sim_path=
+allow_three=0
+lane_peak_mb=
+
+while (($#)); do
+  case "$1" in
+    --workspace) workspace=$2; shift 2 ;;
+    --cpu-dir) cpu_dir=$2; shift 2 ;;
+    --chiplab-commit) chiplab_commit=$2; shift 2 ;;
+    --profile) profile=$2; shift 2 ;;
+    --workloads) workloads=$2; shift 2 ;;
+    --seeds) seeds=$2; shift 2 ;;
+    --lanes) lanes=$2; shift 2 ;;
+    --time-limit) time_limit=$2; shift 2 ;;
+    --sim-path) sim_path=$2; shift 2 ;;
+    --allow-three) allow_three=$2; shift 2 ;;
+    --lane-peak-mb) lane_peak_mb=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+for value in workspace cpu_dir chiplab_commit profile workloads seeds lanes time_limit sim_path; do
+  if [[ -z ${!value} ]]; then
+    printf 'missing required value: %s\n' "$value" >&2
+    exit 2
+  fi
+done
+if [[ $profile != clean && $profile != instrumented ]]; then
+  printf 'SIM_PROFILE must be clean or instrumented, got %s\n' "$profile" >&2
+  exit 2
+fi
+if [[ ! $lanes =~ ^[1-3]$ ]]; then
+  printf 'SIM_LANES must be 1, 2, or 3\n' >&2
+  exit 2
+fi
+if [[ ! $time_limit =~ ^[0-9]+$ ]]; then
+  printf 'TIME_LIMIT must be a nonnegative integer\n' >&2
+  exit 2
+fi
+if [[ $lanes == 3 ]]; then
+  available_mb=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
+  if [[ $allow_three != 1 || ! $lane_peak_mb =~ ^[0-9]+$ || $lane_peak_mb -ge 2560 || $available_mb -le 6144 ]]; then
+    printf '%s\n' \
+      "SIM_LANES=3 requires SIM_ALLOW_THREE=1, measured SIM_LANE_PEAK_MB<2560," \
+      "and current MemAvailable>6144 MiB (peak=${lane_peak_mb:-unset}, available=$available_mb)" >&2
+    exit 2
+  fi
+fi
+
+cpu_commit=$(git -C "$cpu_dir" rev-parse HEAD)
+cpu_short=${cpu_commit:0:12}
+prepared="$workspace/build/sim/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$profile"
+manifest="$prepared/sim-prepared-manifest.txt"
+run_prog="$prepared/sims/verilator/run_prog"
+model="$run_prog/output"
+if [[ ! -f $manifest || ! -x $model ]]; then
+  printf 'prepared model not found for current CPU/profile: %s\n' "$prepared" >&2
+  printf 'run make sim-prepare first\n' >&2
+  exit 1
+fi
+grep -Fxq "cpu_commit=$cpu_commit" "$manifest"
+grep -Fxq "chiplab_commit=$chiplab_commit" "$manifest"
+grep -Fxq "profile=$profile" "$manifest"
+expected_model_sha=$(awk -F= '$1 == "model_sha256" {print $2}' "$manifest")
+actual_model_sha=$(sha256sum "$model" | awk '{print $1}')
+if [[ $actual_model_sha != "$expected_model_sha" ]]; then
+  printf 'prepared model hash mismatch: expected %s, got %s\n' "$expected_model_sha" "$actual_model_sha" >&2
+  exit 1
+fi
+expected_rtl_sha=$(awk -F= '$1 == "rtl_sha256" {print $2}' "$manifest")
+actual_rtl_sha=$(sha256sum "$cpu_dir/rtl/mycpu_top.v" | awk '{print $1}')
+if [[ $actual_rtl_sha != "$expected_rtl_sha" ]]; then
+  printf 'current generated RTL differs from the prepared model; run make sim-prepare again\n' >&2
+  exit 1
+fi
+
+run_root="$workspace/build/sim/runs/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$profile"
+mkdir -p "$run_root"
+IFS=',' read -r -a workload_list <<< "$workloads"
+IFS=',' read -r -a seed_list <<< "$seeds"
+
+run_one() {
+  local workload=$1
+  local seed=$2
+  local slug=${workload//\//__}
+  local lane_dir="$run_root/$slug/seed_$seed/limit_${time_limit}ns"
+  local object_dir="$run_prog/obj/${workload}_obj/obj"
+  if [[ ! -f $object_dir/rom.vlog ]]; then
+    printf 'prepared software image missing: %s\n' "$object_dir/rom.vlog" >&2
+    return 1
+  fi
+  mkdir -p "$lane_dir/logs"
+  install -m 0644 "$object_dir/rom.vlog" "$lane_dir/rom.vlog"
+  install -m 0644 "$object_dir/rom.vlog" "$lane_dir/ram.dat"
+  if [[ -f $run_prog/log/${workload}_log/golden_trace.txt ]]; then
+    install -m 0644 "$run_prog/log/${workload}_log/golden_trace.txt" "$lane_dir/golden_trace.txt"
+  fi
+  {
+    printf 'format=nscc-sim-run-v1\n'
+    printf 'cpu_commit=%s\n' "$cpu_commit"
+    printf 'chiplab_commit=%s\n' "$chiplab_commit"
+    printf 'profile=%s\n' "$profile"
+    printf 'workload=%s\n' "$workload"
+    printf 'axi_seed=%s\n' "$seed"
+    printf 'time_limit=%s\n' "$time_limit"
+    printf 'model_sha256=%s\n' "$actual_model_sha"
+    printf 'software_rom_sha256=%s\n' "$(sha256sum "$object_dir/rom.vlog" | awk '{print $1}')"
+  } > "$lane_dir/run-manifest.txt"
+  (
+    cd "$lane_dir"
+    set +e
+    CHIPLAB_HOME="$prepared" PATH="$sim_path:$PATH" /usr/bin/time -v \
+      "$model" \
+      --simu-bus-delay --simu-bus-delay-random-seed "$seed" \
+      --dump-delay 0 --dump-waveform 0 --time-limit "$time_limit" \
+      --save-bp-time 0 --ram-save-bp-file none --top-save-bp-file none \
+      --restore-bp-time 0 --ram-restore-bp-file none --top-restore-bp-file none \
+      --end-pc 1c000010 --fork-child 0 \
+      > run.log 2> run.stderr.log
+    model_result=$?
+    set -e
+    printf '%s\n' "$model_result" > model-exit-code.txt
+    result=$model_result
+    verdict=pass
+    if grep -Eqi 'Error\(Code:|different at pc|Store commit wrong|difftest.*(abort|mismatch)' run.log run.stderr.log; then
+      result=1
+      verdict=difftest-or-trace-error
+    elif [[ $workload == linux ]]; then
+      if ! grep -Fq 'Time limit exceeded.' run.stderr.log; then
+        result=1
+        verdict=linux-window-did-not-reach-time-limit
+      fi
+    elif ! grep -Fq 'Reached test end PC.' run.stderr.log; then
+      result=1
+      verdict=expected-endpoint-not-reached
+    fi
+    printf '%s\n' "$verdict" > verdict.txt
+    printf '%s\n' "$result" > exit-code.txt
+    exit "$result"
+  )
+}
+
+active=0
+status=0
+for workload in "${workload_list[@]}"; do
+  for seed in "${seed_list[@]}"; do
+    run_one "$workload" "$seed" &
+    active=$((active + 1))
+    if ((active >= lanes)); then
+      if ! wait -n; then status=1; fi
+      active=$((active - 1))
+    fi
+  done
+done
+while ((active > 0)); do
+  if ! wait -n; then status=1; fi
+  active=$((active - 1))
+done
+
+matrix_id=$(printf '%s\n' "$profile|$workloads|$seeds|$lanes|$time_limit" | sha256sum | cut -c1-12)
+summary="$run_root/matrix_${matrix_id}_summary.txt"
+{
+  printf 'cpu_commit=%s\nprofile=%s\nworkloads=%s\nseeds=%s\nlanes=%s\n' \
+    "$cpu_commit" "$profile" "$workloads" "$seeds" "$lanes"
+  for workload in "${workload_list[@]}"; do
+    slug=${workload//\//__}
+    for seed in "${seed_list[@]}"; do
+      result="$run_root/$slug/seed_$seed/limit_${time_limit}ns/exit-code.txt"
+      printf '%s=%s\n' "${result#"$run_root/"}" "$(<"$result")"
+    done
+  done
+} > "$summary"
+printf 'simulation matrix summary: %s\n' "$summary"
+exit "$status"

@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+usage() {
+  printf '%s\n' \
+    'usage: sim-prepare --workspace DIR --cpu-dir DIR --chiplab-dir DIR' \
+    '                   --chiplab-commit HASH --profile clean|instrumented' \
+    '                   --workloads CSV --config-args STRING --jobs N' \
+    '                   --sim-path PATH --verilator-home DIR --extra-libs STRING'
+}
+
+workspace=
+cpu_dir=
+chiplab_dir=
+chiplab_commit=
+profile=
+workloads=
+config_args=
+jobs=
+sim_path=
+verilator_home=
+extra_libs=
+
+while (($#)); do
+  case "$1" in
+    --workspace) workspace=$2; shift 2 ;;
+    --cpu-dir) cpu_dir=$2; shift 2 ;;
+    --chiplab-dir) chiplab_dir=$2; shift 2 ;;
+    --chiplab-commit) chiplab_commit=$2; shift 2 ;;
+    --profile) profile=$2; shift 2 ;;
+    --workloads) workloads=$2; shift 2 ;;
+    --config-args) config_args=$2; shift 2 ;;
+    --jobs) jobs=$2; shift 2 ;;
+    --sim-path) sim_path=$2; shift 2 ;;
+    --verilator-home) verilator_home=$2; shift 2 ;;
+    --extra-libs) extra_libs=$2; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) printf 'unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+for value in workspace cpu_dir chiplab_dir chiplab_commit profile workloads config_args jobs sim_path verilator_home; do
+  if [[ -z ${!value} ]]; then
+    printf 'missing required value: %s\n' "$value" >&2
+    exit 2
+  fi
+done
+if [[ $profile != clean && $profile != instrumented ]]; then
+  printf 'SIM_PROFILE must be clean or instrumented, got %s\n' "$profile" >&2
+  exit 2
+fi
+if [[ ! $jobs =~ ^[1-9][0-9]*$ ]]; then
+  printf 'jobs must be a positive integer, got %s\n' "$jobs" >&2
+  exit 2
+fi
+
+cpu_commit=$(git -C "$cpu_dir" rev-parse HEAD)
+cpu_short=${cpu_commit:0:12}
+chiplab_head=$(git -C "$chiplab_dir" rev-parse HEAD)
+if [[ $chiplab_head != "$chiplab_commit" ]]; then
+  printf 'Chiplab HEAD %s does not match locked commit %s\n' "$chiplab_head" "$chiplab_commit" >&2
+  exit 1
+fi
+rtl="$cpu_dir/rtl/mycpu_top.v"
+if [[ ! -f $rtl ]]; then
+  printf 'generated RTL is missing: %s\n' "$rtl" >&2
+  exit 1
+fi
+
+prepared_root="$workspace/build/sim/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}"
+target="$prepared_root/$profile"
+mkdir -p "$prepared_root"
+staging=$(mktemp -d "$prepared_root/.${profile}.XXXXXX")
+cleanup() {
+  rm -rf -- "$staging"
+}
+trap cleanup EXIT
+
+git -C "$chiplab_dir" archive "$chiplab_commit" | tar -xf - -C "$staging"
+ln -s "$chiplab_dir/toolchains" "$staging/toolchains"
+rm -rf -- "$staging/IP/myCPU"
+mkdir -p "$staging/IP/myCPU"
+install -m 0444 "$rtl" "$staging/IP/myCPU/mycpu_top.v"
+export CHIPLAB_HOME="$staging"
+
+patch_file="$workspace/tools/sim-patches/difftest-interrupt-memory-order.patch"
+patch_lock="$patch_file.sha256"
+patch_sha=none
+if [[ $profile == instrumented ]]; then
+  (cd "$workspace" && sha256sum -c "$patch_lock")
+  patch_sha=$(sha256sum "$patch_file" | awk '{print $1}')
+  TMPDIR=/tmp patch -d "$staging" -p1 --forward --batch < "$patch_file"
+fi
+
+run_dir="$staging/sims/verilator/run_prog"
+read -r -a config_words <<< "$config_args"
+(cd "$run_dir" && ./configure.sh "${config_words[@]}")
+(cd "$run_dir" && make clean)
+PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" verilator \
+  MYCPU_SRC="$staging/IP/myCPU" VERILATOR_HOME="$verilator_home"
+PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" testbench \
+  MYCPU_SRC="$staging/IP/myCPU" VERILATOR_HOME="$verilator_home" \
+  ALL_LIB="./obj_dir/*__ALL.a $extra_libs"
+PATH="$sim_path:$PATH" make -C "$run_dir" soft_compile
+if grep -Fxq 'TRACE_COMP=y' "$run_dir/config-software.mak"; then
+  chmod u+x "$run_dir/qemu_system_run.sh"
+  PATH="$sim_path:$PATH" make -C "$run_dir" golden_trace
+  IFS=',' read -r -a workload_list <<< "$workloads"
+  for workload in "${workload_list[@]}"; do
+    golden="$run_dir/log/${workload}_log/golden_trace.txt"
+    if [[ ! -s $golden ]]; then
+      printf 'trace comparison requested but golden trace was not generated: %s\n' "$golden" >&2
+      exit 1
+    fi
+  done
+fi
+
+git -C "$cpu_dir" status --short > "$staging/cpu-status.txt"
+git -C "$cpu_dir" diff --binary > "$staging/cpu-dirty.patch"
+manifest="$staging/sim-prepared-manifest.txt"
+cat > "$manifest" <<EOF
+format=nscc-sim-prepared-v1
+profile=$profile
+cpu_commit=$cpu_commit
+chiplab_commit=$chiplab_commit
+workloads=$workloads
+config_args=$config_args
+cpu_dirty_patch_sha256=$(sha256sum "$staging/cpu-dirty.patch" | awk '{print $1}')
+rtl_sha256=$(sha256sum "$rtl" | awk '{print $1}')
+model_sha256=$(sha256sum "$run_dir/output" | awk '{print $1}')
+difftest_sha256=$(sha256sum "$staging/sims/verilator/testbench/difftest.cpp" | awk '{print $1}')
+instrumentation_patch_sha256=$patch_sha
+verilator=$($workspace/tools/verilator-local --version | head -n 1)
+java=$(java -version 2>&1 | head -n 1)
+EOF
+
+while IFS= read -r file; do
+  printf 'software_sha256=%s  %s\n' "$(sha256sum "$file" | awk '{print $1}')" "${file#"$run_dir/"}" >> "$manifest"
+done < <(find "$run_dir/obj" -type f \( -name main.bin -o -name main.elf -o -name rom.vlog \) | sort)
+
+chmod a-w "$run_dir/output"
+find "$run_dir/obj_dir" -type f -exec chmod a-w {} +
+if [[ -e $target ]]; then
+  chmod -R u+w "$target"
+  rm -rf -- "$target"
+fi
+mv "$staging" "$target"
+trap - EXIT
+printf 'prepared simulation model: %s\n' "$target"
+printf 'manifest: %s\n' "$target/sim-prepared-manifest.txt"

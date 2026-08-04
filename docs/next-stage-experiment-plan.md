@@ -115,14 +115,33 @@ P1 的活动状态如下；`closed` 只能在定向测试、完整 gate 和对�
 
 | ID | 状态 | CPU commit | 定向证据 | 系统回归 |
 | --- | --- | --- | --- | --- |
-| C01 | open | - | - | - |
-| C02 | open | - | - | - |
-| C03 | open | - | - | - |
-| C04 | open | - | - | - |
-| C05 | open | - | - | - |
-| C06 | open | - | - | - |
-| C07 | open | - | - | - |
-| C08 | open | - | - | - |
+| C01 | directed pass；full gate pending | `9590512` | `OooExecutionClusterSpec`：P0 busy 时 held producer 不 wake，accept 后恰好一次 wake | P1 完整 gate/SoC pending |
+| C02 | directed pass；full gate pending | `93b5910` | `OooDivideUnitSpec`：有符号/无符号 DIV/MOD 边界、随机、逐迭代 flush/restart | P1 完整 gate/SoC pending |
+| C03 | directed pass；full gate pending | `4ff1b99` | `OooRobSpec`：全 pointer wrap、epoch reuse、旧 completion/wakeup/commit 隔离 | P1 完整 gate/SoC pending |
+| C04 | directed pass；full gate pending | `6252184` | `OooLoadStoreQueueSpec`：translation 未决阻塞，PA alias/overlap/forwarding | P1 完整 gate/SoC pending |
+| C05 | directed pass；full gate pending | `2a3a44d` | bridge 8/8、L1I 5/5、L1D 11/11、L2 7/7；refill/BRESP error 与 dirty retry | data hierarchy 1/1、shared hierarchy 6/6；完整 gate/SoC pending |
+| C06 | directed pass；full gate pending | `39fce68` | `OooLoadStoreQueueSpec`：MAT unknown、SUC head/drain、年轻访问顺序 | P1 完整 gate/SoC pending |
+| C07 | directed pass；full gate pending | `191517f` | ATU 5/5、Frontend 14/14、LSQ 28/28、Execution 9/9；mutation cancel/retry | P1 完整 gate/SoC pending |
+| C08 | directed pass；full gate pending | `189677f` | ATU PS=21 非连续/反向 half、I/D odd/even、权限/dirty/MAT | P1 完整 gate/SoC pending |
+
+### 3.3 隔离仿真入口
+
+`make sim-prepare` 串行执行 RTL 生成，从锁定的 c398 commit 创建
+`build/sim/prepared/cpu_<commit>_chiplab_<commit>/<profile>/`，再编译模型与软件。`clean`
+直接使用官方 testbench；`instrumented` 只应用
+`tools/sim-patches/difftest-interrupt-memory-order.patch`，并先校验其 SHA-256 lock。
+prepared manifest 保存 CPU/Chiplab/RTL/model/software、dirty patch 和 profile patch hash。
+
+`make sim-matrix` 不重新生成或编译模型。它复核当前 HEAD、RTL 和 prepared model hash，随后为
+每个 workload/seed/time-limit 创建独立的 `ram.dat`、日志与运行 manifest。非 Linux workload
+必须到达 `Reached test end PC`；Linux 固定窗口必须无 DiffTest/trace error 并到达预期 time
+limit。Chiplab 仿真进程即使超时也返回 0，因此 OS exit status 不能单独作为 verdict。
+
+默认 `SIM_LANES=2`。`SIM_LANES=3` 还要求显式设置 `SIM_ALLOW_THREE=1`、提供实测
+`SIM_LANE_PEAK_MB<2560`，且启动时 `MemAvailable>6144 MiB`。2026-08-04 的两个 clean
+`func_lab19` 短窗口 lane 各约 8 MiB RSS，隔离运行成立；两者在 1,300,000 ns 内均未到达
+终点，已正确记为失败。seed 1 扩至 10,000,000 ns 时仍持续退休至 1,201,505 条、无
+DiffTest mismatch，但仍未到终点，不能作为 func pass。
 
 ## 4. P1：正确性 gate
 

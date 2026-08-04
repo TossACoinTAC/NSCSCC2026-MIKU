@@ -1,0 +1,32 @@
+diff --git a/sims/verilator/testbench/difftest.cpp b/sims/verilator/testbench/difftest.cpp
+index d184775..bd90a52 100644
+--- a/sims/verilator/testbench/difftest.cpp
++++ b/sims/verilator/testbench/difftest.cpp
+@@ -148,12 +147,0 @@ int Difftest::step(vluint64_t &main_time) {
+-    if (dut.excp.excp_valid && dut.excp.exception == 0){
+-        if (dut.excp.interrupt != 0) {
+-            proxy->raise_intr(dut.excp.interrupt);
+-            return STATE_RUNNING;
+-        }else if(dut.csr.estat & 3){
+-            return STATE_RUNNING;
+-        }else{
+-            printf("warning: INT exception with no interrupt detected\n");
+-            // fprintf(trace_out,"warning: INT exception with no interrupt detected\n");
+-        }
+-    }
+-
+@@ -187,0 +176,14 @@ int Difftest::step(vluint64_t &main_time) {
++    /* Retiring memory events in the interrupt cycle must be consumed before
++     * returning to inject the interrupt into the reference model. */
++    if (dut.excp.excp_valid && dut.excp.exception == 0){
++        if (dut.excp.interrupt != 0) {
++            proxy->raise_intr(dut.excp.interrupt);
++            return STATE_RUNNING;
++        }else if(dut.csr.estat & 3){
++            return STATE_RUNNING;
++        }else{
++            printf("warning: INT exception with no interrupt detected\n");
++            // fprintf(trace_out,"warning: INT exception with no interrupt detected\n");
++        }
++    }
++
