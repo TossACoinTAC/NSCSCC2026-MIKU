@@ -232,8 +232,8 @@ manifest。早期 endpoint 失败来自 c398 新 testbench 未消费 `--end-pc`�
 | `e622625` H02-D 16 KiB L1D | 默认 L1D 从 8 KiB 扩至 16 KiB，CPUCFG 同步更新；测试按实际初始化周期与 set 数参数化 | L1D `12/12`、配置/core/CSR 通过；代表 5 项相对上一候选 -0.0560%，无单项回退；当前组合 19 项相对 H01 合计 -3.1704% | 完整 gates、func58/Linux 和 matching route；检查额外存储是否进入 BRAM、是否加重 cache mux/布线 |
 | `b44eaff` W01 completion 回声抑制 | direct wakeup 已被 IQ 接受时，不再让同一 completion 在下一拍占用同 lane registered wakeup；不增加 wakeup lane | 19 项相对 milestone `-0.102375%`，17 项改善、2 项退化；matching func58 三 seed 58/58 | Linux；matching route 必须确认没有恶化当前 staged-wakeup 关键路径族 |
 | `08fbf11` E02 head completion bypass | exact pointer/current epoch 的普通 head staged completion 可提前一拍退休；branch、exception、serializing、system operation 排除，年轻 lane 仍走既有 complete prefix | 19 项相对 W01 `-0.6045%`；ROB 测试覆盖 wrap/epoch/flush、结果值和所有排除边界，并显式证明三宽 commit 能力；matching func58 三 seed 58/58 | Linux；matching implementation 联合评价周期与 ROB/IQ top-N |
-| `2894e04` / `3531af7` L05 direct/DMW pretranslation | 在已有 `scheduledLoad`/Store entry 寄存边界写入 ATU 动态 preview 的 PA、MAT 与 translationDone；TLB 路径和平台接口不变 | 19 项相对 W01+E02 `71,083,365 -> 62,580,196`（`-11.962249%`），19 项全部改善 | 与 W02 组合的完整 gates、func58 已通过；继续 Linux 与 matching route，不能继承旧 WNS |
-| `f2dfd1e` / `7f12340` W02 Load completion wakeup | LSQ 把已通过 identity/exception/write 资格的 Load completion 注册为 P3 early wake；backend 再检查 current epoch，复用原 wakeup lane 与 PRF write-through，不增加全局广播 lane | 19 项相对 L05 `62,580,196 -> 61,817,068`（约 `-1.219%`），18 项改善、`stream_copy` 持平；组合完整 gates、func58 已通过 | Linux 与 matching route；重点检查 completion-to-IQ path family |
+| `2894e04` / `3531af7` L05 direct/DMW pretranslation | 在已有 `scheduledLoad`/Store entry 寄存边界写入 ATU 动态 preview 的 PA、MAT 与 translationDone；TLB 路径和平台接口不变 | 19 项相对 W01+E02 `71,083,365 -> 62,580,196`（`-11.962249%`），19 项全部改善 | 与 W02 组合的完整 gates、func58/Linux 已通过；继续 matching route，不能继承旧 WNS |
+| `f2dfd1e` / `7f12340` W02 Load completion wakeup | LSQ 把已通过 identity/exception/write 资格的 Load completion 注册为 P3 early wake；backend 再检查 current epoch，复用原 wakeup lane 与 PRF write-through，不增加全局广播 lane | 19 项相对 L05 `62,580,196 -> 61,817,068`（约 `-1.219%`），18 项改善、`stream_copy` 持平；组合完整 gates、func58/Linux 已通过 | matching route；重点检查 completion-to-IQ path family |
 
 Vivado 调度采用合并里程碑：同一轮可以并行准备多个高优先级、相互较独立的候选，但每项
 必须先有独立配置开关、同 workload/seed 的软件 A/B 和相关正确性回归。只把各自已有正收益、
@@ -535,6 +535,14 @@ func58 model hash 为 `5fef1d7cfa71118ad9f04130aa8519bac31184bd478baeffdd2c62510
 random-AXI seeds `240/255/141` 均到达 endpoint 并通过 `58/58`，返回 `0x3a00003a`、LED
 `1/1`，无 DiffTest mismatch，cycles 分别为 `635293/635562/635932`。结构化结果位于
 `build/sim/runs/cpu_03a466a39d80_chiplab_c398d274812f/clean-func58/random/matrix_1892a80af7f5_func58.csv`。
+matching instrumented Linux model hash 为
+`04361999d548b5f7760fc03cfa8517024795af18215fd1546c37e606f9cb72e0`；M01 patch hash 为
+`f3e92fcc84245ac65422fd23fc297d05a1ea04d32d63fc9dacde05e362b78b64`。random-AXI
+seeds `1/19557/5570815` 的 200 ms 固定窗口均通过，无 DiffTest/trace error；每个窗口为
+`99,999,995` cycles，retired instructions 分别为 `48,574,350/48,542,696/48,575,829`，
+IPC 为 `0.485744/0.485427/0.485758`，M01 守恒检查全部通过。counter hash 分别为
+`34108db6.../31adaf6f.../e693719c...`，矩阵摘要为
+`build/sim/runs/cpu_03a466a39d80_chiplab_c398d274812f/instrumented/random/matrix_702d500d09d1_summary.txt`。
 
 ## 4. P1：正确性 gate
 
@@ -716,7 +724,7 @@ cycle_speedup_upper = C0 / (C0 - opportunity_cycles)
    milestone 继承。
 7. L05、W02 已由 observer 机会计数进入独立实现和软件 A/B。L05 19 项全部改善并相对
    W01+E02 降低 `11.962249%`；W02 在其上再降低约 `1.219%`，18 项改善、1 项持平。
-   当前组合的完整 gates 与 func58 三 seed 已通过；继续 Linux 三 seed 和 matching route。
+   当前组合的完整 gates、func58 与 Linux 三 seed 已通过；继续 matching route。
    两项归因绑定各自提交与 CSV，机会计数仍不直接代表 speedup。
 
 ## 8. 单次 A/B 实验合同
@@ -819,8 +827,8 @@ WNS/TNS、top-N path 和资源后可继续下一轮微架构/时序协同修改�
    implementation 仍按本文门禁补齐，不将轻量软件结果写成完整验收。
 9. `nscc-m01-v6` 已关闭 L05/W02 observer：L05 分类四种翻译模式及 Load/Store owner，W02
    只接受 current-epoch、无异常且匹配有效 LQ 的 completion，并单列 P0--P2 保守子集。两项
-   已按 L05 后 W02 的顺序完成独立实现和 19 项 paired A/B，当前组合完整 gates 与 func58
-   三 seed 已通过；Linux 三 seed 和 matching 100 MHz route 是下一门禁。
+   已按 L05 后 W02 的顺序完成独立实现和 19 项 paired A/B，当前组合完整 gates、func58
+   与 Linux 三 seed 已通过；matching 100 MHz route 是下一门禁。
 
 下一组合以 W01+E02 为已经独立归因的周期候选；L05/W02 已完成测量，按顺序分别 A/B 后决定
 是否成为新增独立候选。若加入时序候选，必须保持同拍语义、给出结构保留证明，并针对当前 ROB staged
