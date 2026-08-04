@@ -18,7 +18,7 @@ try:
 except (OSError, json.JSONDecodeError) as error:
     fail(str(error))
 
-if counters.get("schema_version") != "nscc-m01-v3":
+if counters.get("schema_version") != "nscc-m01-v4":
     fail(f"unexpected schema {counters.get('schema_version')!r}")
 if counters.get("commit_observation_lag_cycles") != 4:
     fail("unexpected DiffTest commit observation lag")
@@ -39,6 +39,16 @@ if observed != instructions:
     fail(f"difftest observed {observed} instructions, sampled {instructions}")
 if counters.get("unused_commit_slots") != 3 * cycles - instructions:
     fail("unused_commit_slots does not conserve commit width")
+
+dispatch = counters.get("dispatch", {})
+d01_candidates = dispatch.get("d01_oldest_load_candidate_cycles")
+d01_blocked = dispatch.get("d01_oldest_load_blocked_by_sdq_cycles")
+if not isinstance(d01_candidates, int) or d01_candidates < 0:
+    fail("D01 candidate cycles must be a nonnegative integer")
+if not isinstance(d01_blocked, int) or d01_blocked < 0:
+    fail("D01 SDQ-blocked cycles must be a nonnegative integer")
+if d01_blocked > d01_candidates:
+    fail("D01 SDQ-blocked cycles exceed oldest-Load candidate cycles")
 
 invariants = counters.get("invariants", {})
 for name in ("retire_hist_cycles", "retire_hist_instructions", "commit_observation", "source_retire_alignment", "queue_identity"):

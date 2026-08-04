@@ -398,6 +398,22 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
         snapshot.issue_ready[queue] = static_cast<std::uint8_t>(popcount8(ready_maps[queue]));
     }
 
+    // D01 lower bound: the router's P3 payload defaults to dispatch lane 0
+    // when P3 cannot accept anything. With IQ3's registered enqueue-ready
+    // asserted, P3 ready can only be low because the Store Data Queue is full.
+    // Restricting this to lane 0 avoids attributing prefix stalls from older
+    // lanes to SDQ backpressure.
+    const std::uint8_t dispatch_valid =
+        static_cast<std::uint8_t>(BACKEND(dispatchWindow_io_outputValid) & 0x7U);
+    const bool iq3_enqueue_ready = static_cast<bool>(ISSUE(3, enqueueReadyReg));
+    const bool p3_ready = (BACKEND(router_io_portReady) & (1U << 3)) != 0;
+    snapshot.d01_oldest_load_candidate = !snapshot.recovery &&
+        (dispatch_valid & 1U) != 0 &&
+        static_cast<bool>(BACKEND(router_io_portInput_3_decoded_isLoad)) &&
+        iq3_enqueue_ready;
+    snapshot.d01_oldest_load_blocked_by_sdq =
+        snapshot.d01_oldest_load_candidate && !p3_ready;
+
     const bool lsq_signals[8] = {
         static_cast<bool>(LSQ(translationRequestFire)), static_cast<bool>(LSQ(translationResponseFire)),
         static_cast<bool>(LSQ(translationCompletionFire)), static_cast<bool>(LSQ(loadRequestFire)),
@@ -479,6 +495,9 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot, std::uint8_
         issue_ready_cycles_[queue] += bit(snapshot.issue_ready[queue] != 0);
         issue_ready_entries_[queue] += snapshot.issue_ready[queue];
     }
+    d01_oldest_load_candidate_cycles_ += bit(snapshot.d01_oldest_load_candidate);
+    d01_oldest_load_blocked_by_sdq_cycles_ +=
+        bit(snapshot.d01_oldest_load_blocked_by_sdq);
     for (unsigned event = 0; event < 8; event++) {
         lsq_events_[event] += bit((snapshot.lsq_events & (1U << event)) != 0);
     }
@@ -578,7 +597,7 @@ void PerfMonitor::write_json(const char *path) const {
     const bool commit_count_ok = observed_instructions_ == sampled_instructions_;
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v3\",\n");
+    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v4\",\n");
     std::fprintf(file, "  \"roi\": \"difftest-observation-window-source-aligned\",\n");
     std::fprintf(file, "  \"commit_observation_lag_cycles\": %u,\n", kCommitObservationLag);
     std::fprintf(file, "  \"cycles\": %llu,\n", static_cast<unsigned long long>(cycles_));
@@ -645,6 +664,9 @@ void PerfMonitor::write_json(const char *path) const {
                  static_cast<unsigned long long>(issue_ready_cycles_[2]), static_cast<unsigned long long>(issue_ready_cycles_[3]),
                  static_cast<unsigned long long>(issue_ready_entries_[0]), static_cast<unsigned long long>(issue_ready_entries_[1]),
                  static_cast<unsigned long long>(issue_ready_entries_[2]), static_cast<unsigned long long>(issue_ready_entries_[3]));
+    std::fprintf(file, "  \"dispatch\": {\"d01_oldest_load_candidate_cycles\": %llu, \"d01_oldest_load_blocked_by_sdq_cycles\": %llu},\n",
+                 static_cast<unsigned long long>(d01_oldest_load_candidate_cycles_),
+                 static_cast<unsigned long long>(d01_oldest_load_blocked_by_sdq_cycles_));
     std::fprintf(file, "  \"execution\": {\"divider_busy_cycles\": %llu, \"p1_ready_while_divider_busy\": %llu, \"divide_operand_classes\": {\"divisor_zero\": %llu, \"divisor_abs_one\": %llu, \"dividend_zero\": %llu, \"divisor_power_of_two\": %llu, \"ordinary\": %llu}},\n",
                  static_cast<unsigned long long>(divider_busy_cycles_),
                  static_cast<unsigned long long>(p1_ready_while_divider_busy_),

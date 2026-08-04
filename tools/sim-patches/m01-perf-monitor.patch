@@ -59,9 +59,9 @@ index 105635f..1139fa4 100644
 --- a/sims/verilator/testbench/testbench.cpp
 +++ b/sims/verilator/testbench/testbench.cpp
 @@ -7,6 +7,7 @@ CpuTestbench::CpuTestbench(int argc, char **argv, char **env, vluint64_t *main_t
-     this->parse_args(argc, argv, env);
      rand64 = new Rand64(rand_path);
      top = new Vtop;
+     top->__SYM__switch = switch_value;
 +    perf_monitor = new PerfMonitor(top);
      struct UART_STA uart_status;
      if (restore_bp_time != 0) {

@@ -42,6 +42,8 @@ private:
         bool frontend_cache_request = false;
         bool frontend_uncached_request = false;
         std::uint8_t issue_ready[4] = {};
+        bool d01_oldest_load_candidate = false;
+        bool d01_oldest_load_blocked_by_sdq = false;
         bool divider_busy = false;
         bool p1_ready_while_divider_busy = false;
         std::uint8_t divide_class = kNoReason;
@@ -87,6 +89,8 @@ private:
     std::uint64_t frontend_uncached_request_ = 0;
     std::uint64_t issue_ready_cycles_[4] = {0, 0, 0, 0};
     std::uint64_t issue_ready_entries_[4] = {0, 0, 0, 0};
+    std::uint64_t d01_oldest_load_candidate_cycles_ = 0;
+    std::uint64_t d01_oldest_load_blocked_by_sdq_cycles_ = 0;
     std::uint64_t divider_busy_cycles_ = 0;
     std::uint64_t p1_ready_while_divider_busy_ = 0;
     std::uint64_t divide_classes_[5] = {0, 0, 0, 0, 0};
