@@ -5,7 +5,8 @@ usage() {
   printf '%s\n' \
     'usage: sim-prepare --workspace DIR --cpu-dir DIR --chiplab-dir DIR' \
     '                   --chiplab-commit HASH --profile clean|instrumented' \
-    '                   --workloads CSV --config-args STRING --jobs N' \
+    '                   --suite standard|func58|perf20 --workloads CSV' \
+    '                   --config-args STRING --jobs N' \
     '                   --sim-path PATH --verilator-home DIR --extra-libs STRING'
 }
 
@@ -14,6 +15,7 @@ cpu_dir=
 chiplab_dir=
 chiplab_commit=
 profile=
+suite=
 workloads=
 config_args=
 jobs=
@@ -28,6 +30,7 @@ while (($#)); do
     --chiplab-dir) chiplab_dir=$2; shift 2 ;;
     --chiplab-commit) chiplab_commit=$2; shift 2 ;;
     --profile) profile=$2; shift 2 ;;
+    --suite) suite=$2; shift 2 ;;
     --workloads) workloads=$2; shift 2 ;;
     --config-args) config_args=$2; shift 2 ;;
     --jobs) jobs=$2; shift 2 ;;
@@ -39,7 +42,7 @@ while (($#)); do
   esac
 done
 
-for value in workspace cpu_dir chiplab_dir chiplab_commit profile workloads config_args jobs sim_path verilator_home; do
+for value in workspace cpu_dir chiplab_dir chiplab_commit profile suite workloads config_args jobs sim_path verilator_home; do
   if [[ -z ${!value} ]]; then
     printf 'missing required value: %s\n' "$value" >&2
     exit 2
@@ -47,6 +50,10 @@ for value in workspace cpu_dir chiplab_dir chiplab_commit profile workloads conf
 done
 if [[ $profile != clean && $profile != instrumented ]]; then
   printf 'SIM_PROFILE must be clean or instrumented, got %s\n' "$profile" >&2
+  exit 2
+fi
+if [[ $suite != standard && $suite != func58 && $suite != perf20 ]]; then
+  printf 'SIM_SUITE must be standard, func58, or perf20, got %s\n' "$suite" >&2
   exit 2
 fi
 if [[ ! $jobs =~ ^[1-9][0-9]*$ ]]; then
@@ -68,9 +75,13 @@ if [[ ! -f $rtl ]]; then
 fi
 
 prepared_root="$workspace/build/sim/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}"
-target="$prepared_root/$profile"
+variant=$profile
+if [[ $suite != standard ]]; then
+  variant="$profile-$suite"
+fi
+target="$prepared_root/$variant"
 mkdir -p "$prepared_root"
-staging=$(mktemp -d "$prepared_root/.${profile}.XXXXXX")
+staging=$(mktemp -d "$prepared_root/.${variant}.XXXXXX")
 cleanup() {
   rm -rf -- "$staging"
 }
@@ -91,6 +102,14 @@ m01_patch_lock="$m01_patch_file.sha256"
 m01_source_lock="$workspace/tools/sim-instrumentation/manifest.sha256"
 m01_patch_sha=none
 m01_source_sha=none
+official_patch_file="$workspace/tools/sim-patches/official-software-switch.patch"
+official_patch_lock="$official_patch_file.sha256"
+official_patch_sha=none
+if [[ $suite != standard ]]; then
+  (cd "$workspace" && sha256sum -c "$official_patch_lock")
+  official_patch_sha=$(sha256sum "$official_patch_file" | awk '{print $1}')
+  TMPDIR=/tmp patch -d "$staging" -p1 --forward --batch < "$official_patch_file"
+fi
 if [[ $profile == instrumented ]]; then
   (cd "$workspace" && sha256sum -c "$patch_lock")
   patch_sha=$(sha256sum "$patch_file" | awk '{print $1}')
@@ -115,7 +134,23 @@ PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" verilator \
 PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" testbench \
   MYCPU_SRC="$staging/IP/myCPU" VERILATOR_HOME="$verilator_home" \
   ALL_LIB="./obj_dir/*__ALL.a $extra_libs"
-PATH="$sim_path:$PATH" make -C "$run_dir" soft_compile
+case "$suite" in
+standard)
+  PATH="$sim_path:$PATH" make -C "$run_dir" soft_compile
+  ;;
+perf20)
+  "$workspace/tools/stage-perf20-software" \
+    --chiplab-dir "$staging" \
+    --run-dir "$run_dir" \
+    --workloads "$workloads"
+  ;;
+func58)
+  "$workspace/tools/stage-func58-software" \
+    --chiplab-dir "$staging" \
+    --run-dir "$run_dir" \
+    --workloads "$workloads"
+  ;;
+esac
 if grep -Fxq 'TRACE_COMP=y' "$run_dir/config-software.mak"; then
   chmod u+x "$run_dir/qemu_system_run.sh"
   PATH="$sim_path:$PATH" make -C "$run_dir" golden_trace
@@ -133,8 +168,9 @@ git -C "$cpu_dir" status --short > "$staging/cpu-status.txt"
 git -C "$cpu_dir" diff --binary > "$staging/cpu-dirty.patch"
 manifest="$staging/sim-prepared-manifest.txt"
 cat > "$manifest" <<EOF
-format=nscc-sim-prepared-v1
+format=nscc-sim-prepared-v2
 profile=$profile
+suite=$suite
 cpu_commit=$cpu_commit
 chiplab_commit=$chiplab_commit
 workloads=$workloads
@@ -144,6 +180,7 @@ rtl_sha256=$(sha256sum "$rtl" | awk '{print $1}')
 model_sha256=$(sha256sum "$run_dir/output" | awk '{print $1}')
 difftest_sha256=$(sha256sum "$staging/sims/verilator/testbench/difftest.cpp" | awk '{print $1}')
 instrumentation_patch_sha256=$patch_sha
+official_software_patch_sha256=$official_patch_sha
 m01_patch_sha256=$m01_patch_sha
 m01_source_manifest_sha256=$m01_source_sha
 verilator=$($workspace/tools/verilator-local --version | head -n 1)
@@ -152,7 +189,7 @@ EOF
 
 while IFS= read -r file; do
   printf 'software_sha256=%s  %s\n' "$(sha256sum "$file" | awk '{print $1}')" "${file#"$run_dir/"}" >> "$manifest"
-done < <(find "$run_dir/obj" -type f \( -name main.bin -o -name main.elf -o -name rom.vlog \) | sort)
+done < <(find "$run_dir/obj" -type f \( -name main.bin -o -name main.elf -o -name inst_data.bin -o -name rom.vlog \) | sort)
 
 chmod a-w "$run_dir/output"
 find "$run_dir/obj_dir" -type f -exec chmod a-w {} +

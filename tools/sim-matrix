@@ -4,7 +4,8 @@ set -euo pipefail
 usage() {
   printf '%s\n' \
     'usage: sim-matrix --workspace DIR --cpu-dir DIR --chiplab-commit HASH' \
-    '                  --profile clean|instrumented --workloads CSV --seeds CSV' \
+    '                  --profile clean|instrumented --suite standard|func58|perf20' \
+    '                  --memory-mode random|ideal --workloads CSV --seeds CSV' \
     '                  --lanes N --time-limit N --sim-path PATH [lane-3 evidence]'
 }
 
@@ -12,6 +13,8 @@ workspace=
 cpu_dir=
 chiplab_commit=
 profile=
+suite=
+memory_mode=
 workloads=
 seeds=
 lanes=
@@ -26,6 +29,8 @@ while (($#)); do
     --cpu-dir) cpu_dir=$2; shift 2 ;;
     --chiplab-commit) chiplab_commit=$2; shift 2 ;;
     --profile) profile=$2; shift 2 ;;
+    --suite) suite=$2; shift 2 ;;
+    --memory-mode) memory_mode=$2; shift 2 ;;
     --workloads) workloads=$2; shift 2 ;;
     --seeds) seeds=$2; shift 2 ;;
     --lanes) lanes=$2; shift 2 ;;
@@ -38,7 +43,7 @@ while (($#)); do
   esac
 done
 
-for value in workspace cpu_dir chiplab_commit profile workloads seeds lanes time_limit sim_path; do
+for value in workspace cpu_dir chiplab_commit profile suite memory_mode workloads seeds lanes time_limit sim_path; do
   if [[ -z ${!value} ]]; then
     printf 'missing required value: %s\n' "$value" >&2
     exit 2
@@ -46,6 +51,14 @@ for value in workspace cpu_dir chiplab_commit profile workloads seeds lanes time
 done
 if [[ $profile != clean && $profile != instrumented ]]; then
   printf 'SIM_PROFILE must be clean or instrumented, got %s\n' "$profile" >&2
+  exit 2
+fi
+if [[ $suite != standard && $suite != func58 && $suite != perf20 ]]; then
+  printf 'SIM_SUITE must be standard, func58, or perf20, got %s\n' "$suite" >&2
+  exit 2
+fi
+if [[ $memory_mode != random && $memory_mode != ideal ]]; then
+  printf 'SIM_MEMORY_MODE must be random or ideal, got %s\n' "$memory_mode" >&2
   exit 2
 fi
 if [[ ! $lanes =~ ^[1-3]$ ]]; then
@@ -68,7 +81,11 @@ fi
 
 cpu_commit=$(git -C "$cpu_dir" rev-parse HEAD)
 cpu_short=${cpu_commit:0:12}
-prepared="$workspace/build/sim/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$profile"
+variant=$profile
+if [[ $suite != standard ]]; then
+  variant="$profile-$suite"
+fi
+prepared="$workspace/build/sim/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$variant"
 manifest="$prepared/sim-prepared-manifest.txt"
 run_prog="$prepared/sims/verilator/run_prog"
 model="$run_prog/output"
@@ -80,6 +97,15 @@ fi
 grep -Fxq "cpu_commit=$cpu_commit" "$manifest"
 grep -Fxq "chiplab_commit=$chiplab_commit" "$manifest"
 grep -Fxq "profile=$profile" "$manifest"
+grep -Fxq "suite=$suite" "$manifest"
+if [[ $suite != standard ]]; then
+  expected_patch_sha=$(awk -F= '$1 == "official_software_patch_sha256" {print $2}' "$manifest")
+  actual_patch_sha=$(sha256sum "$workspace/tools/sim-patches/official-software-switch.patch" | awk '{print $1}')
+  if [[ -z $expected_patch_sha || $actual_patch_sha != "$expected_patch_sha" ]]; then
+    printf 'prepared official-software harness patch is stale; run make sim-prepare again\n' >&2
+    exit 1
+  fi
+fi
 expected_model_sha=$(awk -F= '$1 == "model_sha256" {print $2}' "$manifest")
 actual_model_sha=$(sha256sum "$model" | awk '{print $1}')
 if [[ $actual_model_sha != "$expected_model_sha" ]]; then
@@ -93,7 +119,7 @@ if [[ $actual_rtl_sha != "$expected_rtl_sha" ]]; then
   exit 1
 fi
 
-run_root="$workspace/build/sim/runs/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$profile"
+run_root="$workspace/build/sim/runs/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$variant/$memory_mode"
 mkdir -p "$run_root"
 IFS=',' read -r -a workload_list <<< "$workloads"
 IFS=',' read -r -a seed_list <<< "$seeds"
@@ -116,6 +142,39 @@ run_one() {
   local slug=${workload//\//__}
   local lane_dir="$run_root/$slug/seed_$seed/limit_${time_limit}ns"
   local object_dir="$run_prog/obj/${workload}_obj/obj"
+  local official_switch_value=ff
+  local runtime_switch_value=ff
+  local benchmark_index=0
+  if [[ $suite == perf20 ]]; then
+    case "$workload" in
+      perf20/bitcount) benchmark_index=1 ;;
+      perf20/bubble_sort) benchmark_index=2 ;;
+      perf20/coremark) benchmark_index=3 ;;
+      perf20/crc32) benchmark_index=4 ;;
+      perf20/dhrystone) benchmark_index=5 ;;
+      perf20/quick_sort) benchmark_index=6 ;;
+      perf20/select_sort) benchmark_index=7 ;;
+      perf20/sha) benchmark_index=8 ;;
+      perf20/stream_copy) benchmark_index=9 ;;
+      perf20/stringsearch) benchmark_index=10 ;;
+      perf20/fireye_A0) benchmark_index=11 ;;
+      perf20/fireye_B2) benchmark_index=12 ;;
+      perf20/fireye_C0) benchmark_index=13 ;;
+      perf20/fireye_D1) benchmark_index=14 ;;
+      perf20/fireye_I2) benchmark_index=15 ;;
+      perf20/inner_product) benchmark_index=16 ;;
+      perf20/lookup_table) benchmark_index=17 ;;
+      perf20/loop_induction) benchmark_index=18 ;;
+      perf20/my_memcmp) benchmark_index=19 ;;
+      perf20/minmax_sequence) benchmark_index=20 ;;
+      *) printf 'unknown perf20 workload: %s\n' "$workload" >&2; return 2 ;;
+    esac
+    printf -v official_switch_value '%02x' "$((0x7f - benchmark_index))"
+    runtime_switch_value=$official_switch_value
+  elif [[ $suite == func58 && $workload != func58 ]]; then
+    printf 'func58 suite only supports workload func58, got %s\n' "$workload" >&2
+    return 2
+  fi
   if [[ ! -f $object_dir/rom.vlog ]]; then
     printf 'prepared software image missing: %s\n' "$object_dir/rom.vlog" >&2
     return 1
@@ -132,16 +191,20 @@ run_one() {
     test_finish=$(PATH="$sim_path:$PATH" loongarch32r-linux-gnusf-readelf -s "$object_dir/main.elf" |
       awk '$8 == "test_finish" && !found {print $2; found = 1}')
     if [[ $test_finish =~ ^[0-9a-fA-F]+$ ]]; then
-      printf -v end_pc '%x' "$((16#$test_finish + 0x30))"
+      printf -v end_pc '%x' "$((16#$test_finish))"
     fi
   fi
   {
-    printf 'format=nscc-sim-run-v1\n'
+    printf 'format=nscc-sim-run-v2\n'
     printf 'cpu_commit=%s\n' "$cpu_commit"
     printf 'chiplab_commit=%s\n' "$chiplab_commit"
     printf 'profile=%s\n' "$profile"
+    printf 'suite=%s\n' "$suite"
+    printf 'memory_mode=%s\n' "$memory_mode"
     printf 'workload=%s\n' "$workload"
     printf 'axi_seed=%s\n' "$seed"
+    printf 'official_switch_value=0x%s\n' "$official_switch_value"
+    printf 'runtime_switch_value=0x%s\n' "$runtime_switch_value"
     printf 'time_limit=%s\n' "$time_limit"
     printf 'end_pc=%s\n' "$end_pc"
     printf 'model_sha256=%s\n' "$actual_model_sha"
@@ -149,10 +212,19 @@ run_one() {
   } > "$lane_dir/run-manifest.txt"
   (
     cd "$lane_dir"
+    bus_args=()
+    switch_args=()
+    if [[ $memory_mode == random ]]; then
+      bus_args=(--simu-bus-delay --simu-bus-delay-random-seed "$seed")
+    fi
+    if [[ $suite != standard ]]; then
+      switch_args=(--switch "$runtime_switch_value")
+    fi
     set +e
     CHIPLAB_HOME="$prepared" PATH="$sim_path:$PATH" /usr/bin/time -v \
       "$model" \
-      --simu-bus-delay --simu-bus-delay-random-seed "$seed" \
+      "${bus_args[@]}" \
+      "${switch_args[@]}" \
       --dump-delay 0 --dump-waveform 0 --time-limit "$time_limit" \
       --save-bp-time 0 --ram-save-bp-file none --top-save-bp-file none \
       --restore-bp-time 0 --ram-restore-bp-file none --top-restore-bp-file none \
@@ -189,6 +261,55 @@ run_one() {
       result=1
       verdict=expected-endpoint-not-reached
     fi
+    if [[ $suite == perf20 && $result == 0 ]]; then
+      observed_switch=
+      cpu_hex=
+      led_rg0=
+      led_rg1=
+      snapshot=$(grep -Eo 'switch/num/led snapshot[[:space:]]+is [0-9a-fA-F]+ / [0-9a-fA-F]{8} / [0-9a-fA-F]+ / [0-9a-fA-F]+' run.log | tail -n 1 || true)
+      if [[ -z $snapshot ]]; then
+        result=1
+        verdict=perf20-result-snapshot-missing
+      else
+        read -r observed_switch cpu_hex led_rg0 led_rg1 < <(
+          sed -n 's/.*is \([0-9a-fA-F][0-9a-fA-F]*\) \/ \([0-9a-fA-F][0-9a-fA-F]*\) \/ \([0-9a-fA-F][0-9a-fA-F]*\) \/ \([0-9a-fA-F][0-9a-fA-F]*\).*/\1 \2 \3 \4/p' <<< "$snapshot"
+        )
+      fi
+      if [[ $result == 0 && ( $observed_switch != "$runtime_switch_value" || $led_rg0 != 1 || $led_rg1 != 1 ) ]]; then
+        result=1
+        verdict=perf20-software-error
+      elif [[ $result == 0 ]]; then
+        cpu_cycles=$((16#$cpu_hex))
+        cat > perf20-result.json <<EOF
+{"format":"nscc-perf20-result-v2","workload":"$workload","memory_mode":"$memory_mode","seed":$seed,"official_switch_value":"0x$official_switch_value","runtime_switch_value":"0x$runtime_switch_value","cpu_cycles":$cpu_cycles,"cpu_cycles_hex":"0x$cpu_hex","led_rg0":$led_rg0,"led_rg1":$led_rg1}
+EOF
+        printf 'perf20_result_sha256=%s\n' "$(sha256sum perf20-result.json | awk '{print $1}')" >> run-manifest.txt
+      fi
+    fi
+    if [[ $suite == func58 && $result == 0 ]]; then
+      observed_switch=
+      num_hex=
+      led_rg0=
+      led_rg1=
+      snapshot=$(grep -Eo 'switch/num/led snapshot[[:space:]]+is [0-9a-fA-F]+ / [0-9a-fA-F]{8} / [0-9a-fA-F]+ / [0-9a-fA-F]+' run.log | tail -n 1 || true)
+      if [[ -z $snapshot ]]; then
+        result=1
+        verdict=func58-result-snapshot-missing
+      else
+        read -r observed_switch num_hex led_rg0 led_rg1 < <(
+          sed -n 's/.*is \([0-9a-fA-F][0-9a-fA-F]*\) \/ \([0-9a-fA-F][0-9a-fA-F]*\) \/ \([0-9a-fA-F][0-9a-fA-F]*\) \/ \([0-9a-fA-F][0-9a-fA-F]*\).*/\1 \2 \3 \4/p' <<< "$snapshot"
+        )
+      fi
+      if [[ $result == 0 && ( $observed_switch != "$runtime_switch_value" || ${num_hex,,} != 3a00003a || $led_rg0 != 1 || $led_rg1 != 1 ) ]]; then
+        result=1
+        verdict=func58-software-error
+      elif [[ $result == 0 ]]; then
+        cat > func58-result.json <<EOF
+{"format":"nscc-func58-result-v3","workload":"$workload","memory_mode":"$memory_mode","axi_seed":$seed,"runtime_switch_value":"0x$runtime_switch_value","num_data":"0x${num_hex,,}","led_rg0":$led_rg0,"led_rg1":$led_rg1,"passed_points":58}
+EOF
+        printf 'func58_result_sha256=%s\n' "$(sha256sum func58-result.json | awk '{print $1}')" >> run-manifest.txt
+      fi
+    fi
     printf '%s\n' "$verdict" > verdict.txt
     printf '%s\n' "$result" > exit-code.txt
     exit "$result"
@@ -212,11 +333,11 @@ while ((active > 0)); do
   active=$((active - 1))
 done
 
-matrix_id=$(printf '%s\n' "$profile|$workloads|$seeds|$lanes|$time_limit" | sha256sum | cut -c1-12)
+matrix_id=$(printf '%s\n' "$profile|$suite|$memory_mode|$workloads|$seeds|$lanes|$time_limit" | sha256sum | cut -c1-12)
 summary="$run_root/matrix_${matrix_id}_summary.txt"
 {
-  printf 'cpu_commit=%s\nprofile=%s\nworkloads=%s\nseeds=%s\nlanes=%s\n' \
-    "$cpu_commit" "$profile" "$workloads" "$seeds" "$lanes"
+  printf 'cpu_commit=%s\nprofile=%s\nsuite=%s\nmemory_mode=%s\nworkloads=%s\nseeds=%s\nlanes=%s\n' \
+    "$cpu_commit" "$profile" "$suite" "$memory_mode" "$workloads" "$seeds" "$lanes"
   for workload in "${workload_list[@]}"; do
     slug=${workload//\//__}
     for seed in "${seed_list[@]}"; do
@@ -225,5 +346,38 @@ summary="$run_root/matrix_${matrix_id}_summary.txt"
     done
   done
 } > "$summary"
+if [[ $suite == perf20 ]]; then
+  results_csv="$run_root/matrix_${matrix_id}_perf20.csv"
+  printf 'benchmark,memory_mode,seed,cpu_cycles,verdict\n' > "$results_csv"
+  for workload in "${workload_list[@]}"; do
+    slug=${workload//\//__}
+    for seed in "${seed_list[@]}"; do
+      lane_dir="$run_root/$slug/seed_$seed/limit_${time_limit}ns"
+      verdict=$(<"$lane_dir/verdict.txt")
+      cpu_cycles=
+      if [[ -f $lane_dir/perf20-result.json ]]; then
+        cpu_cycles=$(sed -n 's/.*"cpu_cycles":\([0-9][0-9]*\).*/\1/p' "$lane_dir/perf20-result.json")
+      fi
+      printf '%s,%s,%s,%s,%s\n' \
+        "${workload#perf20/}" "$memory_mode" "$seed" "$cpu_cycles" "$verdict" \
+        >> "$results_csv"
+    done
+  done
+  printf 'perf20 results: %s\n' "$results_csv"
+elif [[ $suite == func58 ]]; then
+  results_csv="$run_root/matrix_${matrix_id}_func58.csv"
+  printf 'workload,memory_mode,axi_seed,passed_points,verdict\n' > "$results_csv"
+  for seed in "${seed_list[@]}"; do
+    lane_dir="$run_root/func58/seed_$seed/limit_${time_limit}ns"
+    verdict=$(<"$lane_dir/verdict.txt")
+    passed_points=
+    if [[ -f $lane_dir/func58-result.json ]]; then
+      passed_points=58
+    fi
+    printf 'func58,%s,%s,%s,%s\n' "$memory_mode" "$seed" "$passed_points" "$verdict" \
+      >> "$results_csv"
+  done
+  printf 'func58 results: %s\n' "$results_csv"
+fi
 printf 'simulation matrix summary: %s\n' "$summary"
 exit "$status"

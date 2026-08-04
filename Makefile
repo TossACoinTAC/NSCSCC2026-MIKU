@@ -53,12 +53,22 @@ PERF_CPU_MHZ ?= 100
 SIM_CONFIG_ARGS ?= --run $(RUN_SOFTWARE) --disable-simu-trace --output-uart-info --dump-fst
 WAVE ?= $(SIM_DIR)/log/$(RUN_SOFTWARE)_log/simu_trace.fst
 SIM_PROFILE ?= clean
+SIM_SUITE ?= standard
+SIM_MEMORY_MODE ?= random
 SIM_WORKLOADS ?= $(RUN_SOFTWARE)
 SIM_SEEDS ?= $(AXI_SEED)
 SIM_LANES ?= 2
 SIM_ALLOW_THREE ?= 0
 SIM_LANE_PEAK_MB ?=
-SIM_PREPARE_CONFIG_ARGS ?= --run $(SIM_WORKLOADS) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst
+SIM_PREPARE_MODEL_RUN ?= $(if $(filter perf20,$(SIM_SUITE)),coremark,$(RUN_SOFTWARE))
+SIM_PREPARE_CONFIG_ARGS ?= --run $(SIM_PREPARE_MODEL_RUN) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst
+PERF20_WORKLOADS := perf20/bitcount,perf20/bubble_sort,perf20/coremark,perf20/crc32,perf20/dhrystone,perf20/quick_sort,perf20/select_sort,perf20/sha,perf20/stream_copy,perf20/stringsearch,perf20/fireye_A0,perf20/fireye_B2,perf20/fireye_C0,perf20/fireye_D1,perf20/fireye_I2,perf20/inner_product,perf20/lookup_table,perf20/loop_induction,perf20/my_memcmp,perf20/minmax_sequence
+PERF20_TIME_LIMIT ?= 600000000
+FUNC58_WORKLOADS := func58
+FUNC58_SEEDS ?= 240,255,141
+FUNC58_TIME_LIMIT ?= 30000000
+OFFICIAL_SIM_LANES ?= 3
+OFFICIAL_SIM_LANE_PEAK_MB ?= 8
 
 CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
 OFFICIAL_CI_TEMPLATE_COMMIT ?= 6915882af5c8d3a0c856f570cb914920a3e5ff99
@@ -67,6 +77,7 @@ MAIN_CPU_COMMIT ?= d9bab16ef46540eb3348b0781afc4d0949f28adc
 
 .PHONY: help doctor toolchain-check chiplab-toolchains status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-test cpu-check cpu-generate chiplab-sync \
 	sim-configure sim-build sim-run sim sim-prepare sim-matrix wave soc-project soc-impl soc-timing \
+	func58-prepare func58-sim perf20-prepare perf20-sim \
 	soc-func soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
 	soc-archive soc-incremental-archive
 
@@ -90,6 +101,8 @@ help:
 		'  make sim              Build software/model and run Verilator' \
 		'  make sim-prepare      Build one isolated, hash-locked Verilator model/profile' \
 		'  make sim-matrix       Run prepared workloads/seeds in isolated runtime directories' \
+		'  make func58-sim       Run the official 58-point function image with three AXI seeds' \
+		'  make perf20-sim       Run all 20 official performance programs in deterministic Verilator memory' \
 		'  make wave             Open WAVE in Windows Surfer' \
 		'  make soc-project      Recreate an isolated c398 performance Vivado project' \
 		'  make soc-func         Run a clean isolated functional-test SoC implementation' \
@@ -104,7 +117,8 @@ help:
 		'' \
 		'Common overrides:' \
 		'  RUN_SOFTWARE=func/func_lab19  TIME_LIMIT=1300000  JOBS=8  AXI_SEED=5570815' \
-		'  SIM_PROFILE=clean|instrumented  SIM_WORKLOADS=a,b  SIM_SEEDS=1,2  SIM_LANES=2' \
+		'  SIM_PROFILE=clean|instrumented  SIM_SUITE=standard|func58|perf20' \
+		'  SIM_MEMORY_MODE=random|ideal  SIM_WORKLOADS=a,b  SIM_SEEDS=1,2  SIM_LANES=2' \
 		'  PERF_CPU_MHZ=100' \
 		'  SOC_ARCHIVE_CLASS=candidate|stable' \
 		'  SOC_TIMING_POLICY=strict|report  (report is only for comparison artifacts)' \
@@ -351,6 +365,7 @@ sim-prepare: cpu-generate chiplab-toolchains
 		--chiplab-dir "$(CHIPLAB_HOME)" \
 		--chiplab-commit "$(CHIPLAB_COMMIT)" \
 		--profile "$(SIM_PROFILE)" \
+		--suite "$(SIM_SUITE)" \
 		--workloads "$(SIM_WORKLOADS)" \
 		--config-args "$(SIM_PREPARE_CONFIG_ARGS)" \
 		--jobs "$(JOBS)" \
@@ -364,6 +379,8 @@ sim-matrix:
 		--cpu-dir "$(CPU_DIR)" \
 		--chiplab-commit "$(CHIPLAB_COMMIT)" \
 		--profile "$(SIM_PROFILE)" \
+		--suite "$(SIM_SUITE)" \
+		--memory-mode "$(SIM_MEMORY_MODE)" \
 		--workloads "$(SIM_WORKLOADS)" \
 		--seeds "$(SIM_SEEDS)" \
 		--lanes "$(SIM_LANES)" \
@@ -371,6 +388,44 @@ sim-matrix:
 		--sim-path "$(SIM_PATH)" \
 		--allow-three "$(SIM_ALLOW_THREE)" \
 		--lane-peak-mb "$(SIM_LANE_PEAK_MB)"
+
+func58-prepare:
+	$(MAKE) sim-prepare \
+		SIM_PROFILE=clean \
+		SIM_SUITE=func58 \
+		SIM_WORKLOADS="$(FUNC58_WORKLOADS)" \
+		SIM_PREPARE_CONFIG_ARGS='--run func/func_lab19 --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst'
+
+func58-sim: func58-prepare
+	$(MAKE) sim-matrix \
+		SIM_PROFILE=clean \
+		SIM_SUITE=func58 \
+		SIM_MEMORY_MODE=random \
+		SIM_WORKLOADS="$(FUNC58_WORKLOADS)" \
+		SIM_SEEDS="$(FUNC58_SEEDS)" \
+		SIM_LANES="$(OFFICIAL_SIM_LANES)" \
+		SIM_ALLOW_THREE=1 \
+		SIM_LANE_PEAK_MB="$(OFFICIAL_SIM_LANE_PEAK_MB)" \
+		TIME_LIMIT="$(FUNC58_TIME_LIMIT)"
+
+perf20-prepare:
+	$(MAKE) sim-prepare \
+		SIM_PROFILE=clean \
+		SIM_SUITE=perf20 \
+		SIM_WORKLOADS="$(PERF20_WORKLOADS)" \
+		SIM_PREPARE_CONFIG_ARGS='--run coremark --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst'
+
+perf20-sim: perf20-prepare
+	$(MAKE) sim-matrix \
+		SIM_PROFILE=clean \
+		SIM_SUITE=perf20 \
+		SIM_MEMORY_MODE=ideal \
+		SIM_WORKLOADS="$(PERF20_WORKLOADS)" \
+		SIM_SEEDS=0 \
+		SIM_LANES="$(OFFICIAL_SIM_LANES)" \
+		SIM_ALLOW_THREE=1 \
+		SIM_LANE_PEAK_MB="$(OFFICIAL_SIM_LANE_PEAK_MB)" \
+		TIME_LIMIT="$(PERF20_TIME_LIMIT)"
 
 wave:
 	@test -f "$(WAVE)" || { printf 'waveform not found: %s\n' "$(WAVE)" >&2; exit 1; }

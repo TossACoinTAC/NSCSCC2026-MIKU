@@ -234,7 +234,9 @@ validation.
 
 The only supported local Scala/simulation entry points are the root
 `make cpu-test`, `make cpu-check`, `make cpu-generate`, `make sim`,
-`make sim-prepare`, and `make sim-matrix` targets. Use
+`make sim-prepare`, `make sim-matrix`, `make func58-sim`, and
+`make perf20-sim` targets. The official-suite convenience targets use the same
+hash-locked prepare/matrix flow; they do not create a second simulator path. Use
 `make cpu-test CPU_TEST=<fully-qualified-suite>` for a focused Scala contract. Do not call a
 system `sbt` or `verilator`, prepend an ad hoc `/tmp` directory, or switch tool
 versions to work around a failure. Run `make toolchain-check` when diagnosing
@@ -417,6 +419,13 @@ the nested repositories remain authoritative for implementation details.
   workload/seed/time-limit runs with independent RAM, temporary files, logs,
   verdict, and resource measurements. Three lanes require the documented
   measured-memory opt-in; a process exit code of zero is not by itself a pass.
+- `make func58-sim`: stage the c398 official function image and run all 58 points
+  with three fixed random-AXI seeds. This is local patched-harness Verilator
+  evidence, not a function bitstream or board result.
+- `make perf20-sim`: stage the c398 official allbench image and run all 20
+  programs with deterministic Verilator memory, preserving each benchmark's
+  CPU cycle counter and software verdict. These cycles are local A/B evidence,
+  not an official performance score.
 - `make wave`: open the default FST in host Surfer; override `WAVE=...` as needed.
 - `make soc-impl`: create an isolated clean c398 performance snapshot under
   `build/chiplab-perf/` and implement the complete SoC at the default 100 MHz
