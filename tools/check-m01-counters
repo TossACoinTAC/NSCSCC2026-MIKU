@@ -18,8 +18,9 @@ try:
 except (OSError, json.JSONDecodeError) as error:
     fail(str(error))
 
-if counters.get("schema_version") != "nscc-m01-v6":
-    fail(f"unexpected schema {counters.get('schema_version')!r}")
+schema = counters.get("schema_version")
+if schema not in {"nscc-m01-v6", "nscc-m01-v7"}:
+    fail(f"unexpected schema {schema!r}")
 if counters.get("commit_observation_lag_cycles") != 4:
     fail("unexpected DiffTest commit observation lag")
 
@@ -49,6 +50,102 @@ if not isinstance(d01_blocked, int) or d01_blocked < 0:
     fail("D01 SDQ-blocked cycles must be a nonnegative integer")
 if d01_blocked > d01_candidates:
     fail("D01 SDQ-blocked cycles exceed oldest-Load candidate cycles")
+
+if schema == "nscc-m01-v7":
+    frontend = counters.get("frontend", {})
+    frontend_occupancy = frontend.get("occupancy_histogram")
+    if not isinstance(frontend_occupancy, list) or len(frontend_occupancy) != 9 or not all(
+        isinstance(value, int) and value >= 0 for value in frontend_occupancy
+    ):
+        fail("frontend occupancy histogram must contain nine nonnegative integers")
+    if sum(frontend_occupancy) != cycles:
+        fail("frontend occupancy histogram does not conserve cycles")
+    request_fire = frontend.get("cache_request_fire")
+    request_intervals = frontend.get("request_interval_histogram")
+    if not isinstance(request_fire, int) or request_fire < 0:
+        fail("frontend cache request fire count is invalid")
+    if not isinstance(request_intervals, list) or len(request_intervals) != 8 or not all(
+        isinstance(value, int) and value >= 0 for value in request_intervals
+    ):
+        fail("frontend request interval histogram must contain eight nonnegative integers")
+    if sum(request_intervals) != max(request_fire - 1, 0):
+        fail("frontend request interval histogram does not conserve request fires")
+    for name in (
+        "translation_request_fire", "translation_outstanding_cycles",
+        "translated_request_valid_cycles", "cache_request_base_valid_cycles",
+        "cache_response_fire", "cache_outstanding_cycles",
+    ):
+        value = frontend.get(name)
+        if not isinstance(value, int) or value < 0:
+            fail(f"frontend {name} must be a nonnegative integer")
+
+    issue = counters.get("issue", {})
+    for name in ("occupancy_sum", "full_cycles", "fire_by_port"):
+        values = issue.get(name)
+        if not isinstance(values, list) or len(values) != 4 or not all(
+            isinstance(value, int) and value >= 0 for value in values
+        ):
+            fail(f"issue {name} must contain four nonnegative integers")
+    if any(value > cycles for value in issue["full_cycles"]):
+        fail("issue full cycles exceed observation cycles")
+    if any(value > 8 * cycles for value in issue["occupancy_sum"]):
+        fail("issue occupancy sum exceeds eight entries per cycle")
+    issue_valid = issue.get("operand_valid_sum")
+    issue_fire = issue.get("fire_sum")
+    if not isinstance(issue_valid, int) or not isinstance(issue_fire, int):
+        fail("issue valid/fire sums must be integers")
+    if issue_fire > issue_valid or sum(issue["fire_by_port"]) != issue_fire:
+        fail("issue fire counts do not conserve accepted issue slots")
+
+    dispatch_fire = dispatch.get("fire_sum")
+    dispatch_valid = dispatch.get("valid_sum")
+    dispatch_hist = dispatch.get("fire_histogram")
+    if not isinstance(dispatch_hist, list) or len(dispatch_hist) != 4 or not all(
+        isinstance(value, int) and value >= 0 for value in dispatch_hist
+    ):
+        fail("dispatch fire histogram must contain four nonnegative integers")
+    if sum(dispatch_hist) != cycles:
+        fail("dispatch fire histogram does not conserve cycles")
+    if sum(width * count for width, count in enumerate(dispatch_hist)) != dispatch_fire:
+        fail("dispatch fire histogram does not conserve accepted uops")
+    if not isinstance(dispatch_valid, int) or dispatch_fire > dispatch_valid:
+        fail("dispatch fire count exceeds valid input count")
+
+    branch = counters.get("branch", {})
+    branch_hist = branch.get("commit_histogram")
+    if not isinstance(branch_hist, list) or len(branch_hist) != 4 or not all(
+        isinstance(value, int) and value >= 0 for value in branch_hist
+    ):
+        fail("branch commit histogram must contain four nonnegative integers")
+    if sum(branch_hist) != cycles:
+        fail("branch commit histogram does not conserve cycles")
+    if sum(width * count for width, count in enumerate(branch_hist)) != branch.get("retired"):
+        fail("branch commit histogram does not conserve retired branches")
+    if branch_hist[2] + branch_hist[3] != branch.get("multi_commit_cycles"):
+        fail("branch multi-commit cycles do not match commit histogram")
+    predictor_updates = branch.get("predictor_update_cycles")
+    if not isinstance(predictor_updates, int) or predictor_updates < 0:
+        fail("predictor update cycles must be a nonnegative integer")
+    if predictor_updates > branch.get("retired"):
+        fail("predictor update cycles exceed retired branches")
+    resolved = branch.get("resolved")
+    mispredicted = branch.get("mispredicted")
+    matches = branch.get("recovery_matches")
+    unmatched = branch.get("recovery_without_resolution")
+    if not all(isinstance(value, int) and value >= 0 for value in (resolved, mispredicted, matches, unmatched)):
+        fail("branch resolve/recovery counts must be nonnegative integers")
+    if matches > mispredicted or mispredicted > resolved:
+        fail("branch resolve/recovery counts violate containment")
+    branch_latency_hist = branch.get("resolve_to_recovery_histogram")
+    if not isinstance(branch_latency_hist, list) or len(branch_latency_hist) != 8 or not all(
+        isinstance(value, int) and value >= 0 for value in branch_latency_hist
+    ):
+        fail("branch resolve-to-recovery histogram must contain eight nonnegative integers")
+    if sum(branch_latency_hist) != matches:
+        fail("branch resolve-to-recovery histogram does not conserve matching recoveries")
+    branch_recoveries = counters.get("recovery_cause", {}).get("branch_mispredict")
+    if matches + unmatched != branch_recoveries:
+        fail("branch recovery matching does not conserve branch recoveries")
 
 e02 = counters.get("e02", {})
 e02_cycles = e02.get("head_staged_cycles")

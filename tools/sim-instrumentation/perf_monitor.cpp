@@ -21,6 +21,22 @@ inline unsigned popcount8(std::uint8_t value) {
     return count;
 }
 
+inline unsigned latency_bucket(std::uint64_t cycles) {
+    if (cycles <= 3) {
+        return static_cast<unsigned>(cycles);
+    }
+    if (cycles <= 7) {
+        return 4;
+    }
+    if (cycles <= 15) {
+        return 5;
+    }
+    if (cycles <= 31) {
+        return 6;
+    }
+    return 7;
+}
+
 inline void fnv_byte(std::uint64_t &hash, std::uint8_t value) {
     hash ^= value;
     hash *= 1099511628211ULL;
@@ -95,7 +111,8 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
     snapshot.retired_count = static_cast<std::uint8_t>(popcount8(retired_mask));
 
     snapshot.recovery = static_cast<bool>(CORE(systemArea_core_io_recoveryValid));
-    snapshot.recovery_cause = static_cast<std::uint8_t>(SYS(recoveryPayload_cause) & 0x7U);
+    snapshot.recovery_cause = static_cast<std::uint8_t>(BACKEND(rob_io_recovery_cause) & 0x7U);
+    snapshot.recovery_pointer = static_cast<std::uint8_t>(BACKEND(rob_io_recovery_robPointer) & 0x3fU);
     snapshot.exception = static_cast<bool>(COMMIT(exceptionValid));
     snapshot.ertn = static_cast<bool>(COMMIT(ertnValid));
     snapshot.idle = static_cast<bool>(COMMIT(idleValid));
@@ -103,6 +120,7 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
 
     const unsigned rob_occupancy = static_cast<unsigned>(ROB(occupancy) & 0x3fU);
     snapshot.rob_occupancy = static_cast<std::uint8_t>(rob_occupancy);
+    snapshot.rob_head_pointer = static_cast<std::uint8_t>(ROB(_zz_candidates_0_state_pointer) & 0x3fU);
 
     if (snapshot.recovery) {
         snapshot.zero_reason = 0;
@@ -118,6 +136,9 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
     const std::uint8_t ready_maps[4] = {
         static_cast<std::uint8_t>(ISSUE(0, readyMap)), static_cast<std::uint8_t>(ISSUE(1, readyMap)),
         static_cast<std::uint8_t>(ISSUE(2, readyMap)), static_cast<std::uint8_t>(ISSUE(3, readyMap))};
+    const std::uint8_t issue_counts[4] = {
+        static_cast<std::uint8_t>(ISSUE_COUNT(0)), static_cast<std::uint8_t>(ISSUE_COUNT(1)),
+        static_cast<std::uint8_t>(ISSUE_COUNT(2)), static_cast<std::uint8_t>(ISSUE_COUNT(3))};
 
     if (snapshot.zero_reason == 2) {
         const std::uint8_t head_pointer = static_cast<std::uint8_t>(ROB(_zz_candidates_0_state_pointer) & 0x3fU);
@@ -406,6 +427,21 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
 
     snapshot.decode_valid = static_cast<std::uint8_t>(
         popcount8(static_cast<std::uint8_t>(SYS(frontend__DOT__decodeInputValid))));
+    snapshot.frontend_occupancy = static_cast<std::uint8_t>(SYS(frontend__DOT__count) & 0xfU);
+    snapshot.frontend_translation_request_fire =
+        static_cast<bool>(ATU(area_instructionRequestFire));
+    snapshot.frontend_translation_outstanding =
+        static_cast<bool>(SYS(frontend__DOT__translationOutstanding));
+    snapshot.frontend_translated_request_valid =
+        static_cast<bool>(SYS(frontend__DOT__translatedRequestValid));
+    snapshot.frontend_cache_request_base_valid =
+        static_cast<bool>(SYS(frontend__DOT__cacheRequestBaseValid));
+    snapshot.frontend_cache_request_fire =
+        static_cast<bool>(SYS(frontend__DOT__requestFire));
+    snapshot.frontend_cache_response_fire =
+        static_cast<bool>(SYS(frontend__DOT__responseFire));
+    snapshot.frontend_cache_outstanding =
+        static_cast<bool>(SYS(frontend__DOT__cacheOutstanding));
     snapshot.frontend_cache_request = static_cast<bool>(SYS(frontend_io_cacheRequestValid));
     snapshot.frontend_uncached_request = static_cast<bool>(SYS(frontend_io_cacheUncachedRequestValid));
     snapshot.divider_busy = divider_busy;
@@ -420,6 +456,48 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
     previous_divider_busy_ = divider_busy;
     for (unsigned queue = 0; queue < 4; queue++) {
         snapshot.issue_ready[queue] = static_cast<std::uint8_t>(popcount8(ready_maps[queue]));
+        snapshot.issue_occupancy[queue] = static_cast<std::uint8_t>(issue_counts[queue] & 0xfU);
+    }
+    snapshot.issue_operand_valid = static_cast<std::uint8_t>(BACKEND(issueOperandValid) & 0xfU);
+    snapshot.issue_fire = static_cast<std::uint8_t>(
+        snapshot.issue_operand_valid & CLUSTER(execution_io_issueReady) & 0xfU);
+    snapshot.dispatch_valid = static_cast<std::uint8_t>(
+        popcount8(static_cast<std::uint8_t>(BACKEND(dispatchWindow_io_outputValid) & 0x7U)));
+    const std::uint8_t dispatch_port_valid =
+        static_cast<std::uint8_t>(BACKEND(router_io_portValid) & 0xfU);
+    const std::uint8_t dispatch_port_ready =
+        static_cast<std::uint8_t>(BACKEND(router_io_portReady) & 0xfU);
+    snapshot.dispatch_fire = static_cast<std::uint8_t>(dispatch_port_valid & dispatch_port_ready);
+
+    snapshot.committed_branch_mask = static_cast<std::uint8_t>(SYS(committedBranch) & 0x7U);
+    snapshot.predictor_update_valid = static_cast<bool>(SYS(retiredPredictorUpdateValid));
+    const std::uint8_t staged_branch_valid = static_cast<std::uint8_t>(
+        ROB(stagedCompletionValid) & ROB(stagedCompletionCurrent) & 0x1fU);
+    const bool staged_branch_resolved[5] = {
+        static_cast<bool>(ROB(stagedBranchResolved_0)),
+        static_cast<bool>(ROB(stagedBranchResolved_1)),
+        static_cast<bool>(ROB(stagedBranchResolved_2)),
+        static_cast<bool>(ROB(stagedBranchResolved_3)), false};
+    const bool staged_branch_mispredict[5] = {
+        static_cast<bool>(ROB(stagedBranchMispredict_0)),
+        static_cast<bool>(ROB(stagedBranchMispredict_1)),
+        static_cast<bool>(ROB(stagedBranchMispredict_2)),
+        static_cast<bool>(ROB(stagedBranchMispredict_3)),
+        static_cast<bool>(ROB(stagedBranchMispredict_4))};
+    const std::uint8_t staged_branch_pointer[5] = {
+        static_cast<std::uint8_t>(ROB(stagedRobPointer_0)),
+        static_cast<std::uint8_t>(ROB(stagedRobPointer_1)),
+        static_cast<std::uint8_t>(ROB(stagedRobPointer_2)),
+        static_cast<std::uint8_t>(ROB(stagedRobPointer_3)),
+        static_cast<std::uint8_t>(ROB(stagedRobPointer_4))};
+    for (unsigned lane = 0; lane < 5; lane++) {
+        snapshot.branch_resolved_pointer[lane] = staged_branch_pointer[lane] & 0x3fU;
+        if ((staged_branch_valid & (1U << lane)) != 0 && staged_branch_resolved[lane]) {
+            snapshot.branch_resolved_mask |= static_cast<std::uint8_t>(1U << lane);
+            if (staged_branch_mispredict[lane]) {
+                snapshot.branch_mispredict_mask |= static_cast<std::uint8_t>(1U << lane);
+            }
+        }
     }
 
     // D01 lower bound: the router's P3 payload defaults to dispatch lane 0
@@ -616,6 +694,24 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot, std::uint8_
     rob_full_cycles_ += bit(snapshot.rob_occupancy >= 32);
 
     frontend_decode_valid_sum_ += snapshot.decode_valid;
+    if (snapshot.frontend_occupancy < 9) {
+        frontend_occupancy_hist_[snapshot.frontend_occupancy]++;
+    }
+    frontend_translation_request_fire_ += bit(snapshot.frontend_translation_request_fire);
+    frontend_translation_outstanding_cycles_ += bit(snapshot.frontend_translation_outstanding);
+    frontend_translated_request_valid_cycles_ += bit(snapshot.frontend_translated_request_valid);
+    frontend_cache_request_base_valid_cycles_ += bit(snapshot.frontend_cache_request_base_valid);
+    frontend_cache_request_fire_ += bit(snapshot.frontend_cache_request_fire);
+    frontend_cache_response_fire_ += bit(snapshot.frontend_cache_response_fire);
+    frontend_cache_outstanding_cycles_ += bit(snapshot.frontend_cache_outstanding);
+    if (snapshot.frontend_cache_request_fire) {
+        if (frontend_seen_request_) {
+            const std::uint64_t interval = cycles_ - frontend_last_request_cycle_;
+            frontend_request_interval_hist_[latency_bucket(interval)]++;
+        }
+        frontend_last_request_cycle_ = cycles_;
+        frontend_seen_request_ = true;
+    }
     frontend_cache_request_ += bit(snapshot.frontend_cache_request);
     frontend_uncached_request_ += bit(snapshot.frontend_uncached_request);
     divider_busy_cycles_ += bit(snapshot.divider_busy);
@@ -626,6 +722,70 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot, std::uint8_
     for (unsigned queue = 0; queue < 4; queue++) {
         issue_ready_cycles_[queue] += bit(snapshot.issue_ready[queue] != 0);
         issue_ready_entries_[queue] += snapshot.issue_ready[queue];
+        issue_occupancy_sum_[queue] += snapshot.issue_occupancy[queue];
+        issue_full_cycles_[queue] += bit(snapshot.issue_occupancy[queue] >= 8);
+        issue_fire_by_port_[queue] += bit((snapshot.issue_fire & (1U << queue)) != 0);
+    }
+    const unsigned issue_valid = popcount8(snapshot.issue_operand_valid);
+    const unsigned issue_fire = popcount8(snapshot.issue_fire);
+    const unsigned dispatch_fire = popcount8(snapshot.dispatch_fire);
+    issue_valid_sum_ += issue_valid;
+    issue_fire_sum_ += issue_fire;
+    dispatch_valid_sum_ += snapshot.dispatch_valid;
+    dispatch_fire_sum_ += dispatch_fire;
+    dispatch_fire_hist_[dispatch_fire]++;
+
+    bool unresolved_mispredict = false;
+    for (bool pending : branch_mispredict_pending_) {
+        unresolved_mispredict = unresolved_mispredict || pending;
+    }
+    if (unresolved_mispredict) {
+        branch_dispatch_fire_after_mispredict_ += dispatch_fire;
+        branch_issue_fire_after_mispredict_ += issue_fire;
+    }
+
+    const unsigned committed_branches = popcount8(snapshot.committed_branch_mask);
+    branch_commit_hist_[committed_branches]++;
+    branch_retired_ += committed_branches;
+    branch_multi_commit_cycles_ += bit(committed_branches > 1);
+    predictor_update_cycles_ += bit(snapshot.predictor_update_valid);
+    for (unsigned lane = 0; lane < 5; lane++) {
+        if ((snapshot.branch_resolved_mask & (1U << lane)) == 0) {
+            continue;
+        }
+        branch_resolved_++;
+        if ((snapshot.branch_mispredict_mask & (1U << lane)) == 0) {
+            continue;
+        }
+        branch_mispredicted_++;
+        const std::uint8_t pointer = snapshot.branch_resolved_pointer[lane] & 0x3fU;
+        if (!branch_mispredict_pending_[pointer]) {
+            branch_mispredict_pending_[pointer] = true;
+            branch_resolve_cycle_[pointer] = cycles_;
+            const unsigned older_entries =
+                (static_cast<unsigned>(pointer) - snapshot.rob_head_pointer) & 0x3fU;
+            if (older_entries <= 31) {
+                branch_older_entries_at_mispredict_sum_ += older_entries;
+            }
+        }
+    }
+    if (snapshot.recovery) {
+        if (snapshot.recovery_cause == 1) {
+            const std::uint8_t pointer = snapshot.recovery_pointer & 0x3fU;
+            if (branch_mispredict_pending_[pointer]) {
+                const std::uint64_t latency = cycles_ - branch_resolve_cycle_[pointer];
+                branch_recovery_matches_++;
+                branch_resolve_to_recovery_cycles_ += latency;
+                branch_resolve_to_recovery_hist_[latency_bucket(latency)]++;
+                branch_resolve_to_recovery_max_ = latency > branch_resolve_to_recovery_max_ ?
+                    latency : branch_resolve_to_recovery_max_;
+            } else {
+                branch_recovery_without_resolution_++;
+            }
+        }
+        for (bool &pending : branch_mispredict_pending_) {
+            pending = false;
+        }
     }
     d01_oldest_load_candidate_cycles_ += bit(snapshot.d01_oldest_load_candidate);
     d01_oldest_load_blocked_by_sdq_cycles_ +=
@@ -777,7 +937,7 @@ void PerfMonitor::write_json(const char *path) const {
     const bool commit_count_ok = observed_instructions_ == sampled_instructions_;
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v6\",\n");
+    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v7\",\n");
     std::fprintf(file, "  \"roi\": \"difftest-observation-window-source-aligned\",\n");
     std::fprintf(file, "  \"commit_observation_lag_cycles\": %u,\n", kCommitObservationLag);
     std::fprintf(file, "  \"cycles\": %llu,\n", static_cast<unsigned long long>(cycles_));
@@ -836,17 +996,80 @@ void PerfMonitor::write_json(const char *path) const {
     std::fprintf(file, "  \"rob\": {\"occupancy_sum\": %llu, \"occupancy_max\": %llu, \"full_cycles\": %llu},\n",
                  static_cast<unsigned long long>(rob_occupancy_sum_), static_cast<unsigned long long>(rob_occupancy_max_),
                  static_cast<unsigned long long>(rob_full_cycles_));
-    std::fprintf(file, "  \"frontend\": {\"decode_valid_sum\": %llu, \"cache_request\": %llu, \"uncached_request\": %llu},\n",
-                 static_cast<unsigned long long>(frontend_decode_valid_sum_), static_cast<unsigned long long>(frontend_cache_request_),
+    std::fprintf(file, "  \"frontend\": {\"decode_valid_sum\": %llu, \"occupancy_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu], \"translation_request_fire\": %llu, \"translation_outstanding_cycles\": %llu, \"translated_request_valid_cycles\": %llu, \"cache_request_base_valid_cycles\": %llu, \"cache_request_fire\": %llu, \"cache_response_fire\": %llu, \"cache_outstanding_cycles\": %llu, \"request_interval_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu], \"cache_request\": %llu, \"uncached_request\": %llu},\n",
+                 static_cast<unsigned long long>(frontend_decode_valid_sum_),
+                 static_cast<unsigned long long>(frontend_occupancy_hist_[0]),
+                 static_cast<unsigned long long>(frontend_occupancy_hist_[1]),
+                 static_cast<unsigned long long>(frontend_occupancy_hist_[2]),
+                 static_cast<unsigned long long>(frontend_occupancy_hist_[3]),
+                 static_cast<unsigned long long>(frontend_occupancy_hist_[4]),
+                 static_cast<unsigned long long>(frontend_occupancy_hist_[5]),
+                 static_cast<unsigned long long>(frontend_occupancy_hist_[6]),
+                 static_cast<unsigned long long>(frontend_occupancy_hist_[7]),
+                 static_cast<unsigned long long>(frontend_occupancy_hist_[8]),
+                 static_cast<unsigned long long>(frontend_translation_request_fire_),
+                 static_cast<unsigned long long>(frontend_translation_outstanding_cycles_),
+                 static_cast<unsigned long long>(frontend_translated_request_valid_cycles_),
+                 static_cast<unsigned long long>(frontend_cache_request_base_valid_cycles_),
+                 static_cast<unsigned long long>(frontend_cache_request_fire_),
+                 static_cast<unsigned long long>(frontend_cache_response_fire_),
+                 static_cast<unsigned long long>(frontend_cache_outstanding_cycles_),
+                 static_cast<unsigned long long>(frontend_request_interval_hist_[0]),
+                 static_cast<unsigned long long>(frontend_request_interval_hist_[1]),
+                 static_cast<unsigned long long>(frontend_request_interval_hist_[2]),
+                 static_cast<unsigned long long>(frontend_request_interval_hist_[3]),
+                 static_cast<unsigned long long>(frontend_request_interval_hist_[4]),
+                 static_cast<unsigned long long>(frontend_request_interval_hist_[5]),
+                 static_cast<unsigned long long>(frontend_request_interval_hist_[6]),
+                 static_cast<unsigned long long>(frontend_request_interval_hist_[7]),
+                 static_cast<unsigned long long>(frontend_cache_request_),
                  static_cast<unsigned long long>(frontend_uncached_request_));
-    std::fprintf(file, "  \"issue\": {\"ready_cycles\": [%llu, %llu, %llu, %llu], \"ready_entries\": [%llu, %llu, %llu, %llu]},\n",
+    std::fprintf(file, "  \"issue\": {\"ready_cycles\": [%llu, %llu, %llu, %llu], \"ready_entries\": [%llu, %llu, %llu, %llu], \"occupancy_sum\": [%llu, %llu, %llu, %llu], \"full_cycles\": [%llu, %llu, %llu, %llu], \"operand_valid_sum\": %llu, \"fire_sum\": %llu, \"fire_by_port\": [%llu, %llu, %llu, %llu]},\n",
                  static_cast<unsigned long long>(issue_ready_cycles_[0]), static_cast<unsigned long long>(issue_ready_cycles_[1]),
                  static_cast<unsigned long long>(issue_ready_cycles_[2]), static_cast<unsigned long long>(issue_ready_cycles_[3]),
                  static_cast<unsigned long long>(issue_ready_entries_[0]), static_cast<unsigned long long>(issue_ready_entries_[1]),
-                 static_cast<unsigned long long>(issue_ready_entries_[2]), static_cast<unsigned long long>(issue_ready_entries_[3]));
-    std::fprintf(file, "  \"dispatch\": {\"d01_oldest_load_candidate_cycles\": %llu, \"d01_oldest_load_blocked_by_sdq_cycles\": %llu},\n",
+                 static_cast<unsigned long long>(issue_ready_entries_[2]), static_cast<unsigned long long>(issue_ready_entries_[3]),
+                 static_cast<unsigned long long>(issue_occupancy_sum_[0]), static_cast<unsigned long long>(issue_occupancy_sum_[1]),
+                 static_cast<unsigned long long>(issue_occupancy_sum_[2]), static_cast<unsigned long long>(issue_occupancy_sum_[3]),
+                 static_cast<unsigned long long>(issue_full_cycles_[0]), static_cast<unsigned long long>(issue_full_cycles_[1]),
+                 static_cast<unsigned long long>(issue_full_cycles_[2]), static_cast<unsigned long long>(issue_full_cycles_[3]),
+                 static_cast<unsigned long long>(issue_valid_sum_), static_cast<unsigned long long>(issue_fire_sum_),
+                 static_cast<unsigned long long>(issue_fire_by_port_[0]), static_cast<unsigned long long>(issue_fire_by_port_[1]),
+                 static_cast<unsigned long long>(issue_fire_by_port_[2]), static_cast<unsigned long long>(issue_fire_by_port_[3]));
+    std::fprintf(file, "  \"dispatch\": {\"valid_sum\": %llu, \"fire_sum\": %llu, \"fire_histogram\": [%llu, %llu, %llu, %llu], \"d01_oldest_load_candidate_cycles\": %llu, \"d01_oldest_load_blocked_by_sdq_cycles\": %llu},\n",
+                 static_cast<unsigned long long>(dispatch_valid_sum_),
+                 static_cast<unsigned long long>(dispatch_fire_sum_),
+                 static_cast<unsigned long long>(dispatch_fire_hist_[0]),
+                 static_cast<unsigned long long>(dispatch_fire_hist_[1]),
+                 static_cast<unsigned long long>(dispatch_fire_hist_[2]),
+                 static_cast<unsigned long long>(dispatch_fire_hist_[3]),
                  static_cast<unsigned long long>(d01_oldest_load_candidate_cycles_),
                  static_cast<unsigned long long>(d01_oldest_load_blocked_by_sdq_cycles_));
+    std::fprintf(file, "  \"branch\": {\"commit_histogram\": [%llu, %llu, %llu, %llu], \"retired\": %llu, \"multi_commit_cycles\": %llu, \"predictor_update_cycles\": %llu, \"resolved\": %llu, \"mispredicted\": %llu, \"recovery_matches\": %llu, \"recovery_without_resolution\": %llu, \"resolve_to_recovery_cycles\": %llu, \"resolve_to_recovery_max\": %llu, \"resolve_to_recovery_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu], \"older_entries_at_mispredict_sum\": %llu, \"dispatch_fire_after_unrecovered_mispredict\": %llu, \"issue_fire_after_unrecovered_mispredict\": %llu},\n",
+                 static_cast<unsigned long long>(branch_commit_hist_[0]),
+                 static_cast<unsigned long long>(branch_commit_hist_[1]),
+                 static_cast<unsigned long long>(branch_commit_hist_[2]),
+                 static_cast<unsigned long long>(branch_commit_hist_[3]),
+                 static_cast<unsigned long long>(branch_retired_),
+                 static_cast<unsigned long long>(branch_multi_commit_cycles_),
+                 static_cast<unsigned long long>(predictor_update_cycles_),
+                 static_cast<unsigned long long>(branch_resolved_),
+                 static_cast<unsigned long long>(branch_mispredicted_),
+                 static_cast<unsigned long long>(branch_recovery_matches_),
+                 static_cast<unsigned long long>(branch_recovery_without_resolution_),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_cycles_),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_max_),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[0]),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[1]),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[2]),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[3]),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[4]),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[5]),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[6]),
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[7]),
+                 static_cast<unsigned long long>(branch_older_entries_at_mispredict_sum_),
+                 static_cast<unsigned long long>(branch_dispatch_fire_after_mispredict_),
+                 static_cast<unsigned long long>(branch_issue_fire_after_mispredict_));
     std::fprintf(file, "  \"e02\": {\"head_staged_cycles\": %llu, \"by_lane\": [%llu, %llu, %llu, %llu, %llu], \"by_class\": {\"load\": %llu, \"store\": %llu, \"branch\": %llu, \"multiplier\": %llu, \"lane0_other\": %llu, \"lane1_other\": %llu, \"lane2_other\": %llu, \"lane3_other\": %llu}},\n",
                  static_cast<unsigned long long>(e02_head_staged_cycles_),
                  static_cast<unsigned long long>(e02_head_staged_lane_[0]),
