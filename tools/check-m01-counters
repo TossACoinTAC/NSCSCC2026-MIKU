@@ -18,7 +18,7 @@ try:
 except (OSError, json.JSONDecodeError) as error:
     fail(str(error))
 
-if counters.get("schema_version") != "nscc-m01-v5":
+if counters.get("schema_version") != "nscc-m01-v6":
     fail(f"unexpected schema {counters.get('schema_version')!r}")
 if counters.get("commit_observation_lag_cycles") != 4:
     fail("unexpected DiffTest commit observation lag")
@@ -91,6 +91,60 @@ for lane in range(3):
         fail(f"W01 lane {lane} affected cycles exceed conflict cycles")
     if w01_consumers[lane] < w01_affected[lane]:
         fail(f"W01 lane {lane} affected consumer entries are below affected cycles")
+
+l05 = counters.get("l05", {})
+l05_mode_names = {"direct", "dmw0", "dmw1", "tlb"}
+l05_maps = {}
+for field in ("requests_by_mode", "responses_by_mode", "response_latency_cycles_by_mode"):
+    values = l05.get(field)
+    if not isinstance(values, dict) or set(values) != l05_mode_names:
+        fail(f"L05 {field} must contain direct, dmw0, dmw1, and tlb")
+    if not all(
+        isinstance(pair, list) and len(pair) == 2 and
+        all(isinstance(value, int) and value >= 0 for value in pair)
+        for pair in values.values()
+    ):
+        fail(f"L05 {field} entries must be nonnegative [load, store] pairs")
+    l05_maps[field] = values
+for mode in l05_mode_names:
+    for owner in range(2):
+        if l05_maps["responses_by_mode"][mode][owner] > l05_maps["requests_by_mode"][mode][owner]:
+            fail(f"L05 {mode} owner {owner} responses exceed requests")
+l05_blocks = l05.get("direct_dmw_store_blocked_load_cycles")
+if not isinstance(l05_blocks, dict) or set(l05_blocks) != {"direct", "dmw0", "dmw1"} or not all(
+    isinstance(value, int) and value >= 0 for value in l05_blocks.values()
+):
+    fail("L05 direct/DMW Store block counts are invalid")
+if not isinstance(l05.get("boundary_responses"), int) or l05["boundary_responses"] < 0:
+    fail("L05 boundary response count is invalid")
+if l05.get("protocol_errors") != 0:
+    fail("L05 observed overlapping translation ownership")
+if not isinstance(l05.get("pending_at_end"), bool):
+    fail("L05 pending_at_end must be boolean")
+
+w02 = counters.get("w02", {})
+w02_completions = w02.get("load_completions")
+w02_affected = w02.get("affected_cycles")
+w02_safe = w02.get("safe_p0_p2_affected_cycles")
+w02_cycles_by_queue = w02.get("affected_cycles_by_queue")
+w02_consumers_by_queue = w02.get("affected_consumer_entries_by_queue")
+for name, value in (("load completions", w02_completions), ("affected cycles", w02_affected),
+                    ("safe affected cycles", w02_safe)):
+    if not isinstance(value, int) or value < 0:
+        fail(f"W02 {name} must be a nonnegative integer")
+if w02_affected > w02_completions or w02_safe > w02_affected:
+    fail("W02 affected cycles exceed their parent count")
+for name, values in (("affected cycles by queue", w02_cycles_by_queue),
+                     ("affected consumers by queue", w02_consumers_by_queue)):
+    if not isinstance(values, list) or len(values) != 4 or not all(
+        isinstance(value, int) and value >= 0 for value in values
+    ):
+        fail(f"W02 {name} must contain four nonnegative integers")
+for queue in range(4):
+    if w02_cycles_by_queue[queue] > w02_completions:
+        fail(f"W02 queue {queue} affected cycles exceed load completions")
+    if w02_consumers_by_queue[queue] < w02_cycles_by_queue[queue]:
+        fail(f"W02 queue {queue} consumer entries are below affected cycles")
 
 invariants = counters.get("invariants", {})
 for name in ("retire_hist_cycles", "retire_hist_instructions", "commit_observation", "source_retire_alignment", "queue_identity"):

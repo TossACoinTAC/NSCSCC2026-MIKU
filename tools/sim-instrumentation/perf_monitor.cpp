@@ -140,7 +140,7 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
             static_cast<bool>(ROB(stagedBranchResolved_1)),
             static_cast<bool>(ROB(stagedBranchResolved_2)),
             static_cast<bool>(ROB(stagedBranchResolved_3)),
-            static_cast<bool>(ROB(stagedBranchResolved_4))};
+            false};
         for (unsigned lane = 0; lane < 5 && ROB(_zz_candidates_0_state_valid_1); lane++) {
             if ((staged_valid & (1U << lane)) == 0 || staged_pointer[lane] != head_pointer) {
                 continue;
@@ -487,6 +487,65 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
         }
     }
 
+    if (LSQ(translationRequestFire)) {
+        snapshot.l05_translation_request_mode = ATU(area_dataTranslate) ? 3 :
+            ATU(area_dataDmw0) ? 1 : ATU(area_dataDmw1) ? 2 : 0;
+        snapshot.l05_translation_request_store = !LSQ(loadNeedsTranslation);
+    }
+    snapshot.l05_translation_response = static_cast<bool>(LSQ(translationResponseFire));
+    if (LSQ(loadHeadReady) && LSQ(unknownOlderStore) != 0 && LSQ(translationActive) &&
+        LSQ(translationOwnerStore) && !ATU(area_dataContext_translationEnabled)) {
+        snapshot.l05_direct_store_block_mode = ATU(area_dataContext_dmw0Enabled) ? 1 :
+            ATU(area_dataContext_dmw1Enabled) ? 2 : 0;
+    }
+
+    const bool load_valid_for_completion[8] = {
+        static_cast<bool>(LSQ(loads_0_valid)), static_cast<bool>(LSQ(loads_1_valid)),
+        static_cast<bool>(LSQ(loads_2_valid)), static_cast<bool>(LSQ(loads_3_valid)),
+        static_cast<bool>(LSQ(loads_4_valid)), static_cast<bool>(LSQ(loads_5_valid)),
+        static_cast<bool>(LSQ(loads_6_valid)), static_cast<bool>(LSQ(loads_7_valid))};
+    const std::uint8_t load_pointer_for_completion[8] = {
+        static_cast<std::uint8_t>(LSQ(loads_0_robPointer)),
+        static_cast<std::uint8_t>(LSQ(loads_1_robPointer)),
+        static_cast<std::uint8_t>(LSQ(loads_2_robPointer)),
+        static_cast<std::uint8_t>(LSQ(loads_3_robPointer)),
+        static_cast<std::uint8_t>(LSQ(loads_4_robPointer)),
+        static_cast<std::uint8_t>(LSQ(loads_5_robPointer)),
+        static_cast<std::uint8_t>(LSQ(loads_6_robPointer)),
+        static_cast<std::uint8_t>(LSQ(loads_7_robPointer))};
+    const std::uint8_t completion_pointer =
+        static_cast<std::uint8_t>(LSQ_IO(completion_robPointer));
+    bool completion_matches_load = false;
+    for (unsigned entry = 0; entry < 8; entry++) {
+        completion_matches_load |= load_valid_for_completion[entry] &&
+            load_pointer_for_completion[entry] == completion_pointer;
+    }
+    const std::uint8_t completion_pdst =
+        static_cast<std::uint8_t>(LSQ_IO(completion_pdst));
+    snapshot.w02_load_completion = !snapshot.recovery &&
+        static_cast<bool>(LSQ_IO(completionValid)) &&
+        static_cast<bool>(LSQ_IO(completion_writesPdst)) && completion_pdst != 0 &&
+        !static_cast<bool>(LSQ_IO(completion_exception_valid)) &&
+        static_cast<std::uint8_t>(LSQ_IO(completion_recoveryEpoch)) ==
+            static_cast<std::uint8_t>(BACKEND(recoveryEpoch)) &&
+        completion_matches_load;
+    if (snapshot.w02_load_completion) {
+        for (unsigned queue = 0; queue < 4; queue++) {
+            unsigned affected = 0;
+            for (unsigned entry = 0; entry < issue_entries[queue] && entry < 8; entry++) {
+                const bool waits_for_source1 = !issue_src1_ready[queue][entry] &&
+                    issue_psrc1[queue][entry] == completion_pdst;
+                const bool waits_for_source2 = !issue_src2_ready[queue][entry] &&
+                    issue_psrc2[queue][entry] == completion_pdst;
+                affected += waits_for_source1 || waits_for_source2;
+            }
+            snapshot.w02_affected_consumers[queue] = static_cast<std::uint8_t>(affected);
+            if (affected != 0) {
+                snapshot.w02_affected_queue_mask |= static_cast<std::uint8_t>(1U << queue);
+            }
+        }
+    }
+
     const bool lsq_signals[8] = {
         static_cast<bool>(LSQ(translationRequestFire)), static_cast<bool>(LSQ(translationResponseFire)),
         static_cast<bool>(LSQ(translationCompletionFire)), static_cast<bool>(LSQ(loadRequestFire)),
@@ -580,6 +639,44 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot, std::uint8_
         w01_conflict_cycles_[lane] += bit((snapshot.w01_conflict_mask & (1U << lane)) != 0);
         w01_affected_cycles_[lane] += bit((snapshot.w01_affected_mask & (1U << lane)) != 0);
         w01_affected_consumers_[lane] += snapshot.w01_affected_consumers[lane];
+    }
+    if (l05_translation_pending_) {
+        l05_pending_age_++;
+    }
+    if (snapshot.l05_translation_response) {
+        if (l05_translation_pending_) {
+            l05_responses_[l05_pending_mode_][l05_pending_owner_]++;
+            l05_response_latency_cycles_[l05_pending_mode_][l05_pending_owner_] +=
+                l05_pending_age_;
+            l05_translation_pending_ = false;
+        } else {
+            l05_boundary_responses_++;
+        }
+    }
+    if (snapshot.l05_translation_request_mode != kNoReason) {
+        if (l05_translation_pending_) {
+            l05_protocol_errors_++;
+        }
+        l05_pending_mode_ = snapshot.l05_translation_request_mode;
+        l05_pending_owner_ = snapshot.l05_translation_request_store ? 1 : 0;
+        l05_pending_age_ = 0;
+        l05_translation_pending_ = true;
+        l05_requests_[l05_pending_mode_][l05_pending_owner_]++;
+    }
+    if (snapshot.l05_direct_store_block_mode != kNoReason) {
+        l05_direct_store_blocked_load_cycles_[snapshot.l05_direct_store_block_mode]++;
+    }
+    if (snapshot.w02_load_completion) {
+        w02_load_completions_++;
+        const bool any_affected = snapshot.w02_affected_queue_mask != 0;
+        const bool safe_affected = (snapshot.w02_affected_queue_mask & 0x7U) != 0;
+        w02_affected_cycles_ += bit(any_affected);
+        w02_safe_affected_cycles_ += bit(safe_affected);
+        for (unsigned queue = 0; queue < 4; queue++) {
+            w02_affected_cycles_by_queue_[queue] +=
+                bit((snapshot.w02_affected_queue_mask & (1U << queue)) != 0);
+            w02_affected_consumers_[queue] += snapshot.w02_affected_consumers[queue];
+        }
     }
     for (unsigned event = 0; event < 8; event++) {
         lsq_events_[event] += bit((snapshot.lsq_events & (1U << event)) != 0);
@@ -680,7 +777,7 @@ void PerfMonitor::write_json(const char *path) const {
     const bool commit_count_ok = observed_instructions_ == sampled_instructions_;
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v5\",\n");
+    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v6\",\n");
     std::fprintf(file, "  \"roi\": \"difftest-observation-window-source-aligned\",\n");
     std::fprintf(file, "  \"commit_observation_lag_cycles\": %u,\n", kCommitObservationLag);
     std::fprintf(file, "  \"cycles\": %llu,\n", static_cast<unsigned long long>(cycles_));
@@ -775,6 +872,37 @@ void PerfMonitor::write_json(const char *path) const {
                  static_cast<unsigned long long>(w01_affected_consumers_[0]),
                  static_cast<unsigned long long>(w01_affected_consumers_[1]),
                  static_cast<unsigned long long>(w01_affected_consumers_[2]));
+    std::fprintf(file, "  \"l05\": {\"requests_by_mode\": {\"direct\": [%llu, %llu], \"dmw0\": [%llu, %llu], \"dmw1\": [%llu, %llu], \"tlb\": [%llu, %llu]}, \"responses_by_mode\": {\"direct\": [%llu, %llu], \"dmw0\": [%llu, %llu], \"dmw1\": [%llu, %llu], \"tlb\": [%llu, %llu]}, \"response_latency_cycles_by_mode\": {\"direct\": [%llu, %llu], \"dmw0\": [%llu, %llu], \"dmw1\": [%llu, %llu], \"tlb\": [%llu, %llu]}, \"direct_dmw_store_blocked_load_cycles\": {\"direct\": %llu, \"dmw0\": %llu, \"dmw1\": %llu}, \"boundary_responses\": %llu, \"protocol_errors\": %llu, \"pending_at_end\": %s},\n",
+                 static_cast<unsigned long long>(l05_requests_[0][0]), static_cast<unsigned long long>(l05_requests_[0][1]),
+                 static_cast<unsigned long long>(l05_requests_[1][0]), static_cast<unsigned long long>(l05_requests_[1][1]),
+                 static_cast<unsigned long long>(l05_requests_[2][0]), static_cast<unsigned long long>(l05_requests_[2][1]),
+                 static_cast<unsigned long long>(l05_requests_[3][0]), static_cast<unsigned long long>(l05_requests_[3][1]),
+                 static_cast<unsigned long long>(l05_responses_[0][0]), static_cast<unsigned long long>(l05_responses_[0][1]),
+                 static_cast<unsigned long long>(l05_responses_[1][0]), static_cast<unsigned long long>(l05_responses_[1][1]),
+                 static_cast<unsigned long long>(l05_responses_[2][0]), static_cast<unsigned long long>(l05_responses_[2][1]),
+                 static_cast<unsigned long long>(l05_responses_[3][0]), static_cast<unsigned long long>(l05_responses_[3][1]),
+                 static_cast<unsigned long long>(l05_response_latency_cycles_[0][0]), static_cast<unsigned long long>(l05_response_latency_cycles_[0][1]),
+                 static_cast<unsigned long long>(l05_response_latency_cycles_[1][0]), static_cast<unsigned long long>(l05_response_latency_cycles_[1][1]),
+                 static_cast<unsigned long long>(l05_response_latency_cycles_[2][0]), static_cast<unsigned long long>(l05_response_latency_cycles_[2][1]),
+                 static_cast<unsigned long long>(l05_response_latency_cycles_[3][0]), static_cast<unsigned long long>(l05_response_latency_cycles_[3][1]),
+                 static_cast<unsigned long long>(l05_direct_store_blocked_load_cycles_[0]),
+                 static_cast<unsigned long long>(l05_direct_store_blocked_load_cycles_[1]),
+                 static_cast<unsigned long long>(l05_direct_store_blocked_load_cycles_[2]),
+                 static_cast<unsigned long long>(l05_boundary_responses_),
+                 static_cast<unsigned long long>(l05_protocol_errors_),
+                 l05_translation_pending_ ? "true" : "false");
+    std::fprintf(file, "  \"w02\": {\"load_completions\": %llu, \"affected_cycles\": %llu, \"safe_p0_p2_affected_cycles\": %llu, \"affected_cycles_by_queue\": [%llu, %llu, %llu, %llu], \"affected_consumer_entries_by_queue\": [%llu, %llu, %llu, %llu]},\n",
+                 static_cast<unsigned long long>(w02_load_completions_),
+                 static_cast<unsigned long long>(w02_affected_cycles_),
+                 static_cast<unsigned long long>(w02_safe_affected_cycles_),
+                 static_cast<unsigned long long>(w02_affected_cycles_by_queue_[0]),
+                 static_cast<unsigned long long>(w02_affected_cycles_by_queue_[1]),
+                 static_cast<unsigned long long>(w02_affected_cycles_by_queue_[2]),
+                 static_cast<unsigned long long>(w02_affected_cycles_by_queue_[3]),
+                 static_cast<unsigned long long>(w02_affected_consumers_[0]),
+                 static_cast<unsigned long long>(w02_affected_consumers_[1]),
+                 static_cast<unsigned long long>(w02_affected_consumers_[2]),
+                 static_cast<unsigned long long>(w02_affected_consumers_[3]));
     std::fprintf(file, "  \"execution\": {\"divider_busy_cycles\": %llu, \"p1_ready_while_divider_busy\": %llu, \"divide_operand_classes\": {\"divisor_zero\": %llu, \"divisor_abs_one\": %llu, \"dividend_zero\": %llu, \"divisor_power_of_two\": %llu, \"ordinary\": %llu}},\n",
                  static_cast<unsigned long long>(divider_busy_cycles_),
                  static_cast<unsigned long long>(p1_ready_while_divider_busy_),
