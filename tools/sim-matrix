@@ -114,6 +114,15 @@ run_one() {
   if [[ -f $run_prog/log/${workload}_log/golden_trace.txt ]]; then
     install -m 0644 "$run_prog/log/${workload}_log/golden_trace.txt" "$lane_dir/golden_trace.txt"
   fi
+  local end_pc=0
+  local test_finish
+  if [[ $workload != linux && -f $object_dir/main.elf ]]; then
+    test_finish=$(PATH="$sim_path:$PATH" loongarch32r-linux-gnusf-readelf -s "$object_dir/main.elf" |
+      awk '$8 == "test_finish" {print $2; exit}')
+    if [[ $test_finish =~ ^[0-9a-fA-F]+$ ]]; then
+      printf -v end_pc '%x' "$((16#$test_finish + 0x30))"
+    fi
+  fi
   {
     printf 'format=nscc-sim-run-v1\n'
     printf 'cpu_commit=%s\n' "$cpu_commit"
@@ -122,6 +131,7 @@ run_one() {
     printf 'workload=%s\n' "$workload"
     printf 'axi_seed=%s\n' "$seed"
     printf 'time_limit=%s\n' "$time_limit"
+    printf 'end_pc=%s\n' "$end_pc"
     printf 'model_sha256=%s\n' "$actual_model_sha"
     printf 'software_rom_sha256=%s\n' "$(sha256sum "$object_dir/rom.vlog" | awk '{print $1}')"
   } > "$lane_dir/run-manifest.txt"
@@ -134,7 +144,7 @@ run_one() {
       --dump-delay 0 --dump-waveform 0 --time-limit "$time_limit" \
       --save-bp-time 0 --ram-save-bp-file none --top-save-bp-file none \
       --restore-bp-time 0 --ram-restore-bp-file none --top-restore-bp-file none \
-      --end-pc 1c000010 --fork-child 0 \
+      --end-pc "$end_pc" --fork-child 0 \
       > run.log 2> run.stderr.log
     model_result=$?
     set -e

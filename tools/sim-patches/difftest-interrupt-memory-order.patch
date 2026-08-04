@@ -1,8 +1,18 @@
 diff --git a/sims/verilator/testbench/difftest.cpp b/sims/verilator/testbench/difftest.cpp
-index d184775..bd90a52 100644
+index d184775..08c914d 100644
 --- a/sims/verilator/testbench/difftest.cpp
 +++ b/sims/verilator/testbench/difftest.cpp
-@@ -148,12 +147,0 @@ int Difftest::step(vluint64_t &main_time) {
+@@ -2,0 +3 @@
++#include "cpu_tool.h"
+@@ -107 +108,2 @@ int Difftest::step(vluint64_t &main_time) {
+-    if (idx_commit > 0 && dut.commit[idx_commit - 1].pc == END_PC || dut.excp.exceptionPC == END_PC) {
++    const uint32_t stop_pc = CpuTool::end_pc ? CpuTool::end_pc : END_PC;
++    if (idx_commit > 0 && dut.commit[idx_commit - 1].pc == stop_pc || dut.excp.exceptionPC == stop_pc) {
+@@ -143 +145,2 @@ int Difftest::step(vluint64_t &main_time) {
+-    if (idx_commit > 0 && dut.commit[idx_commit - 1].pc == END_PC || dut.excp.excp_valid && dut.excp.exceptionPC == END_PC) {
++    const uint32_t stop_pc = CpuTool::end_pc ? CpuTool::end_pc : END_PC;
++    if (idx_commit > 0 && dut.commit[idx_commit - 1].pc == stop_pc || dut.excp.excp_valid && dut.excp.exceptionPC == stop_pc) {
+@@ -148,12 +151,0 @@ int Difftest::step(vluint64_t &main_time) {
 -    if (dut.excp.excp_valid && dut.excp.exception == 0){
 -        if (dut.excp.interrupt != 0) {
 -            proxy->raise_intr(dut.excp.interrupt);
@@ -15,7 +25,7 @@ index d184775..bd90a52 100644
 -        }
 -    }
 -
-@@ -187,0 +176,14 @@ int Difftest::step(vluint64_t &main_time) {
+@@ -187,0 +179,14 @@ int Difftest::step(vluint64_t &main_time) {
 +    /* Retiring memory events in the interrupt cycle must be consumed before
 +     * returning to inject the interrupt into the reference model. */
 +    if (dut.excp.excp_valid && dut.excp.exception == 0){
