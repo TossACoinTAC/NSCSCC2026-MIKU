@@ -49,6 +49,9 @@ source commit 和 generated RTL hash：
 | W01 已保留候选 | source `b44eaffcefade`；publication `15d06c98ef32` / `afe3c5df...` | 对已成功 direct wakeup 的同 lane completion 回声做有界抑制；19 项 paired perf20 全通过，17 项改善、2 项退化 | 总 cycles `71,588,939 -> 71,515,650`（`-0.102375%`）；尚无 matching timing、系统回归或板测证据 |
 | E02 已保留候选 | source `08fbf1120115`；publication `71577a4fa0db` / `f59c5273...` | 只允许普通 ROB head 使用 exact/current-epoch staged completion 提前退休；19 项 paired perf20 全通过，17 项改善、2 项退化 | 相对 W01 为 `-0.6045%`，组合相对 milestone 为 `-0.7063%`；不得继承 milestone 的 timing、bitstream 或板测结论 |
 | L05/W02 observer 通过 | workspace `7e50f16`，schema `nscc-m01-v6`；production RTL 未修改 | L05 的 `5,194,524` 次 D-side translation 仅 5 次走 TLB；W02 的 P0--P2 waiting-consumer 保守机会为 `2,922,347` 次 | 两项暴露均达到启动门槛；先做 L05 独立 A/B，再做 W02 独立增量 A/B，不能把联合结果作为单项归因 |
+| W02-on diagnostic route | `03a466a` / `50b460f...` | W01+E02+L05+W02 完整 gates、func58/Linux 三 seed；100 MHz bitstream、DRC 0、hold `+0.053 ns` | setup `WNS/TNS -0.601/-85.196 ns`；该 route 只绑定组合 RTL，不能拆成 W02 单项结论 |
+| W02-off timing ablation | source `b4968c4`；publication `81187c0` / `53165912...` | 只关闭 W02；100 MHz bitstream、DRC 0、hold `+0.050 ns` | setup `WNS/TNS -0.778/-633.874 ns`，关闭后更差；排除“W02 直接导致退化”，但两次 route 仅作当前非稳定 RTL 参考 |
+| F01 phase 1 已保留候选 | source `0c6a5dd`；publication `07b0fc0` / `30ed22c9...` | translation response 直接旁路到 L1I；19 项 paired perf20、func58 三 seed、Linux 三 seed与 M01 守恒通过 | 19 项 `61,817,068 -> 53,646,498`（`-13.217337%`），全部改善；尚无 matching timing、bitstream 或板测证据 |
 
 Chiplab 对上述各候选均固定为 `c398d274812f164d387146fa7d8f612a4a1296d9`。CPU 源提交始终
 保留用户已有的 `D AGENTS.md`；生成/门禁期间 `rtl/mycpu_top.v` 可呈现 matching publication
@@ -234,7 +237,9 @@ manifest。早期 endpoint 失败来自 c398 新 testbench 未消费 `--end-pc`�
 | `08fbf11` E02 head completion bypass | exact pointer/current epoch 的普通 head staged completion 可提前一拍退休；branch、exception、serializing、system operation 排除，年轻 lane 仍走既有 complete prefix | 19 项相对 W01 `-0.6045%`；ROB 测试覆盖 wrap/epoch/flush、结果值和所有排除边界，并显式证明三宽 commit 能力；matching func58 三 seed 58/58 | Linux；matching implementation 联合评价周期与 ROB/IQ top-N |
 | `2894e04` / `3531af7` L05 direct/DMW pretranslation | 在已有 `scheduledLoad`/Store entry 寄存边界写入 ATU 动态 preview 的 PA、MAT 与 translationDone；TLB 路径和平台接口不变 | 19 项相对 W01+E02 `71,083,365 -> 62,580,196`（`-11.962249%`），19 项全部改善 | 与 W02 组合的完整 gates、func58/Linux 已通过；继续 matching route，不能继承旧 WNS |
 | `f2dfd1e` / `7f12340` W02 Load completion wakeup | LSQ 把已通过 identity/exception/write 资格的 Load completion 注册为 P3 early wake；backend 再检查 current epoch，复用原 wakeup lane 与 PRF write-through，不增加全局广播 lane | 19 项相对 L05 `62,580,196 -> 61,817,068`（约 `-1.219%`），18 项改善、`stream_copy` 持平；组合完整 gates、func58/Linux 已通过 | matching route；重点检查 completion-to-IQ path family |
-| `03a466a` W01+E02+L05+W02 diagnostic route | matching RTL `50b460f...`，100 MHz performance SoC bitstream 成功、DRC 0、hold `+0.053 ns` | setup `WNS/TNS -0.601/-85.196 ns`；前六条为 LSQ Store PA/order 到 IQ3 operand，route 约 75%，并经过 fanout 166 的 completion network；LUT `90,797` | 四项同时变化，不能单独归因 W02；用同配置只关闭 W02 做 matching route 消融 |
+| `03a466a` W01+E02+L05+W02 diagnostic route | matching RTL `50b460f...`，100 MHz performance SoC bitstream 成功、DRC 0、hold `+0.053 ns` | setup `WNS/TNS -0.601/-85.196 ns`；前六条为 LSQ Store PA/order 到 IQ3 operand，route 约 75%，并经过 fanout 166 的 completion network；LUT `90,797` | 只绑定该组合 RTL；W02 单变量结论由关闭消融给出 |
+| `b4968c4` / `81187c0` W02-off timing ablation | generated RTL `53165912...`；只关闭 `enableLoadCompletionEarlyWakeup`；bitstream 成功、DRC 0、hold `+0.050 ns` | setup `WNS/TNS -0.778/-633.874 ns`；最差路径为 LSQ scheduled-Load ROB pointer 到 IQ3 operand，route `74.4%` | 排除“W02 直接导致当前退化”；两次 route 都是非稳定 RTL 的参考，不把任何时序结论继承给后续候选 |
+| `0c6a5dd` / `07b0fc0` F01 phase 1 | translation response 直接旁路给 L1I，同时保留 translated-request slot 处理 backpressure | 19 项相对 W02-on `-13.217337%` 且全部改善；func58/Linux 三 seed、代表 counters 和 M01 invariants 通过 | 保留并继续前端方向；matching resource/WNS/bitstream 必须在合并候选上重建 |
 
 Vivado 调度采用合并里程碑：同一轮可以并行准备多个高优先级、相互较独立的候选，但每项
 必须先有独立配置开关、同 workload/seed 的软件 A/B 和相关正确性回归。只把各自已有正收益、
@@ -556,6 +561,33 @@ commit-recovery latency 为 `1.89/3.59/2.31/6.63` cycles，累计 latency 相当
 不得算入 benchmark ROI 收益。结论是 F01/H03 与 B01 获得高优先级 ROI-aware 原型/测量资格；
 现有百分比仍只是含启动段的结构证据，不能直接预测最终 cycles。
 
+W02 随后完成单变量 timing ablation。W02-on 身份为 `03a466a/50b460f...`，clean 100 MHz
+route 的 setup `WNS/TNS -0.601/-85.196 ns`、hold `+0.053 ns`、DRC 0，bitstream 成功。只关闭
+`enableLoadCompletionEarlyWakeup` 的 source commit 为 `b4968c4`，publication commit 为
+`81187c0`，generated RTL SHA-256 为
+`531659122f7ac202722190e4f568fa5aa269fdc3c830a18bca5d0731052b3e65`；其 clean route
+setup 反而降到 `WNS/TNS -0.778/-633.874 ns`，hold `+0.050 ns`、DRC 0，bitstream 同样成功。
+最差路径是 LSQ `scheduledLoad` ROB pointer 到 IQ3 `issueOperandSource2`，route 占 `74.4%`。
+这组消融排除了“W02 直接导致当前时序退化”，没有证明 W02 能稳定改善 Fmax；当前 bit 尚非
+阶段稳定版，两次结果只作为后续 RTL 设计与 matching top-N 读取的参考。
+
+F01 phase 1 随后以 source commit `0c6a5dd`、publication commit `07b0fc0` 独立实现，
+generated RTL SHA-256 为
+`30ed22c905b10e561068219846dc9cc0d6010db6e15bb6ed8f9001138d759529`。实现把完成的
+instruction translation response 直接旁路到 L1I request，并保留 translated-request slot 吸收
+backpressure。以 W02-on 为 paired baseline，相同 19 个短 perf20 项全部通过且逐项改善，
+总 cycles 从 `61,817,068` 降到 `53,646,498`，减少 `8,170,570`（`-13.217337%`，speedup
+`1.152304x`）。clean func58 random-AXI seeds `240/255/141` 均通过 `58/58`；instrumented
+代表项 counters 与守恒式通过。相邻 translation request 的最短 interval 从 3 cycles 降到 2
+cycles，且 2-cycle 桶占主导，证明该旁路移除了一拍稳态前端启动 bubble。
+
+F01 matching instrumented Linux random-AXI seeds `1/19557/5570815` 各运行约 100M cycles，
+均通过 verdict、DiffTest 与 M01 invariants，IPC 分别约为
+`0.551143/0.551120/0.550337`。D01 严格下界在
+`fireye_I2/coremark/quick_sort/inner_product` 上为 `0/193/0/0`，继续接近零，停止 D01 RTL
+方向。F01 已具有 paired cycles、func58、Linux 与结构计数的交叉证据，下一候选可以继续沿
+前端 II 推进；资源、100 MHz timing 和板测结论仍需绑定后续 matching RTL。
+
 ## 4. P1：正确性 gate
 
 `C01-C08` 的优先级高于全部性能候选。下面的“通过”表示相应定向测试、现有门禁和受影响
@@ -737,11 +769,14 @@ cycle_speedup_upper = C0 / (C0 - opportunity_cycles)
 7. L05、W02 已由 observer 机会计数进入独立实现和软件 A/B。L05 19 项全部改善并相对
    W01+E02 降低 `11.962249%`；W02 在其上再降低约 `1.219%`，18 项改善、1 项持平。
    当前组合的完整 gates、func58 与 Linux 三 seed 已通过；matching 100 MHz implementation
-   setup 为 `-0.601 ns`，不能板测。该 route 只能归因整体组合，W02 是否导致退化必须由
-   单变量关闭后的 matching route 判断。两项周期归因仍绑定各自提交与 CSV。
+   setup 为 `-0.601 ns`，不能板测。只关闭 W02 后 setup 为 `-0.778 ns`，排除“W02 直接导致
+   退化”；两次 route 只作当前非稳定 RTL 参考。两项周期归因仍绑定各自提交与 CSV。
 8. M01 v7 表明 I-cache request 的结构最短间隔为 3 cycles，代表项前端 empty 比例为
    `24.32%--55.85%`；分支 resolve-to-recovery 累计窗口在三项 branch-heavy workload 中约占
-   `1.97%--3.23%`。下一批提高 F01/H03 与 B01 优先级，同时保留启动段污染限定。
+   `1.97%--3.23%`。该结果已启动 F01 phase 1；F01 把 translation request 最短 interval 降到
+   2 cycles，19 项全部改善且合计 `-13.217337%`，func58/Linux 三 seed 均通过。
+9. D01 在 F01 代表项上的严格下界仍只有 `coremark=193`、其他三项为 0，正式停止；后续优先
+   继续 F01/H03 前端吞吐和由独立 paired A/B 支持的高权重候选。
 
 ## 8. 单次 A/B 实验合同
 
@@ -844,15 +879,19 @@ WNS/TNS、top-N path 和资源后可继续下一轮微架构/时序协同修改�
 9. `nscc-m01-v6` 已关闭 L05/W02 observer：L05 分类四种翻译模式及 Load/Store owner，W02
    只接受 current-epoch、无异常且匹配有效 LQ 的 completion，并单列 P0--P2 保守子集。两项
    已按 L05 后 W02 的顺序完成独立实现和 19 项 paired A/B，当前组合完整 gates、func58
-   与 Linux 三 seed 已通过；matching 100 MHz route setup 为 `-0.601 ns`，只作 diagnostic。
+   与 Linux 三 seed 已通过。W02-on/off matching route setup 分别为 `-0.601/-0.778 ns`，排除
+   “W02 直接导致退化”；两者都只作非稳定 RTL 的 diagnostic。
 10. `nscc-m01-v7` 在相同 RTL 上补齐 frontend interval、IQ/dispatch/issue 与 branch
-    resolve-to-recovery。四个代表项全部通过守恒检查；F01/H03 和 B01 进入下一轮高优先级，
-    但必须用 benchmark ROI 或 paired cycles 排除共同启动段影响。
+    resolve-to-recovery。四个代表项全部通过守恒检查；F01 phase 1 随后完成 19 项 paired A/B、
+    func58 与 Linux 三 seed，周期合计降低 `13.217337%`，translation request 最短 interval 从
+    3 降到 2 cycles。
+11. D01 在 F01 的四代表项严格下界只有 `0/193/0/0`，停止 RTL 化；继续投入 F01/H03 和其他
+    有独立软件 A/B 的高权重候选，组合到下一次 matching implementation。
 
-下一组合以 W01+E02 为已经独立归因的周期候选；L05/W02 已完成测量，按顺序分别 A/B 后决定
-是否成为新增独立候选。若加入时序候选，必须保持同拍语义、给出结构保留证明，并针对当前 ROB staged
-wakeup 到 IQ 的 matching 路径族。候选 ID 的定义始终回到理论笔记的“5. 优化候选账本”；
-具体选择写入新的 experiment contract，不重写账本历史。
+下一组合已具有 W01、E02、L05、W02 与 F01 phase 1 的独立周期归因。后续候选继续保留配置
+开关和 paired A/B，但不要求把全部组合展开成全因子矩阵；只将有独立正收益且组合回归通过的
+候选汇入下一次 matching implementation。候选 ID 的定义始终回到理论笔记的“5. 优化候选
+账本”；具体选择写入新的 experiment contract，不重写账本历史。
 
 首轮执行结果：L04 独立 experiment commit `c30fc470de4a` 的完整 LSQ suite 通过 32/32；19 项 paired
 perf20 均通过，但总 cycles 只从 `71,588,939` 降到 `71,550,342`（约 `-0.054%`），且有
@@ -862,4 +901,5 @@ perf20 均通过，但总 cycles 只从 `71,588,939` 降到 `71,550,342`（约 `
 `27` 个最老 Load 因 SDQ 单独阻塞的周期（约 `0.65 ppm`），因此停止 D01 RTL 化；不为该
 候选增加 ready 组合逻辑或支付 Vivado implementation。随后 v5 observer 在四个代表 perf20
 项目中测得 E02 严格上界 `17.2606%`、W01 affected conflict `1.1214%`；W01 与 E02 的 19 项
-软件 A/B 分别取得 `-0.102375%` 和相对前者 `-0.6045%`，两项都保留到下一组合。
+软件 A/B 分别取得 `-0.102375%` 和相对前者 `-0.6045%`，两项都保留到下一组合。F01 phase 1
+上的 D01 复核只在 `coremark` 发现 193 cycles，其余三个代表项为 0，停止结论不变。

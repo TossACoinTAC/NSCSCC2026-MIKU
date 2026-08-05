@@ -46,8 +46,9 @@ build 为 `+0.978/+0.050 ns`，两种模式均为 0 DRC error 并成功生成 bi
 | W01（软件 A/B 通过） | v5 observer 在四个代表项的 `43,190,065` 个观测周期中发现 `484,314` 个冲突且存在等待消费者的周期，占 `1.1214%` | 对已经成功 direct wakeup 的同 lane completion 回声做有界抑制；保留 registered/direct 仲裁优先级和原有 wakeup lane 数 | producer acceptance、flush、exactly-once wakeup、长依赖链与完整后端回归；func58/Linux/代表 perf20 | 19 项 paired cycles 有稳定正收益且无功能失败；不得用新增 wakeup lane 放大全局比较网 |
 | E02（软件 A/B 通过） | v5 observer 对四个代表项只统计 exact head/current-epoch staged completion，严格上界为 `7,454,851 / 43,190,065 = 17.2606%` | 仅允许普通 head 指令使用 matching staged completion 提前退休；年轻 lane 保持 `entry.complete` prefix，branch、exception、serializing 和 system operation 排除 | ROB flush/epoch/wrap、精确异常、三宽能力和所有排除边界；func58/Linux/代表 perf20 | head-only bubble 的 paired cycles 明确下降，且不增加 staged wakeup 扇出；完整 SoC 的 cycle×frequency 不劣于基线 |
 | L05（软件 A/B 通过） | 四个代表项 `5,194,524` 次 D-side translation 中只有 5 次走 TLB；direct/DMW 往返事件数相当于观测周期的 `12.0803%` | `2894e04` 在已有 `scheduledLoad`/Store entry 寄存边界填入动态 PA/MAT/translationDone；不把 AGU 组合地址直接接入 L1D | ATU `6/6`、LSQ `32/32`、core `14/14`、integration `4/4`；19 项软件、组合完整 gates、func58 与 Linux 全过 | `71,083,365 -> 62,580,196`（`-11.962249%`）；保留并进入 matching 时序门禁 |
-| W02（软件 A/B 通过） | `3,517,657` 次合格 Load completion 中，`2,922,347` 次在 P0-P2 已有等待 consumer，占 completion 的 `83.0765%` | `f2dfd1e` 注册 LSQ completion 资格，复用 P3 wakeup lane 与 PRF write-through；backend 检查 current epoch，不增加广播 lane | cache/forward、exception、flush/epoch、LQ reuse 和实际 operand data；LSQ `32/32`、backend `15/15`；组合完整 gates、func58 与 Linux 通过 | 相对 L05 `62,580,196 -> 61,817,068`（约 `-1.219%`）；18 项改善、1 项持平，进入 matching 时序门禁 |
-| D01 | P3 `portReady` 当前对 Load/Store 都要求 IQ 与 SDQ ready；SDQ 满时 Load 可能被无关阻塞 | 第一阶段只增加 `SDQ-full && P3 load candidate` 计数，不改变 router；第二阶段再按 Load/Store 类型拆分 ready，Store 仍保持 IQ+SDQ 原子接受 | Router prefix、Store 双队列原子性、flush/backpressure、LSQ/SDQ 定向和随机 AXI；func58/Linux/代表 perf20 | 计数确认有可观暴露且 paired cycles 有收益；否则不进入 RTL。新 ready 网络不得形成组合环或显著恶化 route |
+| W02（软件 A/B 通过） | `3,517,657` 次合格 Load completion 中，`2,922,347` 次在 P0-P2 已有等待 consumer，占 completion 的 `83.0765%` | `f2dfd1e` 注册 LSQ completion 资格，复用 P3 wakeup lane 与 PRF write-through；backend 检查 current epoch，不增加广播 lane | cache/forward、exception、flush/epoch、LQ reuse 和实际 operand data；LSQ `32/32`、backend `15/15`；组合完整 gates、func58 与 Linux 通过 | 相对 L05 `62,580,196 -> 61,817,068`（约 `-1.219%`）；18 项改善、1 项持平；关闭 W02 的 matching route 更差，排除“W02 直接导致当前退化” |
+| F01 phase 1（软件 A/B 通过） | v7 中相邻 I-cache request 最短 interval 为 3 cycles，代表项 frontend empty 为 `24.32%--55.85%` | `0c6a5dd` 将已翻译 fetch response 直接旁路给 L1I，同时保留原 translated-request slot 作为 backpressure 缓冲 | focused frontend test；func58 random-AXI 三 seed；19 项 paired perf20；instrumented representative counters；Linux random-AXI 三 seed | 19 项 `61,817,068 -> 53,646,498`（`-13.217337%`），全部改善；请求最短 interval 从 3 降到 2 且 2-cycle 桶占主导，保留进入后续组合 |
+| D01（已停止） | P3 `portReady` 当前对 Load/Store 都要求 IQ 与 SDQ ready；SDQ 满时 Load 可能被无关阻塞 | 只保留 observer 复核，不修改 router；Store 的 IQ+SDQ 原子接受语义不变 | 旧基线四代表项严格下界仅 `27 / 41,501,656`；F01 四代表项复核只有 `coremark=193`、其余为 0 | 暴露持续接近零，不进入 RTL，不增加 ready 组合逻辑 |
 
 每项都先独立提交、独立运行最小相关测试和代表 perf20；通过后才允许把多项放入一个组合
 candidate。组合 candidate 只做一次完整 gates、func58、Linux、短 perf20 和 matching Vivado。
@@ -68,15 +69,18 @@ request/response fire 数相加作为收益：必须报告 Load 被推迟、ATU 
 1. L04 的可关闭 age-aware 仲裁完成 32/32 LSQ 定向测试与 19 项 paired perf20；总收益
    只有约 `0.054%` 且 4 项退化。实验实现已从当前源码移除，不进入后续门禁或
    implementation。
-2. D01 已增加严格下界 observer：只统计最老 dispatch lane 为 Load、IQ3 已 ready、但 P3
-   仅因 SDQ not-ready 被阻塞的周期，不改 production RTL。先在代表 perf20 上测暴露；不足时
-   直接停止 D01。
+2. D01 严格下界 observer 只统计最老 dispatch lane 为 Load、IQ3 已 ready、但 P3 仅因 SDQ
+   not-ready 被阻塞的周期。旧基线四代表项仅 27 cycles；F01 四代表项复核仅 `coremark=193`、
+   其余为 0。暴露持续接近零，D01 已停止，不修改 production RTL。
 3. v5 observer 已按 exact head/current epoch 精化 E02，并确认 W01 冲突中存在等待消费者。
    W01 与 E02 分别完成独立 RTL、定向测试和 19 项 paired perf20；二者均保留进入组合候选。
 4. L05/W02 已按 observer 排序完成独立 RTL 与 paired A/B。L05 19 项全部改善并降低
-   `11.962249%`；W02 在其上再降低约 `1.219%`，18 项改善、1 项持平。二者进入同一组合
-   correctness/timing gate，归因仍由独立提交和两组 CSV 保留。
-5. 只有具有独立、可复现正收益的候选才进入下一次合并 implementation；不为
+   `11.962249%`；W02 在其上再降低约 `1.219%`，18 项改善、1 项持平。W02-on/off 两次 route
+   都未闭合，但关闭 W02 后 WNS/TNS 更差，已排除“W02 直接导致当前退化”；时序数据只绑定
+   各自 RTL 快照。
+5. F01 phase 1 以 W02-on 为 paired baseline，19 项全部改善并降低 `13.217337%`；func58、
+   Linux 三 seed 和 M01 守恒均通过。请求 interval 的结构变化与周期收益同向，F01 保留。
+6. 只有具有独立、可复现正收益的候选才进入下一次合并 implementation；不为
    observer-only、已停止候选或负收益消融单独支付一次完整 Vivado。
 
 ## First Measurements
@@ -170,11 +174,15 @@ capture，最差 data path `9.819 ns`，其中 route `7.354 ns`（`74.9%`）；�
 redirect target。归档位于
 `Stable_Backup/cpu_03a466a39d80_chiplab_c398d274812f_perf_100mhz_20260805-070729_candidate/`。
 
-该 route 只能归因给 W01+E02+L05+W02 的整体组合。与 `758181a` 相比四项同时变化，而且
-L05-only 没有 matching route；尽管 completion-to-IQ 终点与 W02 的风险一致，现有证据不能
-断言 `-0.601 ns` 由 W02 单独造成。必须在相同 source、工具、策略和 100 MHz profile 下仅
-关闭 `enableLoadCompletionEarlyWakeup` 后重跑 route，才能把 W02 从 L05、既有 LSQ cone 与
-布局交互中分离。
+W02 随后做了同配置关闭消融：source commit `b4968c4`、publication commit `81187c0`，
+generated RTL SHA-256 为
+`531659122f7ac202722190e4f568fa5aa269fdc3c830a18bca5d0731052b3e65`。clean 100 MHz
+performance implementation 同样生成 bitstream、DRC 0 error，hold `WHS/THS +0.050 ns/0`；
+setup 则为 `WNS/TNS -0.778 ns/-633.874 ns`，比 W02-on 的 `-0.601/-85.196 ns` 更差。最差
+路径从 LSQ `scheduledLoad` ROB pointer 到 IQ3 `issueOperandSource2`，route 占 data path 的
+`74.4%`。因此现有 matching 消融排除了“W02 直接导致时序退化”的判断；它没有证明 W02
+本身改善 Fmax，也不能消除 placement/routing 交互。两组 route 都来自仍在快速演进、尚未
+阶段稳定的 RTL，只作为后续读取 matching top-N 的参考，不继承到新候选。
 
 workspace `ad148e9` 的 `nscc-m01-v7` observer 在 `03a466a/50b460f...` 上新增前端请求
 interval、IQ/dispatch/issue 和 branch resolve-to-recovery 统计。ideal-memory seed 0 的
@@ -187,6 +195,22 @@ resolve-to-recovery latency 为 `1.89/3.59/2.31/6.63` cycles，累计 latency �
 request 不能解释成 benchmark ROI；它们足以把 F01/H03 与 B01 的 ROI-aware 测量提升为下一轮
 高优先级，但还不是可直接相加的 speedup 预测。结构化证据位于
 `build/sim/runs/cpu_03a466a39d80_chiplab_c398d274812f/instrumented-perf20/ideal/`。
+
+F01 phase 1 的 source commit 为 `0c6a5dd`，publication commit 为 `07b0fc0`，generated RTL
+SHA-256 为 `30ed22c905b10e561068219846dc9cc0d6010db6e15bb6ed8f9001138d759529`。它把已经
+完成的 instruction translation response 直接旁路到 L1I request，同时保留 translated-request
+slot 处理 backpressure。以 W02-on 的 `61,817,068` cycles 为 paired baseline，相同 19 个短
+perf20 项全部通过且逐项改善，总数降至 `53,646,498`，减少 `8,170,570`
+（`-13.217337%`，speedup `1.152304x`）。matching clean func58 random-AXI seeds
+`240/255/141` 均通过 `58/58`；四个 instrumented 代表项的 counters 和守恒式通过。M01 显示
+相邻 translation request 的最短 interval 从 3 cycles 降到 2 cycles，且 2-cycle 桶成为主导，
+直接证明该实现移除了一拍稳态前端启动 bubble。
+
+matching instrumented Linux random-AXI seeds `1/19557/5570815` 各运行约 100M cycles，均
+通过 verdict、DiffTest 和 M01 invariants；IPC 分别约为 `0.551143/0.551120/0.550337`。
+D01 在 `fireye_I2/coremark/quick_sort/inner_product` 上的严格下界分别为 `0/193/0/0`，继续
+接近零，因此停止 D01。F01 的周期、功能和结构计数形成了相互独立的正向证据，但其资源、
+100 MHz WNS 和板测仍必须由后续 matching candidate 重新建立。
 
 ## Scheduling
 
