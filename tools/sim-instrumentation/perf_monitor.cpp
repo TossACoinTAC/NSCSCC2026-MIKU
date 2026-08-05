@@ -470,7 +470,9 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
     snapshot.dispatch_fire = static_cast<std::uint8_t>(dispatch_port_valid & dispatch_port_ready);
 
     snapshot.committed_branch_mask = static_cast<std::uint8_t>(SYS(committedBranch) & 0x7U);
-    snapshot.predictor_update_valid = static_cast<bool>(SYS(retiredPredictorUpdateValid));
+    snapshot.predictor_update_valid =
+        SYS(predictorUpdateQueue__DOT__count) != 0 &&
+        !SYS(frontend__DOT__targetPredictor__DOT__invalidating);
     const std::uint8_t staged_branch_valid = static_cast<std::uint8_t>(
         ROB(stagedCompletionValid) & ROB(stagedCompletionCurrent) & 0x1fU);
     const bool staged_branch_resolved[5] = {
