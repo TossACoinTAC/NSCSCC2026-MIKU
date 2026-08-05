@@ -91,6 +91,32 @@ Before changing files:
 Keep changes attributable. Do not combine a microarchitecture experiment,
 platform rewrite, and build-system refactor in one candidate.
 
+## Parallel Development And Agent Scheduling
+
+Use parallel execution to reduce wall-clock time while keeping evidence
+reproducible:
+
+- Every candidate runs in an isolated CPU worktree or experiment directory and
+  retains independent source and generated-RTL hashes. Do not compare results
+  after changing the candidate without generating a new RTL and evidence hash.
+- Within one CPU worktree, never run `cpu-generate`, `cpu-check`, or
+  `sim-build` concurrently. ScalaTest uses one SBT runtime and serial suites.
+- `sim-prepare` and model compilation are serialized. After a read-only model
+  is prepared, Verilator runtimes may run in independent workload/seed
+  directories. Default to `SIM_LANES=2`; raise to 3 only after `free -h`
+  reports sufficient `available` memory and a measured lane peak supports it.
+- Vivado implementation is exclusive on this host. Do not overlap it with
+  another Vivado implementation, SBT, or a long-running Verilator simulation.
+  Short read-only analysis may proceed when memory remains available.
+- Poll long-running jobs about every three minutes and record useful evidence;
+  while only waiting for synthesis/implementation, a roughly two-minute poll
+  interval is sufficient. Do not leave a required process unobserved until the
+  final response.
+- Subagents are limited to bounded independent review, tests, experiments, or
+  documentation. They must use isolated worktrees for writes, must not compete
+  for a shared worktree, and must report their commit (if any), source/RTL
+  hashes, test seeds/results, and evidence paths before their result is used.
+
 ## RTL And IP Rules
 
 - SpinalHDL is the source for CPU behavior. Generate Verilog through the checked
