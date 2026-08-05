@@ -46,34 +46,33 @@ CPU/package 命名、生成 RTL 或 Xilinx IP。执行前归档如下：
 `src/vivado_cannot/` 生成 CPU，也不会把其中的历史日志当作验证证据。CI 触发条件主要关注
 `.gitlab-ci.yml`、`src/mycpu/**/*` 和 `src/perf_clock.json` 的变化。
 
-## `openla500` 命名与后续源码重构
+## MIKU 命名迁移
 
 当前 `nscscc-cpu/spinal/src/main/scala/openla500/` 及对应测试目录沿袭的是官方
 OpenLA500 baseline 的 Scala package 名称。它是历史来源和兼容边界的标识，不是当前团队
 微架构的设计名称。当前实际生成的主体是团队自建的 LA32R 多发射乱序核；目录名相同不应
 被解读为“仍在实现官方 baseline”。
 
-仓库中仍有一部分 `OpenLa500*` 类名、生成入口和 `openla500_*` manifest 字段需要暂时保留，
-原因是它们分别被以下合同读取或检查：
+团队核名称已确定为 **MIKU**，递归展开为 **MIKU Is Kinda Unordered**。活动 Scala package
+将在当前 100 MHz 候选完成时序、上板和证据后处理后，从 `openla500` 迁移到 `miku`。
+迁移保持以下边界：
 
-- `Makefile`、Spinal `runMain` 入口和各独立 leaf gate；
-- `tools/*_gate.py` 的生成器白名单、模块名和测试报告名检查；
-- `reference/component-contracts/`、`reference/manifest.lock` 中的上游来源与哈希锁；
-- 官方 `core_top` 适配、历史 oracle 以及提交包中的可复现 provenance。
+- 移动 `spinal/src/{main,test}/scala/openla500/` 到对应的 `miku/` 目录；
+- 同步 package/import、`runMain`、生成器白名单、测试发现路径和 executable contracts；
+- 保留 `OpenLa500*` Scala 类和 Verilog 模块名，避免把纯命名迁移扩大成 RTL 层级变更；
+- 保留 `openla500_legacy_core`、`openla500_tlb_entry_impl` 等既有 Verilog 合同标识；
+- 保留 `reference/manifest.lock` 的 `openla500_*` 字段及 source-audit 内容，它们描述上游
+  OpenLA500 来源，不是当前核名称；
+- 保持 `core_top`、AXI、debug/commit、`TLBNUM=32` 与 Chiplab 平台接口不变。
 
-因此“只把文件夹改名、package 仍写 `openla500`”会制造更严重的目录/命名不一致；直接做全局
-替换又会同时改变 Scala 全限定类名、测试报告路径、生成 Verilog 层级、RTL 哈希和门禁台账。
-这类变化不属于提交仓库清理，不能在当前冻结版上顺手进行。
+改名草案已从 `9960820e49ab25205e9a7ef8afb1b218958a4d4d` 生成 RTL，结果仍为
+`73077349d0e7f09fca599f51ca1b38b61ee9af4e1e2950cd5b5295a82dd278e3`，与改名前逐字节相同。
+这只是预验证，不构成提交：改名提交必须位于当前候选完成 matching 100 MHz setup/hold、DRC、
+bitstream、团队板 perf20 和 milestone 文档提交之后。
 
-后续若要消除 baseline 命名，建议单独建立源码重构提交，采用团队自有且中性的根 namespace
-（暂定候选为 `nscscccpu`，最终名称需在设计文档中锁定），将活动 OoO 包迁移到该 namespace，
-并把仍需兼容官方输入的生成器、leaf 和模块名集中放入明确的 `compat` 边界。迁移必须按
-“源码移动与 package 更新 → SBT 编译/测试 → 生成 RTL → 端口、lint、Yosys、publication
-checks → Chiplab 仿真 → 完整 SoC 实现”的顺序完成；所有新哈希和证据重新绑定后，才能进入
-新的发布候选。
-
-本说明不执行目录、package、类名或生成入口改动。当前清理批次不改名；命名重构只能在后续独立
-开发分支中进行，不能混入该冻结版或用它覆盖既有证据。
+最终提交顺序固定为“性能候选 → milestone 验收与证据提交 → MIKU 纯命名提交 → 完整 CPU
+门禁与 RTL 双生成复现 → 同步提交仓库”。若改名后的 RTL 哈希发生变化，必须先调查原因，
+不得直接刷新 replacement ledger 或 lint waiver 来掩盖差异。
 
 ### `src/main/scala` 这一层是否可以压平
 
@@ -103,9 +102,9 @@ spinal/
 | `spinal/` | 一个 SBT/SpinalHDL 构建模块的根目录 | 保留；名称准确表达实现技术。若未来有多个生成模块，可另开机械重构将其改为 `rtl-generator/`，但需同步 Makefile、README 和全部路径证据 |
 | `src/main/`、`src/test/` | SBT 的生产/测试 source set | 保留 |
 | `scala/` | Scala source root 的语言标识 | 保留 |
-| `openla500/` | 沿袭官方 baseline 的 package/目录 namespace | 后续源码重构的主要目标 |
+| `miku/` | MIKU 的活动 package/目录 namespace | milestone 验收后由独立纯命名提交落地 |
 
-这张表的核心判断是：目前只需要规划替换 `openla500/`，没有必要为了“目录更短”同时改动
+这张表的核心判断是：只替换活动 package `openla500/`，没有必要为了“目录更短”同时改动
 `spinal/src/main/scala`。层级减少并不会让 CPU 更自研，清晰的 namespace 边界才会。
 
 ## `vivado_cannot` 的最小职责
@@ -249,4 +248,5 @@ git status --short --branch
 
 本说明描述的是精简目标和验收边界。本批次已归档并移除 `logs/`、嵌套开发用 `AGENTS.md`
 和历史 `baseline.txt`，同时保留 `docs/refactor/status.yml`、生成 RTL、CPU-local IP、
-官方 `.gitlab-ci.yml` 及比赛 Tcl。提交仓库未进行目录/package/类名改动。
+官方 `.gitlab-ci.yml` 及比赛 Tcl。第一次清理提交未进行目录/package/类名改动；MIKU 迁移
+将在当前 milestone 验收后作为后续独立批次同步。
