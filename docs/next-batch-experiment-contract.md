@@ -48,6 +48,7 @@ build 为 `+0.978/+0.050 ns`，两种模式均为 0 DRC error 并成功生成 bi
 | L05（软件 A/B 通过） | 四个代表项 `5,194,524` 次 D-side translation 中只有 5 次走 TLB；direct/DMW 往返事件数相当于观测周期的 `12.0803%` | `2894e04` 在已有 `scheduledLoad`/Store entry 寄存边界填入动态 PA/MAT/translationDone；不把 AGU 组合地址直接接入 L1D | ATU `6/6`、LSQ `32/32`、core `14/14`、integration `4/4`；19 项软件、组合完整 gates、func58 与 Linux 全过 | `71,083,365 -> 62,580,196`（`-11.962249%`）；保留并进入 matching 时序门禁 |
 | W02（软件 A/B 通过） | `3,517,657` 次合格 Load completion 中，`2,922,347` 次在 P0-P2 已有等待 consumer，占 completion 的 `83.0765%` | `f2dfd1e` 注册 LSQ completion 资格，复用 P3 wakeup lane 与 PRF write-through；backend 检查 current epoch，不增加广播 lane | cache/forward、exception、flush/epoch、LQ reuse 和实际 operand data；LSQ `32/32`、backend `15/15`；组合完整 gates、func58 与 Linux 通过 | 相对 L05 `62,580,196 -> 61,817,068`（约 `-1.219%`）；18 项改善、1 项持平；关闭 W02 的 matching route 更差，排除“W02 直接导致当前退化” |
 | F01 phase 1（软件 A/B 通过） | v7 中相邻 I-cache request 最短 interval 为 3 cycles，代表项 frontend empty 为 `24.32%--55.85%` | `0c6a5dd` 将已翻译 fetch response 直接旁路给 L1I，同时保留原 translated-request slot 作为 backpressure 缓冲 | focused frontend test；func58 random-AXI 三 seed；19 项 paired perf20；instrumented representative counters；Linux random-AXI 三 seed | 19 项 `61,817,068 -> 53,646,498`（`-13.217337%`），全部改善；请求最短 interval 从 3 降到 2 且 2-cycle 桶占主导，保留进入后续组合 |
+| Q01（新 100 MHz 板测里程碑） | 四个固定端口的 IQ resident entry 保存完整 `OooRenamedUop`，大量冷字段被每 entry 复制并进入 compaction 布线 | `341280a` 改为按端口保存最小 decoded payload，issue 边界重建既有 uop 接口；不改变选择、wakeup、端口能力或对外接口；`03f7202` 再切断 matching route 暴露的 L1D-response/LSQ 与 barrier 路径 | 每端口字段定向测试、20,000-cycle 随机 scoreboard、所有 FU/flush/wakeup 回归、完整 gates、19 项 perf20、func58 三 seed、团队板 perf20 20/20 | 同一 `627aca6/6a4437a6...` RTL 在 100 MHz 达到 setup/hold `+0.009/+0.012 ns` 并通过板测；相对旧 milestone 总 CPU cycles `-26.910%`。Q01 本身周期语义中性，收益归属整个组合 |
 | D01（已停止） | P3 `portReady` 当前对 Load/Store 都要求 IQ 与 SDQ ready；SDQ 满时 Load 可能被无关阻塞 | 只保留 observer 复核，不修改 router；Store 的 IQ+SDQ 原子接受语义不变 | 旧基线四代表项严格下界仅 `27 / 41,501,656`；F01 四代表项复核只有 `coremark=193`、其余为 0 | 暴露持续接近零，不进入 RTL，不增加 ready 组合逻辑 |
 
 每项都先独立提交、独立运行最小相关测试和代表 perf20；通过后才允许把多项放入一个组合
@@ -211,6 +212,104 @@ matching instrumented Linux random-AXI seeds `1/19557/5570815` 各运行约 100M
 D01 在 `fireye_I2/coremark/quick_sort/inner_product` 上的严格下界分别为 `0/193/0/0`，继续
 接近零，因此停止 D01。F01 的周期、功能和结构计数形成了相互独立的正向证据，但其资源、
 100 MHz WNS 和板测仍必须由后续 matching candidate 重新建立。
+
+## Q01 Compact IQ And FreeList Regression Closure
+
+Q01 从改名后的开发起点 `42d9f36` 建立独立候选。`341280a` 仅压缩四个固定执行端口的
+IQ resident payload：每个端口保存本端口会消费的 decoded 字段，issue 时重建原有
+`OooRenamedUop` 接口；选择顺序、wakeup tag、ready 状态、ROB/epoch identity 和执行端口
+能力保持不变。`afbca21` 增加 20,000-cycle 随机 scoreboard，覆盖 enqueue、任意 ready
+entry 选择、compaction、wakeup、backpressure 和 flush 交错。
+
+锁定 Yosys 在 exact parent 与 compact IQ 之间显示结构变化集中在调度存储及其 mux：完整
+`core_top` cell 从 `67,173` 降到修复后的 `62,254`（`-4,919`，约 `-7.32%`），DFF
+`7,047 -> 5,793`（`-17.79%`），`$eq 13,237 -> 12,337`，`$mux 32,735 -> 30,330`，
+`$pmux 1,693 -> 1,547`；wire 从 `79,682` 降到 `74,633`，wire bits 从 `549,420`
+降到 `528,331`。FreeList 修复只在 compact-only 结果上增加 4 个 Yosys cells，未抵消 Q01
+的主要缩减。该层次统计只说明逻辑规模，不替代完整 SoC placed resource 或 routed timing。
+
+首轮 Q01 软件仿真复现了此前 `88657fd` 团队板的相同 `18/20` 症状：`sha` 停在
+426,124 条 retired instructions、PC `0x1c0100c0`，`lookup_table` 进入 PC
+`0x1c000380` 的失败环。exact parent `42d9f36` 在相同软件、模型合同和 time limit 下得到
+相同端点，因此该问题不由 IQ payload 压缩引入。回溯定位到 `6711a06` 删除了全局 rename
+决定中的 FreeList capacity gate；当时的证明只从 63 个可分配 physical registers 中减去
+32 个 ROB entries，却漏算最多 31 个长期保留的非零 architectural mappings。ROB 未满并不
+保证仍有新 physical tag，继续分配会复用 live tag，表现为依赖死锁或数据/异常破坏。
+
+`aaaeaa0` 恢复了安全分配条件：FreeList 保留按实际 writer 数计算的精确
+`allocateReady`，另向全局三宽原子分配提供 `freeCount >= renameWidth` 的保守
+`allocateCapacityReady`。这样只把 6-bit state compare 接入 global ready，避免重新引入
+`rd/writesGpr/CountOne` decode cone；最后 1--2 个空闲 tag 可能保守停顿，但不会复用 live
+tag。修复由 FreeList `7/7`、backend dispatch `16/16`、core integration `4/4`、system
+integration `1/1` 及完整 `cpu-check` 覆盖；完整门禁为 Scala/Verilator `203/203`、Python
+`364/364`，locked port/lint/Yosys/publication 全部通过。
+
+修复源码、published RTL 与 gate metadata 分别为 `aaaeaa0`、`7df9e41` 和 `fbb1003`；
+published RTL SHA-256 为
+`4d2a946af51ff312802427a334d0525e1a84af0109bfc741f9c00cc086c24903`。相同 clean
+perf20 model 的 19 个短项目全部通过，合计 `49,022,303` CPU cycles；`sha` 和
+`lookup_table` 分别为 `2,758,492/1,802,270` cycles。与修复前 Q01 的 17 个可完成项目
+相比，16 项逐周期相等，`coremark` 减少 3,936 cycles；这证明修复没有观察到性能损失，
+但不是 Q01 相对未压缩设计的 cycle-speedup A/B。证据位于
+`build/sim/runs/cpu_7df9e417aef9_chiplab_c398d274812f/clean-perf20/ideal/`。
+
+matching clean func58 绑定 gate commit `fbb1003` 和同一 RTL hash；random-AXI seeds
+`240/255/141` 均通过 `58/58`，返回 `0x3a00003a`、LED `1/1`，无 DiffTest mismatch，
+cycles 分别为 `636023/637115/636808`。矩阵证据位于
+`build/sim/runs/cpu_fbb1003f0eb3_chiplab_c398d274812f/clean-func58/random/`。
+
+`fbb1003/4d2a946a...` 的 matching 100 MHz performance implementation 已生成 bitstream，
+DRC 为 0 error，hold `WHS/THS +0.044 ns/0`，但 setup 为
+`WNS/TNS -0.225 ns/-1.846 ns`、37 个 failing endpoints，故仍是 diagnostic candidate。
+placed full-SoC 资源为 LUT `86,486`（`64.64%`）、FF `51,981`（`19.31%`）、
+slice `26,419/33,450`（`78.98%`）、BRAM tile `68.5`、DSP `8`。最差五条路径均从
+L1D deferred response valid 进入 LSQ load completion data，最差 data path `10.099 ns`，
+其中 route `8.340 ns`；另一条 `-0.084 ns` 路径从 Store translation completion 进入
+barrier state。归档位于
+`Stable_Backup/cpu_fbb1003f0eb3_chiplab_c398d274812f_perf_100mhz_20260806-024635_candidate/`。
+
+针对上述 top-N，source commit `03f7202` 给内部 cache request/response 携带既有 LQ owner，
+LSQ response 直接索引 entry 后仍校验 valid、requestSent、ROB pointer 和 recovery epoch，移除
+response-to-completion 路径上的 16-entry associative ROB/epoch search 与 `OHToUInt`。同时把
+memory-subsystem quiescence 预注册后再送入已有的连续两周期 barrier 判定，保守地增加至多一拍
+串行化等待，切断 translation-to-barrier 组合路径。LSQ、shared-cache、AXI bridge 和 execution
+focused suites 分别通过 `32/32`、`6/6`、`8/8`、`10/10`；matching 完整 `cpu-check` 通过
+Scala/Verilator `205/205`、Python `364/364` 及 locked port/lint/Yosys/publication。gate commit
+为 `627aca6`，published RTL SHA-256 为
+`6a4437a6adcd9f13afbb8e5561e660f6881855d84614e363ee222018af402d3c`；Yosys cell 从
+`62,254` 小幅增至 `62,311`。
+
+该 RTL 的 matching clean 100 MHz route 已验证两条 targeted cut 生效：此前 top-N 的
+L1D-response/LSQ 与 translation-to-barrier 路径族均退出前十。原始 route 仍为 setup
+`WNS/TNS -0.454 ns/-143.682 ns`、1,196 个 failing endpoints，hold `+0.012 ns/0`，新前十
+集中在 `idleController.enterPending` 经 redirect/wakeup/ROB/IQ select 与 compaction 到 IQ
+resident payload clock-enable，最差 data path `10.007 ns`，其中 route `8.314 ns`（`83%`）。
+这说明 RTL cut 改善了指定路径，但布局布线扰动把剩余高扇出控制路径推成新的全局瓶颈，不能把
+原始 route 直接认定为闭合。
+
+在完全相同的 `627aca6/6a4437a6...`、c398 platform 和 `100/100/200 MHz` 时钟上，从该
+routed DCP 执行 `phys_opt_design -directive AggressiveExplore` 后再以
+`route_design -directive AggressiveExplore` 重布线，最终 setup `WNS/TNS +0.009 ns/0`、hold
+`WHS/THS +0.012 ns/0`，0 unrouted nets、DRC 0 error 且 bitstream 成功。最终最差路径仍为
+`idleController.enterPending` 到 IQ resident payload CE，data path 降为 `9.540 ns`，其中
+route `7.952 ns`（`83.35%`）；因此闭合来自同一网表的物理优化与重布线，不是继承旧 RTL 的
+时序。post-route 资源为 LUT `86,174`（`64.41%`）、register `52,535`（`19.52%`）、BRAM
+tile `56.5`、DSP `8`。完整 bitstream、DCP、前后 timing、DRC、route status、脚本、日志与
+hash 归档在
+`Stable_Backup/cpu_627aca6a565a_chiplab_c398d274812f_postroute_100mhz_20260806-034619_stable/`。
+matching 团队板 perf20 job `20260805-195251-eff27bf6` 最终 verdict 为 `passed`，20/20 均在
+`nscscc-system-reset-v1` 下双跑并选择较慢有效值。总 SoC/CPU cycles 为
+`50,784,604/50,772,461`；相对上一 matching 100 MHz milestone job
+`20260804-182327-8f1c8193` 的 `69,476,960/69,466,027`，分别减少
+`18,692,356/18,693,566`，即 `-26.904395%/-26.910372%`。20 项中 19 项改善；唯一退化的
+`stringsearch` 从 `799,866` 增至 `1,248,551` CPU cycles（`+56.095021%`），后续前端/分支
+优化仍需把它作为独立反例，而不能只看总和。该 A/B 衡量从旧 milestone 到当前组合的总体收益，
+不能把 `-26.91%` 单独归因给周期语义中性的 Q01。
+
+远端 result、双跑 CSV、programming/board summaries 与原始 metrics 的 hash 已全部匹配，归档在
+上述 stable 目录的 `board_jobs/20260805-195251-eff27bf6/`。因此 `627aca6/6a4437a6...` 现可作为
+新的 100 MHz performance milestone：完整本地 gates、func58 三 seed、matching full-SoC
+setup/hold、DRC、bitstream 与团队板 perf20 20/20 均成立；它仍不等价于 Linux 板上启动证据。
 
 ## Scheduling
 
