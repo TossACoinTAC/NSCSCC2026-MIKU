@@ -54,6 +54,8 @@ source commit 和 generated RTL hash：
 | F01 phase 1 已保留候选 | source `0c6a5dd`；publication `07b0fc0` / `30ed22c9...` | translation response 直接旁路到 L1I；19 项 paired perf20、func58 三 seed、Linux 三 seed与 M01 守恒通过 | 19 项 `61,817,068 -> 53,646,498`（`-13.217337%`），全部改善；尚无 matching timing、bitstream 或板测证据 |
 | H03-II 已保留候选 | source `078385e` + `90eee14`；publication `1b09d3c` / `314d0811...` | confirmed L1I hit 在 array response 拍直接交付，并允许 frontend 同拍替换 owner；L1I/frontend/core integration 定向测试通过；19 项 paired perf20 通过 | 相对 F01 `53,646,498 -> 50,645,040`（`-5.5949%`），18 项改善、`dhrystone +19 cycles`；新增 array/tag 到 frontend 的组合路径必须用 matching route 评价 |
 | B03-min 已保留候选 | source `060ede4`；publication `3a7adda` / `4dce2cca...` | 同拍退休分支中优先训练实际 recovery branch；19 项 paired perf20、func58 三 seed、clean/instrumented Linux 三 seed通过 | 相对 F01 `53,646,498 -> 47,378,949`（`-11.683053%`）；收益主要由 `loop_induction -55.48%` 贡献，仍会丢同拍其他 branch training，必须以组合 A/B 和后续 B03-full 判断泛化 |
+| B03-full 已保留候选 | source `0aa5a82`；publication `491cb8f` / `74f4fc51...` | 8-entry、三入一出更新队列保留全部退休分支训练；完整 gates 及修复 endpoint 后的 19 项 standalone perf20 全通过 | 相对 F01 `53,646,498 -> 47,272,002`（`-11.882408%`）；相对 B03-min 再降 `106,947`（`-0.225727%`），11 项改善、6 项退化、2 项相同；保留 full 版本 |
+| 下一 100 MHz route 候选 | source `0aa5a82` + F01/H03-II；publication `9960820` / `73077349...` | B03-full 保留全部退休分支训练；`951667a` 将三路 GHR/RAS 退休状态寄存切分；完整 `cpu-check`、locked gates、func58 三 seed、19 项 perf20及 clean Linux random-AXI 200M ns 三 seed全通过 | 组合总周期 `44,286,720`，相对 F01+H03-II 为 `-12.554675%`，相对 B03-min 组合再降 `0.260511%`；后一个比较同时包含退休状态时序切分，不能写成纯 B03-full 单变量；WNS/资源必须由 matching route 重建 |
 | B02-A 已否决候选 | source `0d129b6`；publication `d652f9b` / `65576e6d...` | 用 XOR folding 让 8-bit GHR 全部参与原 10-bit PHT index；predictor/frontend 定向测试及 func58 三 seed通过 | 相对 F01 总周期 `53,646,498 -> 53,759,205`（`+0.2101%`），`bitcount/my_memcmp` 等明显退化；不进入合并候选 |
 
 Chiplab 对上述各候选均固定为 `c398d274812f164d387146fa7d8f612a4a1296d9`。CPU 源提交始终
@@ -620,6 +622,32 @@ predictor/frontend 定向测试和 func58 三 seed通过，19 项总 cycles 变�
 哈希不进入下一组合。这个结果只否决当前 folding，不否决扩大 predictor、改变索引或减少
 alias 的 B02 大方向。
 
+B03-full source commit `0aa5a82` 用深度 8、每拍最多入队三项并按程序顺序单项出队的更新队列，
+避免 B03-min 仍会丢失同拍其他退休分支训练；publication commit 为 `491cb8f`。首次 standalone
+perf20 使用的旧 harness 只观察 debug lane 0，三宽退休使软件 `test_finish` 可能从 lane 1/2
+退休，因而已 PASS 的程序仍继续运行到 timeout；该旧矩阵不作为 standalone A/B。workspace
+commit `fae4cfe` 将 perf20 endpoint 固定到 finish loop 中可见的 lane-0 load，`d322a97` 又允许
+用独立 artifact root 保留旧模型同时重跑。隔离的 19 项 standalone 矩阵全部通过，总周期为
+`47,272,002`；相对 B03-min 的 `47,378,949` 减少 `106,947`（`-0.225727%`），11 项改善、
+6 项退化、2 项相同；相对 F01 减少 `11.882408%`，speedup `1.134847x`。最大新增改善为
+`quick_sort -51,335`、`coremark -19,278`、`fireye_C0 -17,873` 和
+`bubble_sort -16,585` cycles；最大回退为 `fireye_I2 +10,668`（`+0.167465%`）。证据位于
+`build/sim-isolated-b03full/runs/cpu_491cb8f9726c_chiplab_c398d274812f/clean-perf20/ideal/`。
+
+当前组合 publication commit `9960820`、generated RTL SHA-256 为
+`73077349d0e7f09fca599f51ca1b38b61ee9af4e1e2950cd5b5295a82dd278e3`，19 项全部通过，
+总周期为 `44,286,720`。相对同一 F01+H03-II 组合的 `50,645,040` 减少 `12.554675%`；
+相对 B03-min 组合的 `44,402,393` 再减少 `0.260511%`。clean Linux random-AXI seeds
+`1/19557/5570815` 均跑满 200M ns 窗口并通过 DiffTest，日志进入 Linux early boot；该窗口
+不代表启动到 shell。
+
+当前组合还包含 `951667a` 的退休状态时序切分：先寄存 conditional-history、call/return 与
+`pc+4`，再驱动三路 architectural GHR/RAS fold，切断 ROB payload 到 predictor 状态的长组合
+路径。恢复本来经 `recoveryPending` 延迟，因此该边界不增加 recovery penalty；但它与
+B03-full 同时出现在上述组合比较中，故 `0.260511%` 只能视为组合增量，不能伪装成纯 B03-full
+单变量结论。H03-II 的同步 L1I array/tag 到 frontend 路径仍是首次 route 的高风险项；是否再
+增加 response staging 只依据 matching top-N 路径决定，避免在无物理证据时支付取指延迟。
+
 ## 4. P1：正确性 gate
 
 `C01-C08` 的优先级高于全部性能候选。下面的“通过”表示相应定向测试、现有门禁和受影响
@@ -919,6 +947,11 @@ WNS/TNS、top-N path 和资源后可继续下一轮微架构/时序协同修改�
     3 降到 2 cycles。
 11. D01 在 F01 的四代表项严格下界只有 `0/193/0/0`，停止 RTL 化；继续投入 F01/H03 和其他
     有独立软件 A/B 的高权重候选，组合到下一次 matching implementation。
+12. B03-full standalone 19 项相对 B03-min 再降 `0.225727%`，已在下一 route 候选中替代
+    B03-min；当前 `9960820/73077349...` 的完整 CPU gates、func58 三 seed、19 项 perf20和
+    clean Linux random-AXI 200M ns 三 seed均通过，组合周期为 `44,286,720`。`951667a` 已
+    切断退休状态到 predictor GHR/RAS 的静态长路径；100 MHz setup/hold、资源和 bitstream
+    结论等待该 matching RTL 的完整 SoC route，不能继承历史结果。
 
 下一组合已具有 W01、E02、L05、W02 与 F01 phase 1 的独立周期归因。后续候选继续保留配置
 开关和 paired A/B，但不要求把全部组合展开成全因子矩阵；只将有独立正收益且组合回归通过的
