@@ -5,6 +5,8 @@ ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 LOCAL_TOOL_DIR := $(ROOT_DIR)/tools/.local
 LOCAL_TOOL_BIN := $(ROOT_DIR)/tools/bin
 CPU_DIR ?= $(ROOT_DIR)/nscscc-cpu
+CPU_REL_DIR := $(shell realpath --relative-to="$(ROOT_DIR)" "$(CPU_DIR)")
+CPU_CONTAINER_DIR := /work/$(CPU_REL_DIR)
 CHIPLAB_HOME := $(ROOT_DIR)/chiplab
 CHIPLAB_TOOLCHAIN_DIR := $(CHIPLAB_HOME)/toolchains
 CHIPLAB_GCC_BIN := $(CHIPLAB_TOOLCHAIN_DIR)/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin
@@ -263,6 +265,10 @@ gate-image:
 cpu-locked-gates: gate-image cpu-locked-gates-run
 
 cpu-locked-gates-run: cpu-generate
+	@if [[ "$(CPU_REL_DIR)" == ".." || "$(CPU_REL_DIR)" == ../* ]]; then \
+		printf 'CPU_DIR must be inside the workspace for locked gates: %s\n' "$(CPU_DIR)" >&2; \
+		exit 2; \
+	fi
 	@docker image inspect "$(GATE_IMAGE)" >/dev/null 2>&1 || { \
 		printf 'locked gate image not found: %s\n' "$(GATE_IMAGE)" >&2; \
 		printf 'build it first with: make gate-image\n' >&2; \
@@ -273,9 +279,10 @@ cpu-locked-gates-run: cpu-generate
 		--user "$$(id -u):$$(id -g)" \
 		-e HOME=/tmp \
 		-v "$(ROOT_DIR):/work" \
-		-w /work/nscscc-cpu \
+		-v "$(ROOT_DIR):$(ROOT_DIR)" \
+		-w "$(CPU_CONTAINER_DIR)" \
 		"$(GATE_IMAGE)" sh -ec ' \
-			git config --global --add safe.directory /work/nscscc-cpu; \
+			git config --global --add safe.directory "$(CPU_CONTAINER_DIR)"; \
 			python3 -I tools/core_top_gate.py refresh-metadata \
 				--repo-root . --manifest reference/manifest.lock \
 				--ports reference/core-top.ports.json --rtl rtl/mycpu_top.v \
