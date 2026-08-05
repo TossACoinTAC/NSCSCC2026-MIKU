@@ -64,7 +64,9 @@ SIM_ALLOW_THREE ?= 0
 SIM_LANE_PEAK_MB ?=
 SIM_PREPARE_MODEL_RUN ?= $(if $(filter perf20,$(SIM_SUITE)),coremark,$(RUN_SOFTWARE))
 SIM_PREPARE_CONFIG_ARGS ?= --run $(SIM_PREPARE_MODEL_RUN) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst
-PERF20_WORKLOADS := perf20/bitcount,perf20/bubble_sort,perf20/coremark,perf20/crc32,perf20/dhrystone,perf20/quick_sort,perf20/select_sort,perf20/sha,perf20/stream_copy,perf20/stringsearch,perf20/fireye_A0,perf20/fireye_B2,perf20/fireye_C0,perf20/fireye_D1,perf20/fireye_I2,perf20/inner_product,perf20/lookup_table,perf20/loop_induction,perf20/my_memcmp,perf20/minmax_sequence
+# Local software simulation omits the long-tail stringsearch case.  The complete perf20 image,
+# including stringsearch, remains mandatory in the actual-board flow.
+PERF20_WORKLOADS := perf20/bitcount,perf20/bubble_sort,perf20/coremark,perf20/crc32,perf20/dhrystone,perf20/quick_sort,perf20/select_sort,perf20/sha,perf20/stream_copy,perf20/fireye_A0,perf20/fireye_B2,perf20/fireye_C0,perf20/fireye_D1,perf20/fireye_I2,perf20/inner_product,perf20/lookup_table,perf20/loop_induction,perf20/my_memcmp,perf20/minmax_sequence
 PERF20_TIME_LIMIT ?= 600000000
 FUNC58_WORKLOADS := func58
 FUNC58_SEEDS ?= 240,255,141
