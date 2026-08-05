@@ -145,15 +145,7 @@ run_dir="$staging/sims/verilator/run_prog"
 read -r -a config_words <<< "$config_args"
 (cd "$run_dir" && ./configure.sh "${config_words[@]}")
 (cd "$run_dir" && make clean)
-PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" verilator \
-  MYCPU_SRC="$staging/IP/myCPU" VERILATOR_HOME="$verilator_home"
-PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" testbench \
-  MYCPU_SRC="$staging/IP/myCPU" VERILATOR_HOME="$verilator_home" \
-  ALL_LIB="./obj_dir/*__ALL.a $extra_libs"
 case "$suite" in
-standard)
-  PATH="$sim_path:$PATH" make -C "$run_dir" soft_compile
-  ;;
 perf20)
   "$workspace/tools/stage-perf20-software" \
     --chiplab-dir "$staging" \
@@ -167,6 +159,14 @@ func58)
     --workloads "$workloads"
   ;;
 esac
+PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" verilator \
+  MYCPU_SRC="$staging/IP/myCPU" VERILATOR_HOME="$verilator_home"
+PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" testbench \
+  MYCPU_SRC="$staging/IP/myCPU" VERILATOR_HOME="$verilator_home" \
+  ALL_LIB="./obj_dir/*__ALL.a $extra_libs"
+if [[ $suite == standard ]]; then
+  PATH="$sim_path:$PATH" make -C "$run_dir" soft_compile
+fi
 if grep -Fxq 'TRACE_COMP=y' "$run_dir/config-software.mak"; then
   chmod u+x "$run_dir/qemu_system_run.sh"
   PATH="$sim_path:$PATH" make -C "$run_dir" golden_trace
