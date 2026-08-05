@@ -57,6 +57,7 @@ WAVE ?= $(SIM_DIR)/log/$(RUN_SOFTWARE)_log/simu_trace.fst
 SIM_PROFILE ?= clean
 SIM_SUITE ?= standard
 SIM_MEMORY_MODE ?= random
+SIM_ARTIFACT_ROOT ?= $(ROOT_DIR)/build/sim
 SIM_WORKLOADS ?= $(RUN_SOFTWARE)
 SIM_SEEDS ?= $(AXI_SEED)
 SIM_LANES ?= 2
@@ -122,6 +123,7 @@ help:
 		'Common overrides:' \
 		'  RUN_SOFTWARE=func/func_lab19  TIME_LIMIT=1300000  JOBS=8  AXI_SEED=5570815' \
 		'  SIM_PROFILE=clean|instrumented  SIM_SUITE=standard|func58|perf20' \
+		'  SIM_ARTIFACT_ROOT=path          Isolate prepared models and runtime evidence' \
 		'  SIM_MEMORY_MODE=random|ideal  SIM_WORKLOADS=a,b  SIM_SEEDS=1,2  SIM_LANES=2' \
 		'  PERF_CPU_MHZ=100' \
 		'  SOC_ARCHIVE_CLASS=candidate|stable' \
@@ -370,6 +372,7 @@ sim: sim-run
 sim-prepare: cpu-generate chiplab-toolchains
 	"$(ROOT_DIR)/tools/sim-prepare" \
 		--workspace "$(ROOT_DIR)" \
+		--artifact-root "$(SIM_ARTIFACT_ROOT)" \
 		--cpu-dir "$(CPU_DIR)" \
 		--chiplab-dir "$(CHIPLAB_HOME)" \
 		--chiplab-commit "$(CHIPLAB_COMMIT)" \
@@ -385,6 +388,7 @@ sim-prepare: cpu-generate chiplab-toolchains
 sim-matrix:
 	"$(ROOT_DIR)/tools/sim-matrix" \
 		--workspace "$(ROOT_DIR)" \
+		--artifact-root "$(SIM_ARTIFACT_ROOT)" \
 		--cpu-dir "$(CPU_DIR)" \
 		--chiplab-commit "$(CHIPLAB_COMMIT)" \
 		--profile "$(SIM_PROFILE)" \

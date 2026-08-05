@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   printf '%s\n' \
-    'usage: sim-prepare --workspace DIR --cpu-dir DIR --chiplab-dir DIR' \
+    'usage: sim-prepare --workspace DIR [--artifact-root DIR] --cpu-dir DIR --chiplab-dir DIR' \
     '                   --chiplab-commit HASH --profile clean|instrumented' \
     '                   --suite standard|func58|perf20 --workloads CSV' \
     '                   --config-args STRING --jobs N' \
@@ -11,6 +11,7 @@ usage() {
 }
 
 workspace=
+artifact_root=
 cpu_dir=
 chiplab_dir=
 chiplab_commit=
@@ -26,6 +27,7 @@ extra_libs=
 while (($#)); do
   case "$1" in
     --workspace) workspace=$2; shift 2 ;;
+    --artifact-root) artifact_root=$2; shift 2 ;;
     --cpu-dir) cpu_dir=$2; shift 2 ;;
     --chiplab-dir) chiplab_dir=$2; shift 2 ;;
     --chiplab-commit) chiplab_commit=$2; shift 2 ;;
@@ -41,6 +43,10 @@ while (($#)); do
     *) printf 'unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ -z $artifact_root ]]; then
+  artifact_root="$workspace/build/sim"
+fi
 
 for value in workspace cpu_dir chiplab_dir chiplab_commit profile suite workloads config_args jobs sim_path verilator_home; do
   if [[ -z ${!value} ]]; then
@@ -74,7 +80,7 @@ if [[ ! -f $rtl ]]; then
   exit 1
 fi
 
-prepared_root="$workspace/build/sim/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}"
+prepared_root="$artifact_root/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}"
 variant=$profile
 if [[ $suite != standard ]]; then
   variant="$profile-$suite"

@@ -3,13 +3,14 @@ set -euo pipefail
 
 usage() {
   printf '%s\n' \
-    'usage: sim-matrix --workspace DIR --cpu-dir DIR --chiplab-commit HASH' \
+    'usage: sim-matrix --workspace DIR [--artifact-root DIR] --cpu-dir DIR --chiplab-commit HASH' \
     '                  --profile clean|instrumented --suite standard|func58|perf20' \
     '                  --memory-mode random|ideal --workloads CSV --seeds CSV' \
     '                  --lanes N --time-limit N --sim-path PATH [lane-3 evidence]'
 }
 
 workspace=
+artifact_root=
 cpu_dir=
 chiplab_commit=
 profile=
@@ -26,6 +27,7 @@ lane_peak_mb=
 while (($#)); do
   case "$1" in
     --workspace) workspace=$2; shift 2 ;;
+    --artifact-root) artifact_root=$2; shift 2 ;;
     --cpu-dir) cpu_dir=$2; shift 2 ;;
     --chiplab-commit) chiplab_commit=$2; shift 2 ;;
     --profile) profile=$2; shift 2 ;;
@@ -42,6 +44,10 @@ while (($#)); do
     *) printf 'unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
   esac
 done
+
+if [[ -z $artifact_root ]]; then
+  artifact_root="$workspace/build/sim"
+fi
 
 for value in workspace cpu_dir chiplab_commit profile suite memory_mode workloads seeds lanes time_limit sim_path; do
   if [[ -z ${!value} ]]; then
@@ -85,7 +91,7 @@ variant=$profile
 if [[ $suite != standard ]]; then
   variant="$profile-$suite"
 fi
-prepared="$workspace/build/sim/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$variant"
+prepared="$artifact_root/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$variant"
 manifest="$prepared/sim-prepared-manifest.txt"
 run_prog="$prepared/sims/verilator/run_prog"
 model="$run_prog/output"
@@ -119,7 +125,7 @@ if [[ $actual_rtl_sha != "$expected_rtl_sha" ]]; then
   exit 1
 fi
 
-run_root="$workspace/build/sim/runs/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$variant/$memory_mode"
+run_root="$artifact_root/runs/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$variant/$memory_mode"
 mkdir -p "$run_root"
 IFS=',' read -r -a workload_list <<< "$workloads"
 IFS=',' read -r -a seed_list <<< "$seeds"
