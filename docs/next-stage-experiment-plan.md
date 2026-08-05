@@ -52,6 +52,9 @@ source commit 和 generated RTL hash：
 | W02-on diagnostic route | `03a466a` / `50b460f...` | W01+E02+L05+W02 完整 gates、func58/Linux 三 seed；100 MHz bitstream、DRC 0、hold `+0.053 ns` | setup `WNS/TNS -0.601/-85.196 ns`；该 route 只绑定组合 RTL，不能拆成 W02 单项结论 |
 | W02-off timing ablation | source `b4968c4`；publication `81187c0` / `53165912...` | 只关闭 W02；100 MHz bitstream、DRC 0、hold `+0.050 ns` | setup `WNS/TNS -0.778/-633.874 ns`，关闭后更差；排除“W02 直接导致退化”，但两次 route 仅作当前非稳定 RTL 参考 |
 | F01 phase 1 已保留候选 | source `0c6a5dd`；publication `07b0fc0` / `30ed22c9...` | translation response 直接旁路到 L1I；19 项 paired perf20、func58 三 seed、Linux 三 seed与 M01 守恒通过 | 19 项 `61,817,068 -> 53,646,498`（`-13.217337%`），全部改善；尚无 matching timing、bitstream 或板测证据 |
+| H03-II 已保留候选 | source `078385e` + `90eee14`；publication `1b09d3c` / `314d0811...` | confirmed L1I hit 在 array response 拍直接交付，并允许 frontend 同拍替换 owner；L1I/frontend/core integration 定向测试通过；19 项 paired perf20 通过 | 相对 F01 `53,646,498 -> 50,645,040`（`-5.5949%`），18 项改善、`dhrystone +19 cycles`；新增 array/tag 到 frontend 的组合路径必须用 matching route 评价 |
+| B03-min 已保留候选 | source `060ede4`；publication `3a7adda` / `4dce2cca...` | 同拍退休分支中优先训练实际 recovery branch；19 项 paired perf20、func58 三 seed、clean/instrumented Linux 三 seed通过 | 相对 F01 `53,646,498 -> 47,378,949`（`-11.683053%`）；收益主要由 `loop_induction -55.48%` 贡献，仍会丢同拍其他 branch training，必须以组合 A/B 和后续 B03-full 判断泛化 |
+| B02-A 已否决候选 | source `0d129b6`；publication `d652f9b` / `65576e6d...` | 用 XOR folding 让 8-bit GHR 全部参与原 10-bit PHT index；predictor/frontend 定向测试及 func58 三 seed通过 | 相对 F01 总周期 `53,646,498 -> 53,759,205`（`+0.2101%`），`bitcount/my_memcmp` 等明显退化；不进入合并候选 |
 
 Chiplab 对上述各候选均固定为 `c398d274812f164d387146fa7d8f612a4a1296d9`。CPU 源提交始终
 保留用户已有的 `D AGENTS.md`；生成/门禁期间 `rtl/mycpu_top.v` 可呈现 matching publication
@@ -241,6 +244,9 @@ mismatch 只表示证据未闭合，不构成功能失败。
 | `03a466a` W01+E02+L05+W02 diagnostic route | matching RTL `50b460f...`，100 MHz performance SoC bitstream 成功、DRC 0、hold `+0.053 ns` | setup `WNS/TNS -0.601/-85.196 ns`；前六条为 LSQ Store PA/order 到 IQ3 operand，route 约 75%，并经过 fanout 166 的 completion network；LUT `90,797` | 只绑定该组合 RTL；W02 单变量结论由关闭消融给出 |
 | `b4968c4` / `81187c0` W02-off timing ablation | generated RTL `53165912...`；只关闭 `enableLoadCompletionEarlyWakeup`；bitstream 成功、DRC 0、hold `+0.050 ns` | setup `WNS/TNS -0.778/-633.874 ns`；最差路径为 LSQ scheduled-Load ROB pointer 到 IQ3 operand，route `74.4%` | 排除“W02 直接导致当前退化”；两次 route 都是非稳定 RTL 的参考，不把任何时序结论继承给后续候选 |
 | `0c6a5dd` / `07b0fc0` F01 phase 1 | translation response 直接旁路给 L1I，同时保留 translated-request slot 处理 backpressure | 19 项相对 W02-on `-13.217337%` 且全部改善；func58/Linux 三 seed、代表 counters 和 M01 invariants 通过 | 保留并继续前端方向；matching resource/WNS/bitstream 必须在合并候选上重建 |
+| `078385e` / `90eee14` / `1b09d3c` H03-II | L1I confirmed hit 在 array response 拍组合交付，frontend 可同拍消费 response 并交付下一 owner；refill/error 仍走原注册路径 | 19 项相对 F01 `-5.5949%`，18 项改善；L1I `9/9`、frontend `16/16`、core integration `4/4` | 保留到下一组合；重点读取 L1I array/tag 到 predecode/frontend 的 setup path，不能继承旧 WNS |
+| `060ede4` / `3a7adda` B03-min | 当退休组包含本拍 mispredict recovery branch 时，单写口优先训练该 branch；其他拍保持训练最老分支 | 19 项相对 F01 `-11.683053%`；func58 三 seed `58/58`，clean/instrumented Linux 三 seed约 100M cycles 均无 mismatch | 保留到下一组合；`loop_induction` 占绝大收益，且仍丢同拍其余分支，继续以 B03-full 原型判断完整保序训练的增益与成本 |
+| `0d129b6` / `d652f9b` B02-A | 保持 PHT 容量、接口和 metadata 宽度不变，将 `GHR[7:5]` XOR-fold 到原 `GHR[4:0]` 索引片段 | 19 项全部通过但总周期 `+0.2101%`；func58 三 seed通过 | 否决本 folding；若重启 B02，应使用 committed trace/offline replay 或不同容量/哈希，不把“更多 GHR bit”本身视为收益 |
 
 Vivado 调度采用合并里程碑：同一轮可以并行准备多个高优先级、相互较独立的候选，但每项
 必须先有独立配置开关、同 workload/seed 的软件 A/B 和相关正确性回归。只把各自已有正收益、
@@ -588,6 +594,31 @@ F01 matching instrumented Linux random-AXI seeds `1/19557/5570815` 各运行约 
 `fireye_I2/coremark/quick_sort/inner_product` 上为 `0/193/0/0`，继续接近零，停止 D01 RTL
 方向。F01 已具有 paired cycles、func58、Linux 与结构计数的交叉证据，下一候选可以继续沿
 前端 II 推进；资源、100 MHz timing 和板测结论仍需绑定后续 matching RTL。
+
+H03 第一版只让 L1I controller 在 confirmed hit 后同拍接受下一 lookup，但 response 仍先进入
+寄存器；真实 frontend 无法在该拍释放旧 owner，因此 19 项周期与 F01 逐项精确相等。H03-II
+把 confirmed hit response 直接暴露在 cache-array response 拍，并证明至少一次 cache response
+与下一 request fire 重叠；refill、error、kill 和 maintenance 仍保留原控制边界。相同 19 项总
+cycles 从 `53,646,498` 降到 `50,645,040`，减少 `3,001,458`（`-5.5949%`，speedup
+`1.059265x`），18 项改善，只有 `dhrystone` 增加 19 cycles。该实现增加同步 array/tag 到
+frontend response/predecode 的组合路径，所以周期收益成立，频率收益尚未成立。
+
+B03-min 用一个低成本优先级修改验证训练丢失的价值：当同拍退休组包含导致 recovery 的
+mispredict branch 时，单写口优先训练该 branch。相对 F01 的 19 项总 cycles 从
+`53,646,498` 降到 `47,378,949`，减少 `6,267,549`（`-11.683053%`，speedup
+`1.132286x`）。其中 `loop_induction` 从 `10,493,866` 降到 `4,671,533`（`-55.48%`），
+说明总收益明显偏向一个高权重项目；其余项目仍有 9 项改善、6 项退化、3 项相等。func58
+random-AXI seeds `240/255/141` 均为 `58/58 pass`；clean 与 instrumented Linux seeds
+`1/19557/5570815` 各运行约 100M cycles，均无 DiffTest mismatch，且两种 profile 的逐 seed
+指令数完全一致。该窗口只到 Linux early boot，不能写成启动到 shell。B03-min 仍会丢弃同拍
+其他 retired branch，故保留它作为下一组合的已测候选，同时独立评估 B03-full 的保序更新
+队列、architectural GHR/RAS 合并与 timing/resource 成本。
+
+B02-A 保持 PHT 容量为原值，只将 `GHR[7:5]` XOR-fold 到原 `GHR[4:0]` 索引片段。尽管
+predictor/frontend 定向测试和 func58 三 seed通过，19 项总 cycles 变为 `53,759,205`
+（`+0.2101%`）；`my_memcmp +5.82%`、`bitcount +4.53%` 等退化抵消了部分项目收益，因此该
+哈希不进入下一组合。这个结果只否决当前 folding，不否决扩大 predictor、改变索引或减少
+alias 的 B02 大方向。
 
 ## 4. P1：正确性 gate
 
