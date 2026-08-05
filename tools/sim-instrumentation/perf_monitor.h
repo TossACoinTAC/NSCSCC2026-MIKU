@@ -20,6 +20,7 @@ public:
 
 private:
     static constexpr unsigned kCommitObservationLag = 4;
+    static constexpr unsigned kFrontendOccupancyBins = 17;
     static constexpr std::uint8_t kNoReason = 0xff;
 
     struct CycleSnapshot {
@@ -117,7 +118,7 @@ private:
     std::uint64_t rob_full_cycles_ = 0;
     std::uint64_t rob_occupancy_hist_[33] = {};
     std::uint64_t frontend_decode_valid_sum_ = 0;
-    std::uint64_t frontend_occupancy_hist_[9] = {};
+    std::uint64_t frontend_occupancy_hist_[kFrontendOccupancyBins] = {};
     std::uint64_t frontend_translation_request_fire_ = 0;
     std::uint64_t frontend_translation_outstanding_cycles_ = 0;
     std::uint64_t frontend_translated_request_valid_cycles_ = 0;

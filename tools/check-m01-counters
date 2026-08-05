@@ -19,7 +19,7 @@ except (OSError, json.JSONDecodeError) as error:
     fail(str(error))
 
 schema = counters.get("schema_version")
-if schema not in {"nscc-m01-v6", "nscc-m01-v7"}:
+if schema not in {"nscc-m01-v6", "nscc-m01-v7", "nscc-m01-v8"}:
     fail(f"unexpected schema {schema!r}")
 if counters.get("commit_observation_lag_cycles") != 4:
     fail("unexpected DiffTest commit observation lag")
@@ -51,13 +51,17 @@ if not isinstance(d01_blocked, int) or d01_blocked < 0:
 if d01_blocked > d01_candidates:
     fail("D01 SDQ-blocked cycles exceed oldest-Load candidate cycles")
 
-if schema == "nscc-m01-v7":
+if schema in {"nscc-m01-v7", "nscc-m01-v8"}:
     frontend = counters.get("frontend", {})
     frontend_occupancy = frontend.get("occupancy_histogram")
-    if not isinstance(frontend_occupancy, list) or len(frontend_occupancy) != 9 or not all(
+    expected_occupancy_bins = 17 if schema == "nscc-m01-v8" else 9
+    if not isinstance(frontend_occupancy, list) or len(frontend_occupancy) != expected_occupancy_bins or not all(
         isinstance(value, int) and value >= 0 for value in frontend_occupancy
     ):
-        fail("frontend occupancy histogram must contain nine nonnegative integers")
+        fail(
+            "frontend occupancy histogram must contain "
+            f"{expected_occupancy_bins} nonnegative integers"
+        )
     if sum(frontend_occupancy) != cycles:
         fail("frontend occupancy histogram does not conserve cycles")
     request_fire = frontend.get("cache_request_fire")

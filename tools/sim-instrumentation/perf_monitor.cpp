@@ -427,7 +427,7 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
 
     snapshot.decode_valid = static_cast<std::uint8_t>(
         popcount8(static_cast<std::uint8_t>(SYS(frontend__DOT__decodeInputValid))));
-    snapshot.frontend_occupancy = static_cast<std::uint8_t>(SYS(frontend__DOT__count) & 0xfU);
+    snapshot.frontend_occupancy = static_cast<std::uint8_t>(SYS(frontend__DOT__count) & 0x1fU);
     snapshot.frontend_translation_request_fire =
         static_cast<bool>(ATU(area_instructionRequestFire));
     snapshot.frontend_translation_outstanding =
@@ -698,7 +698,7 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot, std::uint8_
     rob_full_cycles_ += bit(snapshot.rob_occupancy >= 32);
 
     frontend_decode_valid_sum_ += snapshot.decode_valid;
-    if (snapshot.frontend_occupancy < 9) {
+    if (snapshot.frontend_occupancy < kFrontendOccupancyBins) {
         frontend_occupancy_hist_[snapshot.frontend_occupancy]++;
     }
     frontend_translation_request_fire_ += bit(snapshot.frontend_translation_request_fire);
@@ -941,7 +941,7 @@ void PerfMonitor::write_json(const char *path) const {
     const bool commit_count_ok = observed_instructions_ == sampled_instructions_;
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v7\",\n");
+    std::fprintf(file, "  \"schema_version\": \"nscc-m01-v8\",\n");
     std::fprintf(file, "  \"roi\": \"difftest-observation-window-source-aligned\",\n");
     std::fprintf(file, "  \"commit_observation_lag_cycles\": %u,\n", kCommitObservationLag);
     std::fprintf(file, "  \"cycles\": %llu,\n", static_cast<unsigned long long>(cycles_));
@@ -1000,17 +1000,13 @@ void PerfMonitor::write_json(const char *path) const {
     std::fprintf(file, "  \"rob\": {\"occupancy_sum\": %llu, \"occupancy_max\": %llu, \"full_cycles\": %llu},\n",
                  static_cast<unsigned long long>(rob_occupancy_sum_), static_cast<unsigned long long>(rob_occupancy_max_),
                  static_cast<unsigned long long>(rob_full_cycles_));
-    std::fprintf(file, "  \"frontend\": {\"decode_valid_sum\": %llu, \"occupancy_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu], \"translation_request_fire\": %llu, \"translation_outstanding_cycles\": %llu, \"translated_request_valid_cycles\": %llu, \"cache_request_base_valid_cycles\": %llu, \"cache_request_fire\": %llu, \"cache_response_fire\": %llu, \"cache_outstanding_cycles\": %llu, \"request_interval_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu], \"cache_request\": %llu, \"uncached_request\": %llu},\n",
-                 static_cast<unsigned long long>(frontend_decode_valid_sum_),
-                 static_cast<unsigned long long>(frontend_occupancy_hist_[0]),
-                 static_cast<unsigned long long>(frontend_occupancy_hist_[1]),
-                 static_cast<unsigned long long>(frontend_occupancy_hist_[2]),
-                 static_cast<unsigned long long>(frontend_occupancy_hist_[3]),
-                 static_cast<unsigned long long>(frontend_occupancy_hist_[4]),
-                 static_cast<unsigned long long>(frontend_occupancy_hist_[5]),
-                 static_cast<unsigned long long>(frontend_occupancy_hist_[6]),
-                 static_cast<unsigned long long>(frontend_occupancy_hist_[7]),
-                 static_cast<unsigned long long>(frontend_occupancy_hist_[8]),
+    std::fprintf(file, "  \"frontend\": {\"decode_valid_sum\": %llu, \"occupancy_histogram\": [",
+                 static_cast<unsigned long long>(frontend_decode_valid_sum_));
+    for (unsigned bucket = 0; bucket < kFrontendOccupancyBins; bucket++) {
+        std::fprintf(file, "%s%llu", bucket == 0 ? "" : ", ",
+                     static_cast<unsigned long long>(frontend_occupancy_hist_[bucket]));
+    }
+    std::fprintf(file, "], \"translation_request_fire\": %llu, \"translation_outstanding_cycles\": %llu, \"translated_request_valid_cycles\": %llu, \"cache_request_base_valid_cycles\": %llu, \"cache_request_fire\": %llu, \"cache_response_fire\": %llu, \"cache_outstanding_cycles\": %llu, \"request_interval_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu], \"cache_request\": %llu, \"uncached_request\": %llu},\n",
                  static_cast<unsigned long long>(frontend_translation_request_fire_),
                  static_cast<unsigned long long>(frontend_translation_outstanding_cycles_),
                  static_cast<unsigned long long>(frontend_translated_request_valid_cycles_),
