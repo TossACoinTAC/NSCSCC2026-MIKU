@@ -208,9 +208,10 @@ manifest。早期 endpoint 失败来自 c398 新 testbench 未消费 `--end-pc`�
 `--simu-bus-delay-random-seed` 提供 AXI 扰动并始终保持运行期 `switch=FF`。两者是相同验证
 目的下的不同延迟实现，不能声称 bit-exact 随机序列相同。`perf20` 的 CPU cycle counter 只
 覆盖 benchmark ROI；Verilator 墙钟和整段模拟周期还包含启动与 UART，不可写入性能 A/B。
-`stringsearch` 尤其会在每轮 ROI 后输出大量文本，早期 100 ms 仿真窗口不足；官方 suite
-默认已提高到 600 ms，其他项目到达 endpoint 后仍会提前退出。超窗且无 mismatch 只表示证据
-未闭合，不构成功能失败。
+本地软件性能仿真固定使用其余 19 项，不再启动 `stringsearch`；该长尾只在实际板卡的完整
+`perf20` 流程中运行。历史本地 `stringsearch` 结果继续作为当时里程碑证据保留，但不再作为
+后续候选的软件门禁或性能归因输入。其余项目到达 endpoint 后仍会提前退出；超窗且无
+mismatch 只表示证据未闭合，不构成功能失败。
 
 ### 3.4 RTL 演进与预期同步
 
