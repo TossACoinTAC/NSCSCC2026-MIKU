@@ -593,20 +593,22 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
         static_cast<std::uint8_t>(LSQ(loads_5_robPointer)),
         static_cast<std::uint8_t>(LSQ(loads_6_robPointer)),
         static_cast<std::uint8_t>(LSQ(loads_7_robPointer))};
+    // The parent completion wires may be inlined away by Verilator. With fast Store completion
+    // disabled, these resident LSQ registers are exactly the externally visible completion.
     const std::uint8_t completion_pointer =
-        static_cast<std::uint8_t>(LSQ_IO(completion_robPointer));
+        static_cast<std::uint8_t>(LSQ(completion_robPointer));
     bool completion_matches_load = false;
     for (unsigned entry = 0; entry < 8; entry++) {
         completion_matches_load |= load_valid_for_completion[entry] &&
             load_pointer_for_completion[entry] == completion_pointer;
     }
     const std::uint8_t completion_pdst =
-        static_cast<std::uint8_t>(LSQ_IO(completion_pdst));
+        static_cast<std::uint8_t>(LSQ(completion_pdst));
     snapshot.w02_load_completion = !snapshot.recovery &&
-        static_cast<bool>(LSQ_IO(completionValid)) &&
-        static_cast<bool>(LSQ_IO(completion_writesPdst)) && completion_pdst != 0 &&
-        !static_cast<bool>(LSQ_IO(completion_exception_valid)) &&
-        static_cast<std::uint8_t>(LSQ_IO(completion_recoveryEpoch)) ==
+        static_cast<bool>(LSQ(completionValid)) &&
+        static_cast<bool>(LSQ(completion_writesPdst)) && completion_pdst != 0 &&
+        !static_cast<bool>(LSQ(completion_exception_valid)) &&
+        static_cast<std::uint8_t>(LSQ(completion_recoveryEpoch)) ==
             static_cast<std::uint8_t>(BACKEND(recoveryEpoch)) &&
         completion_matches_load;
     if (snapshot.w02_load_completion) {
