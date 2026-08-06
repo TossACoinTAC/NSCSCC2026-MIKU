@@ -1,30 +1,19 @@
-# Workspace-local tools and editors
-/.codex/
-/.vscode/
-/.idea/
+# 本机配置与 IDE 状态（默认 clean 不删除）
+/config/local.env
 /.bsp/
 /.metals/
 /.scala-build/
-/tools/.local/
+/.idea/
+/.vscode/*
+!/.vscode/settings.json
+/.codex/
 
-# Nested repositories and local reference material are managed independently.
-/chiplab/
-/nscscc-cpu/
-/nscscc-team-ci/
-/T2026144230012607/
-/nscscc-linux-kernel/
-/fpga-lab-agent/
-/Info/
-
-# Root-level generated output
+# 可再生构建输出
 /build/
-/out/
-/output/
-/tmp/
-/.cache/
-/Stable_Backup/
-
-# FPGA and simulator products accidentally emitted at the workspace root
+/cpu/target/
+/cpu/project/target/
+**/__pycache__/
+*.pyc
 /.Xil/
 /*.bit
 /*.bin
@@ -39,6 +28,20 @@
 /*.vcd
 /*.wdb
 /*.xpr
+
+# 明确保留但不进入根仓库的实现证据和二进制参考
+/Post_Impl_Bundles/
+/Stable_Backup/
+/docs/References/
+
+# 初赛遗留克隆和历史资料不进入根仓库
+/T2026144230012607/
+/nscscc-team-ci/
+/Info/
+
+# 迁移前目录必须不存在；此规则防止误重新纳入
+/nscscc-cpu/
+/tools/
 
 # OS/editor residue
 *~

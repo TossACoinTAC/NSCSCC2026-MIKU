@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "repositories": [
+    {
+      "name": "chiplab",
+      "path": "chiplab",
+      "remote": "https://gitee.com/loongson-edu/chiplab.git",
+      "branch": "nscscc2026",
+      "commit": "c398d274812f164d387146fa7d8f612a4a1296d9",
+      "management": "git-submodule",
+      "purpose": "决赛 SoC、Verilator 仿真平台和 Vivado 工程",
+      "required_for": ["sim", "vivado", "linux"],
+      "dirty_policy": "allowed-recorded"
+    },
+    {
+      "name": "linux-kernel",
+      "path": "nscscc-linux-kernel",
+      "remote": "https://github.com/Maotechh/nscscc-linux-kernel.git",
+      "branch": "main",
+      "commit": "104de262720d594b9651faf05c0fbabdb59fba68",
+      "management": "git-submodule",
+      "purpose": "LA32R Linux 内核源码和补丁",
+      "required_for": ["linux"],
+      "dirty_policy": "warn"
+    },
+    {
+      "name": "fpga-lab-agent",
+      "path": "fpga-lab-agent",
+      "remote": "https://github.com/negativegluon/fpga-lab-agent.git",
+      "branch": "main",
+      "commit": "f8a3e3f9a45ed675a88fcdf460227ce8bd6f6c35",
+      "management": "git-submodule",
+      "purpose": "团队远程板卡服务的独立源码仓库",
+      "required_for": ["board"],
+      "dirty_policy": "warn"
+    }
+  ]
+}

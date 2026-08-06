@@ -1,0 +1,12 @@
+[submodule "chiplab"]
+	path = chiplab
+	url = https://gitee.com/loongson-edu/chiplab.git
+	branch = nscscc2026
+[submodule "nscscc-linux-kernel"]
+	path = nscscc-linux-kernel
+	url = https://github.com/Maotechh/nscscc-linux-kernel.git
+	branch = main
+[submodule "fpga-lab-agent"]
+	path = fpga-lab-agent
+	url = https://github.com/negativegluon/fpga-lab-agent.git
+	branch = main
