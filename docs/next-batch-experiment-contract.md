@@ -311,6 +311,196 @@ matching 团队板 perf20 job `20260805-195251-eff27bf6` 最终 verdict 为 `pas
 新的 100 MHz performance milestone：完整本地 gates、func58 三 seed、matching full-SoC
 setup/hold、DRC、bitstream 与团队板 perf20 20/20 均成立；它仍不等价于 Linux 板上启动证据。
 
+## 627 Milestone Frontend Attribution And H03-III/IV Contract
+
+在 `627aca6/6a4437a6...` 上以 ideal memory、seed 0 重跑 M01 后，
+`coremark/fireye_I2/quick_sort/inner_product` 均通过 DiffTest 与 observer 守恒式。软件报告的
+CPU cycles 分别为 `4,884,950/6,574,849/2,732,066/7,800,209`；observer 的实际窗口为
+`15,921,319/9,931,936/6,060,400/11,232,298` cycles，retired instructions 为
+`5,157,165/3,819,837/1,947,850/5,165,016`，对应 IPC
+`0.323916/0.384601/0.321406/0.459836`。两种 cycle 口径不可混用：前者用于相同软件合同下的
+A/B，后者用于 observer 内部比例与守恒检查。
+
+frontend empty 占实际观测窗口的 `20.2425%/43.3060%/48.6415%/29.4684%`，平均 frontend
+occupancy 为 `3.7917/1.9610/1.9260/3.1750`。相邻 instruction request interval 不大于
+2 cycles 的比例为 `33.66%/65.98%/46.81%/55.68%`，3-cycle 桶为
+`21.49%/17.10%/27.91%/6.54%`，至少 4 cycles 的长尾仍有
+`44.85%/16.92%/25.28%/37.78%`。ROB 平均占用为
+`18.968/14.868/12.572/13.736`，ROB full 比例仅
+`0.922%/1.423%/0.596%/0.0089%`；零 retire 且 ROB empty 的比例为
+`3.448%/8.316%/9.333%/0.560%`。branch resolve-to-recovery 平均延迟为
+`4.546/2.516/4.350/9.095` cycles，但累计暴露只占窗口
+`2.281%/3.243%/6.080%/0.0728%`。
+
+因此本轮归因将前端持续供给列为第一高权重瓶颈，ROB 容量不列为当前首要瓶颈；B01 仍是第二
+候选，尤其应以 `quick_sort` 验证。该判断来自四个代表 workload，不外推为 perf20 全体的精确
+speedup。原始 JSON 与日志位于
+`build/sim-current-milestone/runs/cpu_627aca6a565a_chiplab_c398d274812f/instrumented-perf20/ideal/`。
+
+H03-III 从 `627aca6` 建立独立候选。`172161c/975c3aa` 保留 L1I instruction data 与
+predecode 的寄存器边界，只向前端传递一位 hit-response-pending token，并为旧 response 保存一份
+PC/predictor owner context；同时恢复已有的 translation turnover。初版 published RTL SHA-256
+为 `f0283e74685bd1f63372054bf224ce401d92c4442cda323801704439b469a704`，`core_top`、AXI、
+debug 与 commit 接口不变。仅加入 hit token、保持 translation turnover 关闭时，首个 warm-hit
+request interval 仍为 2 cycles；两项同时启用后，定向测试观测到 1-cycle 连续 warm-hit request
+interval，因此二者是一个耦合的吞吐候选。
+
+初版代表矩阵暴露了真实 correctness bug：`quick_sort/fireye_I2/inner_product` 通过，但
+`coremark` 进入官方失败环。原因是 8-entry IBUF 在旧 registered response、当前 hit handoff 和
+下一 translated group 同拍并存时，实际需要为三个 4-instruction group 保留 12 个 slot，而旧
+credit 只保留 8 个。`07546ca/a3a96f8` 将 capacity qualification 修为 triple-overlap 预留 12、
+double-overlap 预留 8，并补上显式驱动 hit token 的 8/16-entry 对照测试。修复后的 published RTL
+SHA-256 为 `51ddbab54633869673de55bba1371de095fc4384a598ee089be0a2b6bc0737d1`；frontend
+`17/17` 与 core integration `4/4` 通过。失败环 trace 保存在
+`build/sim-h03iii-debug/runs/cpu_975c3aae2f78_chiplab_c398d274812f/clean-perf20/ideal/`，不得作为
+候选性能数据。
+
+为解除上述协议的结构性 credit 限制，`99a1ec6/f2139ba` 把 IBUF 从 8 扩为 16 entries；published
+RTL SHA-256 为 `564ee665f60a746a77c9f475ed71c650fbf92d94b7edab7a182a0e31cdc77163`。同一 clean
+perf19、ideal memory、seed 0 的精确 A/B 为：`627aca6=49,022,303` cycles，容量修复后的
+8-entry H03-III 为 `48,926,633`（`-0.1952%`），16-entry 为 `46,862,959`
+（相对 627 `-4.4048%`，相对 8-entry `-4.2179%`）。16-entry 相对 627 有 17 项改善，只有
+`fireye_C0 +0.1322%` 与 `inner_product +0.0348%`；`crc32 -35.2845%`、`sha -10.9176%`
+证明 16 entries 的主要作用是让已实现的三组并存协议真正持续工作，不应解释为一般队列扩容收益。
+
+H03-IV 在此基础上消除预测分支组的剩余 turnover bubble。`b3f4801/9d18632` 将本组 predicted
+GHR/RAS update 直接送入 predictor 已有的同拍 history lookup bypass，使 conditional、call 和
+return group 也能在 translation response 进入 L1I 的同拍启动目标 translation；published RTL
+SHA-256 为 `31b74bd8f434b879dc47a4a0b964124ec5feae1be03ebd268cfd412f32ed5854`。frontend
+`19/19` 和 core integration `4/4` 已通过，其中 conditional 定向测试继续到下一 fetch group，
+验证其 PHT index 确实包含刚旁路的 taken history；call/return 定向测试则验证 call request 同拍
+push 的 speculative RAS 能让下一组 return lookup 直接 turnover 到 `callPc + 4`。测试提交
+`109af32` 也把 `OooCoreSpec` 的 IBUF 配置合同从旧 8 entries 同步为 16。第一次完整门禁因此在
+`206/207` 时只失败于该过期静态断言，并非运行时回归；修正后的 focused core `14/14` 以及完整
+Scala/Verilator `208/208`、Python `364/364`、锁定端口/lint/Yosys/publication 门禁全部通过。
+`85834ed` 将组件替换和 lint waiver 的发布哈希同步锁定到上述 RTL；该提交不改变 RTL SHA-256。
+perf19 全部通过，总周期为 `46,240,121`：相对 IBUF16 再降 `1.3291%`，相对 627 净降
+`5.6753%`；18 项改善，仅 `inner_product +0.0313%`。matching clean func58 random-AXI seeds
+`240/255/141` 也均为 `58/58 pass`，CSV 位于
+`build/sim-h03iv-func/runs/cpu_9d18632eaa69_chiplab_c398d274812f/clean-func58/random/matrix_1892a80af7f5_func58.csv`。
+该 func58 prepared model 的 CPU key 早于纯测试/元数据提交，但其 RTL SHA-256 与 `85834ed` 精确
+相同，因此可作为同一硬件候选的功能证据；后续 Linux 与 Vivado 证据统一以 `85834ed` 冻结身份。
+
+`85834ed` 的 clean Linux ideal-memory 50 ms 窗口通过：seed 1 跑满 `24,999,995` CPU cycles，
+提交 `16,186,862` 条指令，无 DiffTest mismatch，以预期 time-limit 结束。首次 instrumented
+random-AXI 200 ms 三 seed 也都跑满 `99,999,995` cycles、无 mismatch，所有 RTL/架构级 observer
+invariants 为真，但旧 `nscc-m01-v7` 将 frontend occupancy 硬编码为 9 桶，只覆盖 8-entry IBUF；
+16-entry 候选的 occupancy `9..15` 被丢弃、`16` 又被 4-bit mask 截成 0，因此三条 verdict 均为
+`counter-invariant-error`。这是 observer coverage bug，不能作为候选 correctness 失败或通过证据。
+workspace observer 随后升级到 `nscc-m01-v8`：采样覆盖 `0..16`、输出 17 桶，同时检查器保留历史
+v6/v7 兼容；source hash lock、历史 v7 实例、17 桶守恒正例和 16 桶拒绝例均通过。最终三 seed
+Linux 已用重编译 model `7b6fb161...` 重新产生，三条 verdict 和 M01 check 均为 pass；retired
+instructions 分别为 `49,558,927/49,557,802/49,775,416`，trace signature 分别为
+`465e6e2431be1ab5/f974d379c6016c36/6bd37bcacc74a60d`。每条直方图都精确守恒
+`99,999,995` cycles；occupancy `>=9` 占 `51.1407%/51.1572%/51.1001%`，平均 occupancy 为
+`7.0081/7.0097/7.0057`，16-entry full 仅占 `1.5196%/1.5176%/1.5063%`。这既证明 8-entry
+版本无法表示大量真实前端在途状态，也说明 16 entries 尚未成为常态容量上限。
+
+clean perf19 证据分别位于 `build/sim-627-clean/`、`build/sim-h03iii-fixed8/`、
+`build/sim-h03iii-ibuf16/` 和 `build/sim-h03iv-history-turnover/`。`tools/sim-prepare` 同步改为先
+校验并 staging perf20/func58 workload，再编译模型；无效 workload 因此在模型编译前失败，完整
+perf20 prepare 已验证正向路径。H03-III/IV 刻意避免 H03-II 的 L1I BRAM data/predecode 组合
+旁路，但 16-entry 动态 buffer 读写 mux 和 predictor BRAM-response-to-next-PHT-address 是新的 timing
+风险。锁定 Yosys 结构报告相对同一 `6a4437a6...` 基线从 `62,311` 增至 `63,890` generic cells，
+其中 `$dff 5,810 -> 5,921`、`$mux 30,400 -> 31,569`、`$eq 12,347 -> 12,612`；这些数字只用于
+定位 16-entry IBUF/context mux 带来的结构增量，不能替代 Vivado LUT/FF/BRAM 利用率。当前 milestone
+setup 裕量只有 `+0.009 ns`，所以 matching 100 MHz full-SoC timing 仍是
+保留候选的硬门禁；`stringsearch` 继续只在 matching 板测运行。
+
+`85834ed/31b74bd8...` 的 matching clean 100 MHz implementation 已生成 bitstream，DRC 为
+0 error、hold `WHS/THS +0.054 ns/0`，但 setup 为
+`WNS/TNS -2.066 ns/-9507.783 ns`，因此不能作为板测候选。综合利用率为 Slice LUT
+`85,498`（`63.52%`）、register `44,238`（`16.43%`）、BRAM tile `64`、DSP `8`；这些是
+synthesis 数字，不与 627 的 post-route 数字混用。归档位于
+`Stable_Backup/cpu_85834ed12f90_chiplab_c398d274812f_perf_100mhz_20260806-064506_candidate/`。
+从该 routed DCP 再运行 `phys_opt_design/route_design -directive AggressiveExplore` 后，setup
+反而为 `-2.182 ns`，hold 仍为 `+0.054 ns`；Vivado 也明确提示原始 `-2.066 ns` 已远超通常适合
+post-route 修补的约 `-0.5 ns` 范围，故必须修改 RTL 结构。
+
+matching top-N 将问题定位为同一个 response control cone。最差路径从 L1I 寄存的
+`responseValid` 经过 response predecode、prediction correction 与同拍 speculative history
+选择进入 PHT BRAM `ADDRBWRADDR`，最差 post-route slack `-2.182 ns`、21 levels、data path
+`11.538 ns`；同源路径还进入 RAS clock enable（约 `-2.008 ns`）和多个 IBUF entry clock enable
+（约 `-2.054/-2.001 ns`）。因此违例并非旧 IQ wakeup/select 路径，也不能靠关闭整个 H03-IV
+来粗粒度处理。
+
+`9c1a3d2` 对该共同锥做了两项协议保持的切割。第一，已接受 request 的 speculative GHR/RAS
+更新只由 `requestFire` 限定，不再让当拍 response correction 回穿预测器写使能；若该 request
+随后确认走错，现有 `predictionCorrectionFlushPending` 会在 corrected lookup 前阻塞并于下一拍
+恢复 architectural history。第二，IBUF response 的有效 lane 按协议必然是从 `firstSlot` 开始、
+在第一个 predicted-taken lane 截止的连续后缀，因此写入位置可由 `lane-firstSlot` 直接确定，无需
+让 prediction mask 的动态 prefix count 进入 16-entry 写选择。新增定向测试覆盖第二个 fetch group
+从 lane 2 开始并在 lane 3 taken 的非对齐压缩场景，逐项检查 PC、instruction、taken 与 target。
+
+source/test、published RTL 和 gate metadata commits 分别为 `9c1a3d2/8ca1d3a/182c260`，新
+published RTL SHA-256 为
+`d93e80131e5a87ef5188637aec69bc91ef474d538ed82323b0a690d5498e7eed`。完整门禁通过
+Scala/Verilator `209/209`、Python `364/364` 及 locked port/lint/Yosys/publication；lint 仍精确
+匹配既有 `1073` 条 `CMPCONST/UNUSEDSIGNAL` 签名。重新编译的 clean perf19 也全部通过，19 项
+逐项周期与修复前完全相等，总计仍为 `46,240,121`。证据位于
+`build/sim-h03iv-timing-cut/runs/cpu_182c260bd1c0_chiplab_c398d274812f/clean-perf20/ideal/`。
+这证明 RTL cut 保留已测周期行为，但最终保留候选仍取决于当前在途 matching clean 100 MHz
+full-SoC route；不能继承前一 RTL 的 WNS、DCP 或 bitstream。
+
+## H03-IV history turnover：本轮停止点与证据
+
+本轮最终按“完成当前综合/实现后停止”的要求收束。需要区分两个 CPU 身份：
+
+- `1a9591d496cee178f67a6e99ed4d660eff112fbb` 是已完成软件性能和完整 SoC 实现的
+  history-turnover 候选，published RTL SHA-256 为
+  `c4f60a56ba21be7bde9dde809075ae077ae1073e195074f9e983b608f4fb03d3`。
+- `8e020f5` 是在该候选基础上继续收缩 translation owner 选择器的 source commit，生成 RTL 与
+  gate metadata 发布于 `70e009e`。`make cpu-check
+  CPU_DIR=build/experiments/cpu-h03iv-history-turnover` 已通过，发布后的
+  RTL SHA-256 为
+  `4968c5131a7fdf937286b0d7eacfe41a9d9d42e25bed89b89bf2e45f9d770839`。本轮没有为它重新跑
+  perf20 或完整 SoC implementation，因此不得把下述旧候选的周期和 WNS 归给 `8e020f5`。
+
+### 软件和门禁
+
+`1a9591d` 的 clean ideal-memory perf19（官方 20 项中排除只在板上运行的 `stringsearch`）
+为 `19/19 pass`，总周期 `47,084,627`。相对稳定基线 `49,022,303` 为 `-3.952642%`，
+相对上一版 H03-IV 的 `46,240,121` 为 `+1.826349%`；逐 benchmark CSV 与日志保存在
+`build/sim-h03iv-history-turnover-corrected/runs/cpu_1a9591d496ce_chiplab_c398d274812f/clean-perf20/ideal/`。
+该结果是 `1a9591d` 的可追溯性能证据，不是 `8e020f5` 的性能结论。
+
+新 source 的 focused frontend 测试 `22/22` 通过；随后完整 `make cpu-check` 通过：Scala/Verilator
+完整套件、Python `364/364`，以及锁定 port/lint/Yosys/publication gates 均通过。发布 RTL 的
+warning 数仍为 `1073`，签名为
+`4034b71b42683a792c92a85d3955687ddc24a84b6b06ed3fad77fe5d1ae079ed`。生成物和替换/waiver
+哈希已在 CPU 仓库单独提交；未把 ignored build 输出或其他工作树修改带入该提交。
+
+### 完整 SoC 100 MHz 实现
+
+对 `1a9591d`、Chiplab `c398d274812f164d387146fa7d8f612a4a1296d9` 的 clean performance
+build 完成了综合、实现和 bitstream 生成。PLL 实际时钟为 CPU/SYS/DDR `100/100/200 MHz`；综合
+资源为 Slice LUT `86,096 (63.96%)`、register `44,428 (16.50%)`、BRAM tile `62 (16.99%)`、
+DSP `8 (1.08%)`。正常 route 的 setup `WNS/TNS=-0.919/-1217.716 ns`，hold
+`WHS/THS=+0.059/0 ns`，DRC `0` error；bitstream 成功生成，但 setup 未收敛，归档类别为
+`candidate`，不能用于板测或 release acceptance。归档目录为
+`Stable_Backup/cpu_1a9591d496ce_chiplab_c398d274812f_perf_100mhz_20260806-103810_candidate/`。
+
+从该 routed DCP 做的 `phys_opt_design/route_design -directive AggressiveExplore` 重试在
+`general.maxThreads=4` 下完整结束：route `114712` 条 fully routed、DRC `0` error，bitstream
+也成功生成，但 setup 仅改善到 `WNS=-0.697 ns`，hold 仍为 `+0.059 ns`。最差路径起点为
+`translationUsesTurnoverPc_reg/C`，终点为 BTB bank 寄存器，data delay `10.631 ns`，其中
+route `8.343 ns (78.478%)`；后续主要路径仍落在 BTB、L1I tag 到 predecode，以及 privileged
+redirect 到 issue-queue enable。该 post-route 结果仍是诊断证据，不是时序通过。
+
+第一次使用 8 个线程的 post-route 尝试在 Vivado `librdi_route.so` 的
+`rt::HARTRouteDeposit::addElementPin` 中以 signal 11 退出；随后降低到 4 个线程后成功完成，故
+不能把第一次崩溃解释为 RTL 或功能失败。崩溃报告已保存在 ignored 证据
+`build/post-route-1a9591d-hs_err_pid43.log`；重试报告、validation、top-N、DCP 和 bitstream
+均在 `build/post-route-1a9591d-aggressive/`，其中 validation SHA-256 为
+`1d44a4dfdf6011fe10c19694af36099a8803fc639eb19dd1df620164b3fd5b88`。
+
+### 收束判定
+
+本轮不再启动新的软件仿真、Vivado implementation、板测或 CI。`8e020f5` 目前只具备完整门禁
+证据，尚未具备自己的 perf20、完整 SoC WNS 或板测证据；下一轮若继续，应以其 published RTL
+`4968c513...` 重新冻结 manifest，再独立测性能和时序。旧候选的负 WNS、DCP、bitstream 和
+周期数据均只作历史参考，不能跨 RTL 提交复用。
+
 ## Scheduling
 
 Vivado implementation 运行期间不启动 SBT、模型编译、另一 Vivado 或长 Verilator。可以并行
