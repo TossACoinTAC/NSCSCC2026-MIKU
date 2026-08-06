@@ -1,0 +1,4 @@
+worktree_head=627aca6a565aa66911a69a27dfef56c069d1bb4a
+worktree_branch=dev/ECHO
+source_snapshot=70e009e6b79386916e72680e29485e175bf9bbd2
+source_snapshot_scope=spinal/build.sbt,spinal/project,spinal/src

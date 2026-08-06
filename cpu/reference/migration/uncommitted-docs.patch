@@ -1,0 +1,639 @@
+diff --git a/docs/linux-system-gap-audit.md b/docs/linux-system-gap-audit.md
+index e15060e..835c862 100644
+--- a/docs/linux-system-gap-audit.md
++++ b/docs/linux-system-gap-audit.md
+@@ -1,110 +1,56 @@
+-# 当前 CPU 对非浮点 Linux/完整系统要求的差距判断
++# MIKU 的 Linux 系统差距审计
+ 
+-> 本文同步自 NSCSCC2026 根工作区 `Info/CurrentDesign/linux-system-gap-audit.md`；
+-> 功能验收合同位于根工作区 `docs/linux-system-requirements.md`。
++> 功能验收合同以根工作区 `docs/linux-system-requirements.md` 为准。本文件只描述当前
++> 提交候选，不继承其他 RTL hash 的时序、仿真或板测结论。
+ 
+-## 1. 审计口径
++## 当前候选
+ 
+-本判断对照根工作区 `docs/linux-system-requirements.md` 中的非浮点 LA32R Linux/完整系统实现要求，审阅当前活动 OoO CPU 的 Scala/SpinalHDL 源码和可复现验证记录。当前候选源自 `dev/ECHO` 的 `60fba481888a8f7e5a2f0ba0b76c91422a117309`，功能实现提交为 `6bbca9b`，生成 RTL SHA-256 为 `137657aa0c594334568cc386571d13aa9cdc828c8fc45c56ed421be15912c209`。固定集成平台为 Chiplab `c398d274812f164d387146fa7d8f612a4a1296d9`。
++| 项目 | 值 |
++| --- | --- |
++| CPU 源码 | `dev/ECHO @ 42d9f36` |
++| 等价 RTL 逻辑提交 | `2c11ca6730a94b26e2de74eb33a4a1568ab9ad92` |
++| 生成 RTL SHA-256 | `0625976bcfc430c7084f9e4dcb7bb7bf391714b474150b994aa29201526d986a` |
++| Chiplab | `c398d274812f164d387146fa7d8f612a4a1296d9` |
++| 本地门禁 | 完整 `make cpu-check` 通过：39 个 Scala suites / 202 tests、364 个 Python tests、port/lint/Yosys/publication gates |
++| Linux 总体验收 | **未满足**：尚无该 RTL 在真实板上进入交互 shell 并完成规定系统操作的证据 |
+ 
+-- **满足**：当前 RTL 已有对应实现，并通过定向测试、随机仿真和完整 SoC 门禁。
+-- **部分满足**：主要实现存在，但平台范围或端到端证据仍有限。
+-- **未满足**：存在明确体系结构缺口，或缺少要求中的真实系统验收。
++`42d9f36` 只把活动 Scala package 从 `openla500` 改为 `miku`；`core_top`、AXI、
++debug/commit、`TLBNUM=32` 和生成 Verilog 逻辑保持不变。实现与板测必须绑定上述 RTL hash。
+ 
+-## 2. 总结论
++## 已实现的体系结构基础
+ 
+-> 当前 CPU 的已知 Linux 体系结构缺口已在本地 RTL 和软件仿真范围内闭环，但 **尚未满足 Linux 总体验收**。
++- LA32R 整数、乘除、CSR、TLB、异常/中断、ERTN、IDLE、LL/SC、CACOP、DBAR/IBAR
++  已进入译码、执行和精确提交路径。
++- ROB 保证顺序提交和精确异常；RAT/PRF、IQ、LDQ/STQ/SDQ 的投机状态由统一 recovery
++  epoch 和 flush 边界撤销。
++- 32 项 TLB、直接地址/DMW/分页转换、权限和 dirty/MAT 检查覆盖取指与数据访问。
++- DBAR/IBAR 等待旧 store、Cache 与 AXI 工作排空；CACOP 支持 Store Tag、Index 和 Hit
++  语义，脏行在失效前写回。
++- LL/SC reservation 使用 64 B cache-line 粒度；当前平台合同限定为单核、非一致性 DMA。
++- uncached/MMIO store 以 AXI B 响应完成，错误响应形成精确异常；cached refill/writeback
++  错误不允许静默安装或丢弃脏数据。
++- CPUCFG 从固定微架构配置报告 ISA、TLB 和 Cache 能力；对外接口保持官方 Chiplab 合同。
+ 
+-本轮完成了精确 `CACOP`、配置派生 `CPUCFG`、64 B 粒度 LL/SC，以及 MMIO/AXI 错误与恢复路径；原有 `DBAR/IBAR` 闭环继续成立。锁定门禁、Chiplab 功能测试、perf20、干净 Linux DiffTest、三个随机 AXI seed 的 200 ms Linux DiffTest、Vivado 2023.2 的 perf 100 MHz 与 func 平台默认时钟完整 SoC 实现，以及当前候选真实团队板 `perf20`、`func58` 均通过。
++这些条目表示 RTL 与定向合同已经存在，并不等于 Linux 已经启动到 shell。
+ 
+-仍缺少当前候选在真实 FPGA 上的 U-Boot/PMON、Linux 内核完整启动、Buildroot shell 和文件/进程/页错误/原子/定时器/I/O 操作证据。因此不能把 early-console 或 perf20 结果升级为“Linux 已满足”。
++## 当前证据边界
+ 
+-## 3. 当前能力与证据
++本轮最终时序候选的资源接受、ROB 槽位复用、L1I kill/turnover 和 IQ flush/payload
++碰撞均有定向测试，并已进入完整本地门禁。按最终调度决定，本候选跳过 standalone
++perf20；旧候选的 func58、perf20、Linux random-AXI、100 MHz WNS 和板测记录只作历史参考。
+ 
+-| 项目 | 判断 | 当前证据 |
+-| --- | --- | --- |
+-| 68 条目标指令与特权框架 | 已有 | Scala 译码、CSR、32 项 TLB、地址翻译、精确提交、`IDLE` |
+-| `DBAR/IBAR` | 满足 | memory epoch、ROB-head 排空、Cache/AXI 双周期静止、IBAR L1D/L2/L1I 维护和 `PC+4` 重取 |
+-| `CACOP` | 满足 | L1I/L1D/L2 的 Store Tag、Index、Hit 单行维护；脏行写回、Hit 翻译异常和维护 token 均有定向测试 |
+-| `CPUCFG` | 满足 | 从 `OooCoreConfig` 派生，默认 `.16/.17/.18/.19` 为 `0x1d/0x06070001/0x06070001/0x06090001` |
+-| LL/SC | 平台范围内满足 | 64 B line 保留粒度；uncached LL 不建立 reservation，uncached SC 失败且不写；平台限定单核、非一致性 DMA |
+-| MMIO/AXI | 本地满足 | uncached store 等待 B，非 OKAY 形成 ADEM，检查 response ID；cached writeback B 错误在仿真中断言 |
+-| Cache/AXI 响应仲裁 | 满足 | cached L1D 与 uncached 响应同拍时以一项 deferred response 保存 cached 响应，随机 AXI Linux 死锁已消除 |
+-| 本地 RTL 门禁 | 满足 | `make cpu-check`：Scala 161/161、Python 364/364、port/lint/Yosys/publication 全通过 |
+-| Chiplab 功能 | 满足 | `func_lab19`、`func_advance` 在 seed `1`、`19557`、`5570815` 全通过 |
+-| perf20 | 满足 | 20/20，总 CPU cycles `83,234,731`；相对即时基线 `83,234,678` 为 `+53`，即 `+0.000064%` |
+-| 完整 SoC 100 MHz | 满足 | bitstream 成功，DRC 0 Error，WNS/TNS `+0.044/0 ns`，WHS/THS `+0.050/0 ns` |
+-| 团队板 perf20 | 满足 | Job `20260803-220447-d9b5b478`，20/20；选慢值总 CPU count `79,524,833`，同环境 main 对照仅差 `-599`（`-0.000753%`） |
+-| 团队板 func58 | 满足 | Job `20260803-223955-1ceb232c`，58/58；实际 `32.726797 MHz`，`F0/FF/A5` 均到达 `0x3A00003A` |
+-| Linux 端到端 | 未满足 | Verilator 到 early-console；当前候选尚无真实板上 shell |
++当前候选只有在匹配的完整 SoC 实现同时满足以下条件后，才能称为 100 MHz bitstream 候选：
+ 
+-## 4. 已闭环的体系结构语义
++1. 实际 CPU/sys/DDR 时钟与平台合同一致；
++2. setup 与 hold slack 均非负；
++3. DRC 0 Error、无 failed/unrouted/partial net；
++4. bitstream 成功，并记录 CPU/RTL/bitstream hash。
+ 
+-### 4.1 `DBAR/IBAR`
++## 剩余 Linux 验收
+ 
+-8 位 speculative/committed memory epoch 阻止年轻 cached、uncached/MMIO load 和 store 越过栅障。ROB-head 栅障按 ROB pointer 等待旧 store，并要求 L1D、共享路由、L2 和 AXI bridge 连续两个周期静止。`IBAR` 依次执行 L1D、L2 writeback-invalidate 和 L1I invalidate，最终 AXI 响应结束后才完成，并从 `PC+4` 重取。flush 恢复 speculative epoch，迟到维护响应不能写回已回收 ROB。
++1. 在真实 FPGA 记录复位、DDR、UART、定时器/中断、bootloader、内核解包与入口。
++2. 观察 MMU 和用户态切换，启动到 Buildroot/等价交互 shell。
++3. 在 shell 中完成文件、fork/exec、页错误、原子、定时器及 I/O 操作。
++4. 保存 UART、板测 Job ID、软件镜像、bitstream、CPU/RTL 与平台 hash。
+ 
+-**状态：满足。**
+-
+-### 4.2 精确 `CACOP`
+-
+-`CACOP` 已纳入 memory epoch，并以完整 code、VA/PA、ROB pointer 和 recovery epoch 在 ROB head 串行执行。Hit 类走普通 load 翻译并形成精确 TLB 异常但不检查对齐；Index/Store Tag 直接使用 VA 选择 way/index。L1I、L1D、L2 分别实现 Store Tag、Index、Hit；数据 Cache 脏行先写回再失效，Hit miss 无副作用完成。L1I 操作不再扩散为 L2 全局失效，commit adapter 也不再重复发全局维护脉冲。
+-
+-定向测试覆盖 3 个 Cache、3 类操作、clean/dirty、hit/miss、错误 way、无关行保持、PLV3/TLB 异常、未对齐地址、背靠背操作、flush 和迟到完成。
+-
+-**状态：满足。**
+-
+-### 4.3 配置派生 `CPUCFG`
+-
+-Cache 几何由 `OooCoreConfig` 单一来源生成，并对 ways、sets、line bytes 的二次幂和字段可编码性做 elaboration 断言。默认值正确报告 8 KiB 2-way L1I/L1D 和 64 KiB 2-way L2；未实现的 FPU、向量和未知索引返回零。默认及两组自定义 geometry 已通过测试。
+-
+-**状态：满足。**
+-
+-### 4.4 LL/SC 平台语义
+-
+-reservation 地址宽度由 `xlen - dataCache.offsetWidth` 派生，默认比较 PA `[31:6]`。CSR、commit adapter、core、backend 和 LSQ 使用同一宽度。同一 Cache line 内的 store 会使 SC 失败；相邻 line 不会。uncached LL 不建立 reservation，uncached SC 不产生写事务；异常、ERTN/KLO、WCLLB 清除规则保留。
+-
+-当前平台明确限定为单核、非一致性 DMA。未来加入一致性 master 时，必须增加外部完成 store 的 reservation invalidation 事件；在此之前不声明多核/一致性 I/O 支持。
+-
+-**状态：在当前平台范围内满足。**
+-
+-### 4.5 异常、MMIO 和 AXI 恢复
+-
+-数据读错误归为 `ADE/ADEM`、`EsubCode=1`，取指错误保持 `ADE/ADEF`、`EsubCode=0` 并记录 BADV。uncached/MMIO store 在 AXI B 响应后完成，非 OKAY 响应回传 LSQ 形成精确 ADEM，并检查 AXI response ID。无法归属到已退休 store 的 cached writeback B 错误按平台违约在仿真中断言，而不是伪装成精确异常。
+-
+-随机 AXI delay 曾暴露 cached L1D 和 uncached 响应同拍时丢失 L1D pulse 的真实死锁。共享层现以一项 deferred response 保存该响应；修复后 seed `1`、`19557`、`5570815` 均跑满 200 ms、约 41.69 M instructions，无 DiffTest 失配。干净 Chiplab harness 的 50 ms 官方等价检查也通过。
+-
+-**状态：本地 RTL、定向测试和随机 DiffTest 范围内满足。**
+-
+-## 5. FPGA 实现证据
+-
+-Vivado 2023.2 在 `xc7a200tfbg676-2` 上完成 `perf 100 MHz` 全量 synthesis、implementation 和 bitstream：
+-
+-- 实际 CPU/sys/DDR 时钟为 `100/100/200 MHz`；
+-- setup WNS/TNS 为 `+0.044/0 ns`，hold WHS/THS 为 `+0.050/0 ns`；
+-- DRC 为 0 Error、27 Warning；route 为 0 failed/unrouted/partial nets；
+-- Slice LUT `88,967`，Slice Register `53,697`，BRAM tile `65.5`，DSP48 `8`；
+-- bitstream SHA-256 为 `6302203cd181748ce5a703312843b5ae80c824b8c94c150151eca05a2e191986`；
+-- 归档位于 `Stable_Backup/cpu_60fba481888a_chiplab_c398d274812f_perf_100mhz_20260804-054923_stable/`。
+-
+-该结果证明当前候选完整 SoC 100 MHz 性能配置时序闭合。独立 func 配置也完成全量实现与 bitstream：实际 CPU/sys/DDR 时钟为 `32.726797/100/200 MHz`，setup/hold WNS 为 `+0.978/+0.052 ns`，DRC 0 Error，bitstream SHA-256 为 `30c8543f99e69e0d312d630a67ffc589590eb82197821d82bcd96b6a1a5b3289`。func 归档位于 `Stable_Backup/cpu_e26ccfa823e8_chiplab_c398d274812f_func_20260804-061935_stable/`。
+-
+-## 6. 团队板 perf20 与 main 对照
+-
+-当前候选使用 package SHA-256 `36c1e997335b9785ace7b78c645a689918b243d1c8f6c8ed9e4cff11b29ead37`，在 Job `20260803-220447-d9b5b478` 以 `c398d274...`、`nscscc-system-reset-v1` 和实际 `100 MHz` 运行，20 项均通过。LabAgent 每项运行两次并保留较慢有效值；选中结果总 `soc_count=79,537,915`、总 `cpu_count=79,524,833`。`perf_vio.csv` SHA-256 为 `9e86d7f50b7ad74466a9846b11e31e29285042411b8b6b31bcf96eab4ed31823`。
+-
+-同一团队板紧接着运行 GitLab CI main `d9bab16...` 的 100 MHz perf bitstream，Job `20260803-221038-4ad4237a` 也为 20/20。main 总 `soc_count=79,537,886`、总 `cpu_count=79,525,432`。当前候选相对 main 分别为 `+29` soc cycles（`+0.000036%`）和 `-599` CPU cycles（`-0.000753%`）；20 个单项的最大绝对 CPU count 差为 `0.109278%`。该结果只支持“普通性能路径无可测回退”，不能把 599 cycles 的差值解释为优化收益。
+-
+-板测证据分别保存在当前 perf 归档和 `Stable_Backup/cpu_d9bab16_chiplab_c398d27_perf/` 的 `board_jobs/<job-id>/` 下，取回文件 SHA-256 与 LabAgent 结果清单全部匹配。
+-
+-## 7. 团队板 func58
+-
+-独立 func bitstream 使用未经改写的官方 c398 metrics 打包，package SHA-256 为 `4d3ebd3754f165d0af4c2e37e33e54bc67f9f5d7619c8a4467025d549cc30687`。Job `20260803-223955-1ceb232c` 在 `nscscc-system-reset-v1` 下终态 `passed`：`F0`、`FF`、`A5` 三个 seed 均到达 `0x3A00003A`，实际 CPU 时钟为 `32.726797 MHz`。`board-summary.txt`、`func_vio.csv`、`programming-summary.txt` 和 `vivado-metrics.txt` 的取回哈希均与 LabAgent 结果清单一致，证据位于 func 归档的 `board_jobs/20260803-223955-1ceb232c/`。
+-
+-该结果关闭当前候选的 func58 板测缺口，但不覆盖 100 MHz 性能配置，也不证明启动链或 Linux shell。
+-
+-## 8. 剩余验收路径
+-
+-1. 在真实 FPGA 依次记录 PMON/U-Boot、DDR/UART/定时器/中断、TFTP、内核解包与入口、MMU/用户态、Buildroot shell。
+-2. 在 shell 中完成文件、fork/exec、页错误、原子、定时器、串口及网络/存储操作，并保存 UART、Job ID 和全部输入哈希。
+-3. 只有真实 shell 和系统操作通过后，才能把 Linux 总体状态改为“满足”。
++只有上述端到端证据完成后，`linux_acceptance` 才能从 `not_satisfied` 改为通过。
+diff --git a/docs/ooo-core.md b/docs/ooo-core.md
+index 46a5470..00b16a1 100644
+--- a/docs/ooo-core.md
++++ b/docs/ooo-core.md
+@@ -166,24 +166,32 @@ standalone Vivado 只验证 core_top 自身，不代表完整 SoC 闭合：
+   -tclargs (Resolve-Path 'rtl/mycpu_top.v').Path (Join-Path (Resolve-Path '.').Path 'build/vivado/core_top')
+ ~~~
+ 
+-完整 SoC 构建和板测必须使用已提交的完整 40 位 commit。默认直接跑 `perf20`，只有暴露功能问题时才回到 `func58`；同一候选做三次严格串行真实评测并取最低 `soc_count`。板测 passed、bitstream 成功和时序闭合是三个独立结论，必须分别记录。远程客户端命令模板、版本要求、包哈希和当前 Job ID 均在 status.yml。
++完整 SoC 构建和板测必须记录完整 CPU commit、生成 RTL hash、固定 Chiplab commit、
++实际时钟和工件 hash。板测 passed、bitstream 成功和时序闭合是三个独立结论，必须分别记录；
++旧 RTL hash 的 WNS、周期或板测 verdict 不能继承到当前候选。
+ 
+ ## 迁移清单
+ 
+-1. 从远端检出最新 `dev-OoOE`；当前 RTL 基线是 status.yml 的 `baseline.rtl_commit`，其后的纯文档提交不改变 RTL。
+-2. 设置上述五个环境变量。路径可以位于任意磁盘，不得把本机绝对路径写回仓库。
+-3. 不迁移 `build/`、Vivado runs、WSL 临时目录、`.fpgajob` 或远端结果缓存；它们都能从提交、包哈希和 Job ID 重建或重新获取。
+-4. 开始修改前确认 `git status` 干净，并核对 `rtl/mycpu_top.v` SHA-256 与 status.yml 一致。
+-5. CPU 功能只改 `spinal/src/main/scala`；重新运行 `make generate-core` 发布 Verilog。禁止引入非自动生成的 Verilog。
+-6. 新候选按“本地门禁、官方仿真、完整 SoC implementation、三次真实 perf20”的顺序验证。任何 RTL 改动都不能继承当前 WNS 或板测 verdict。
++1. 从远端检出最新 `dev-ECHO` 到本地 `dev/ECHO`，核对 `docs/refactor/status.yml` 的
++   source commit 和 RTL hash。
++2. 使用工作区根 `make cpu-check`、`make cpu-generate` 和 `make soc-impl`；不要绕开锁定的
++   SBT、Verilator、Yosys 或 Chiplab 工具入口。
++3. 不迁移 `build/`、Vivado runs、WSL 临时目录、`.fpgajob`、工具缓存或远端结果缓存。
++4. CPU 功能只改 `spinal/src/main/scala/miku/`；重新生成并发布 Verilog，禁止手改
++   `rtl/mycpu_top.v`。
++5. 每个 RTL 候选按风险运行定向测试、完整本地门禁、匹配仿真、完整 SoC implementation
++   和团队板/官方 CI；不能跨 RTL hash 继承结果。
+ 
+ ## 已知风险与后续入口
+ 
+-- 当前 setup margin 只有 `+0.036678 ns`。最差 CPU 路径是 ROB `stagedPdst` 高扇出到 issue-queue payload clock enable，9.582 ns 数据路径中 8.153 ns 是布线。
+-- 当前闭合版本比性能参考慢 620,197 cycles（0.84%）。已知可能的周期代价来自注册式 shared-L2 miss request 和 scheduler input window；这是后续分析入口，不是未经验证的修复结论。
+-- 本次只证明当前 commit/profile 的三次 `perf20` 20/20，不自动扩大为 random DiffTest、Linux 或其他 profile 的完整等价声明。
+-- 停止状态为：没有活动的综合 run 或板测任务；优化工作已在建立 100 MHz 闭合基线后主动停止。
++- 当前逻辑候选为 `2c11ca6`；`42d9f36` 只做 MIKU package/namespace 改名，生成 RTL
++  必须继续与 `0625976b...d986a` 逐字节一致。
++- 本轮按最终调度跳过精确候选 standalone perf20，因此不附加新的周期收益声明。
++- Linux 仍只到本地 early boot 证据；没有匹配候选的真实 FPGA 交互 shell 和系统操作结果。
++- setup/hold、DRC、bitstream 和板测状态只以 `docs/refactor/status.yml` 中匹配当前 RTL hash
++  的结果为准。
+ 
+ ## 历史证据
+ 
+-当前迭代的完整构建、时序和三次板测证据在 [L1I 并行预解码迭代日志](../logs/refactor/20260728-l1i-parallel-predecode-timing/iteration.md)。更早试验保留在 `logs/refactor/`，只用于追溯，不能用其中的“当前”“待执行”覆盖 status.yml。原始标量性能对照保留在 `baseline.txt`。
++旧候选的构建、时序、仿真和板测证据保存在 Git 历史与工作区 `Stable_Backup/`，不随正式
++提交包分发。它们只用于追溯，不能覆盖当前 `status.yml`。
+diff --git a/docs/refactor/status.yml b/docs/refactor/status.yml
+index 641b9ab..327a3bb 100644
+--- a/docs/refactor/status.yml
++++ b/docs/refactor/status.yml
+@@ -1,375 +1,54 @@
+-schema_version: 1
+-updated_at: "2026-08-04T18:03:00+08:00"
++schema_version: 2
++updated_at: "2026-08-05T23:16:00+08:00"
+ branch: dev/ECHO
+ 
+-active_development_candidate:
+-  source_commit: 9de316494fc03d746b597afb1f4f271e9762114f
+-  timing_source_commit: e5212e3
+-  generated_rtl_commit: 9de3164
+-  generated_rtl_sha256: 00d37c5bc78fe0052cabf7e9d3ae665f31e0a7a0c238ea181ab935957b4c40c1
++active_candidate:
++  core_name: MIKU
++  core_name_expansion: "MIKU Is Kinda Unordered"
++  source_commit: 42d9f36
++  equivalent_rtl_commit: 2c11ca6730a94b26e2de74eb33a4a1568ab9ad92
++  generated_rtl_sha256: 0625976bcfc430c7084f9e4dcb7bb7bf391714b474150b994aa29201526d986a
+   chiplab_commit: c398d274812f164d387146fa7d8f612a4a1296d9
+-  source_state: "committed P1 fixes plus L1D and LSQ timing cuts; only the pre-existing deleted AGENTS.md remains dirty"
+-  local_gates: passed
+-  scala_verilator_tests: 177
+-  python_tests: 364
+-  lint_warning_count: 856
+-  lint_warning_signature_sha256: 49ee79a696ad5ef217cf5e2c5cd8e7bc3b45a80a1f135eaf86fe247b56996364
+-  matching_chiplab_simulation: passed_func_3_seeds_linux_clean_and_instrumented_50ms
+-  matching_complete_soc: pending_combined_milestone
+-  matching_board_evaluation: not_run
+-  timing_hypothesis: "Registering selected-load translation at the existing scheduledLoad boundary should remove the routed dynamic loadHead PA mux without adding a load cycle. This remains unverified until matching place/route."
+-
+-m01_baseline:
+-  evidence_scope: active_development_candidate_9de3164
+-  schema: nscc-m01-v2
+-  observer: simulation_only_no_dut_drives
+-  generated_rtl_sha256: 00d37c5bc78fe0052cabf7e9d3ae665f31e0a7a0c238ea181ab935957b4c40c1
+-  patch_sha256: 4674d050a42c2005243a63c167ce020574c90672308cd4406c1cb8c376967cfb
+-  source_manifest_sha256: f00f4e38de8c4c99f3c3aa3c03e8143b01df17d4084cf15c5c496b088cfd5435
+-  commit_observation_lag_cycles: 4
+-  final_prepared_model:
+-    func_lab19_seed_1_sha256: f8f044ff26f37ad2dcba311d3422668d05011f671374db29e75da9b11b00df86
+-    linux_seed_1_sha256: 5d53230abe03ab54beb037b122896ccf7873dd7cccce7710a670898d009c113f
+-  non_intrusion:
+-    workload: func/func_advance
+-    seed: 1
+-    cycles: 15886
+-    instructions: 1517
+-    commit_trace_lines: 1519
+-    commit_trace_sha256: a417ba89a8b415b63b0428fd88ecb56e29883b71440e673dfc920d249060fc3f
+-    clean_instrumented_trace_equal: true
+-    clean_instrumented_uart_equal: true
+-  function_simulation:
+-    func_lab19:
+-      - {seed: 1, cycles: 620754, instructions: 139660, status: passed}
+-      - {seed: 19557, cycles: 620572, instructions: 139657, status: passed}
+-      - {seed: 5570815, cycles: 620555, instructions: 139655, status: passed}
+-    func_advance:
+-      - {seed: 1, cycles: 15886, instructions: 1517, status: passed}
+-      - {seed: 19557, cycles: 15968, instructions: 1517, status: passed}
+-      - {seed: 5570815, cycles: 15828, instructions: 1517, status: passed}
+-  linux_50ms:
+-    seed: 1
+-    cycles: 24999995
+-    instructions: 13627566
+-    ipc: 0.545103
+-    clean_instrumented_uart_sha256: 1cf92c30b65c33bd11499964a1b1c9f94f04802add281ad0775cb9d3b2d4a17f
+-    instrumented_model_sha256: 5d53230abe03ab54beb037b122896ccf7873dd7cccce7710a670898d009c113f
+-    counter_json_sha256: acb60011261ebac7a1648976196d9e9c1aa2db7bccc82eace039754c375a0d7b
+-    zero_retire_loss: {recovery: 0, rob_empty: 745033, head_incomplete: 17220324, head_complete_blocked: 43657, unclassified: 0}
+-    head_incomplete_detail: {store_translation: 7984219, store_completion_to_rob: 5928701, load_completion_to_rob: 962622, load_response: 590968, rob_staged_completion: 553721, issue_operand_stage: 289265, issue_address_stage: 104449, execution_dispatch_or_untracked: 234010}
+-    status: passed_without_mismatch
+-  func_lab19_seed_1_v2:
+-    cycles: 620754
+-    instructions: 139660
+-    ipc: 0.224984
+-    model_sha256: f8f044ff26f37ad2dcba311d3422668d05011f671374db29e75da9b11b00df86
+-    counter_json_sha256: 173a51c3ffa777745ba68a461981050048f3afab270c115e07972268a93e3a42
+-    zero_retire_loss: {recovery: 71, rob_empty: 160949, head_incomplete: 363488, head_complete_blocked: 2403, unclassified: 0}
+-    head_incomplete_detail: {rob_staged_completion: 78419, issue_operand_stage: 48858, store_completion_to_rob: 44176, store_uncached_response: 42859, execution_dispatch_or_untracked: 34428, issue_address_stage: 24618, issue_ready_wait: 24024, load_response: 19333, load_order_or_request: 16099, divider: 12862}
+-    status: passed_without_mismatch
+-  invariants: passed_all_results
+-  unclassified_zero_retire_cycles: 0
+-  next_measurement_priority: "Split Linux Store translation and Store completion-to-ROB by ATU/LSQ/cache/AXI sub-state; keep DIV fast path as an independent microbenchmark candidate."
+-
+-last_fully_validated_candidate:
+-  source_commit: 60fba481888a8f7e5a2f0ba0b76c91422a117309
+-  implementation_commit: 6bbca9b
+-  base_commit: 80fb1cbee19a6040ae5d10f99e861ac381fbd536
+-  source_state: "committed Scala/SpinalHDL with generated RTL and refreshed publication metadata"
+-  generated_rtl_sha256: 137657aa0c594334568cc386571d13aa9cdc828c8fc45c56ed421be15912c209
+-  chiplab_commit: c398d274812f164d387146fa7d8f612a4a1296d9
+-  dbar_ibar_semantics: satisfied
+-  cacop_semantics: satisfied
+-  cpucfg_geometry: satisfied
+-  llsc_platform_semantics: satisfied_single_core_noncoherent
+-  mmio_axi_recovery: satisfied_local
+-  linux_acceptance: not_satisfied
+-  board_evaluation: func58_and_perf20_passed
+-
+-p1_closure:
+-  status: closed_on_dd469ea_matching_rtl
+-  items:
+-    C01: 9590512
+-    C02: 93b5910
+-    C03: 4ff1b99
+-    C04: 6252184
+-    C05: 2a3a44d
+-    C06: 39fce68
+-    C07: 191517f
+-    C08: 189677f
+-  matching_source_commit: dd469eaff61a488adebe00d5c89dd0bc7364c71e
+-  matching_generated_rtl_sha256: c655a887fc423686c181a9acf8e5fe54622a2eb617f460184e6c253829b8a653
+-  full_gates: passed_177_scala_verilator_364_python_locked_rtl_gates
+-  function_simulation:
+-    func_lab19:
+-      - {seed: 1, cycles: 620754, instructions: 139660, status: passed}
+-      - {seed: 19557, cycles: 620572, instructions: 139657, status: passed}
+-      - {seed: 5570815, cycles: 620555, instructions: 139655, status: passed}
+-    func_advance:
+-      - {seed: 1, cycles: 15886, instructions: 1517, status: passed}
+-      - {seed: 19557, cycles: 15968, instructions: 1517, status: passed}
+-      - {seed: 5570815, cycles: 15828, instructions: 1517, status: passed}
+-  linux_clean_50ms:
+-    cycles: 24999995
+-    instructions: 13627566
+-    ipc: 0.545103
+-    status: passed_without_mismatch
+-  linux_random_axi_200ms:
+-    - {seed: 1, cycles: 99999995, instructions: 39759420, ipc: 0.397594, status: passed_without_mismatch}
+-    - {seed: 19557, cycles: 99999995, instructions: 39742725, ipc: 0.397427, status: passed_without_mismatch}
+-    - {seed: 5570815, cycles: 99999995, instructions: 39719858, ipc: 0.397199, status: passed_without_mismatch}
+-
+-latest_timing_sample:
+-  evidence_scope: historical_for_active_candidate
+-  source_commit: dd469eaff61a488adebe00d5c89dd0bc7364c71e
+-  generated_rtl_sha256: c655a887fc423686c181a9acf8e5fe54622a2eb617f460184e6c253829b8a653
+-  profile: perf
+-  target_cpu_mhz: 100
+-  timing_met: false
+-  wns_ns: -0.449
+-  tns_ns: -30.140
+-  setup_failing_endpoints: 220
+-  whs_ns: 0.047
+-  ths_ns: 0.0
+-  drc_errors: 0
+-  write_bitstream: complete_diagnostic_only
+-  resources:
+-    slice_luts: 89689
+-    slice_lut_percent: 67.03
+-    slice_registers: 53573
+-    slice_register_percent: 19.90
+-    block_ram_tiles: 68.5
+-    block_ram_percent: 18.77
+-    dsp48: 8
+-  top_path:
+-    startpoint: loadStoreQueue/loadHead_reg[1]_replica
+-    endpoint: loadStoreQueue/completion_data_reg[11]
+-    data_path_ns: 10.342
+-    logic_ns: 2.836
+-    route_ns: 7.506
+-    route_percent: 72.6
+-  archive: Stable_Backup/cpu_dd469eaff61a_chiplab_c398d274812f_perf_100mhz_20260804-154312_candidate
+-
+-architecture_closure:
+-  memory_epoch_width: 8
+-  cacop:
+-    status: satisfied
+-    operations: [store_tag, index_writeback_invalidate, hit_writeback_invalidate]
+-    caches: [l1i, l1d, l2]
+-    hit_translation_exceptions: precise
+-  cpucfg:
+-    status: satisfied
+-    index_16: 0x0000001d
+-    index_17: 0x06070001
+-    index_18: 0x06070001
+-    index_19: 0x06090001
+-  llsc:
+-    status: satisfied_single_core_noncoherent
+-    reservation_line_bytes: 64
+-    uncached_ll_establishes_reservation: false
+-    uncached_sc_writes_memory: false
+-    external_coherent_invalidation: unsupported_by_platform
+-  mmio_axi:
+-    status: satisfied_local
+-    uncached_store_completion: axi_b_response
+-    uncached_error_exception: ADEM
+-    response_id_checked: true
+-    cached_writeback_error_policy: simulation_assertion
+-  cached_uncached_response_collision:
+-    status: fixed
+-    mechanism: one_entry_deferred_data_response
++  requested_cpu_mhz: 100
++  actual_cpu_mhz: 100
++  source_state: "committed; only the pre-existing deleted AGENTS.md remains dirty"
++  namespace_migration:
++    from: openla500
++    to: miku
++    rtl_byte_identical_before_generation_recheck: true
++    external_interface_changed: false
+ 
+ local_gates:
+-  evidence_scope: active_development_candidate_9de3164
+   command: make cpu-check
+   status: passed
+-  scala:
+-    passed: 177
+-    failed: 0
+-  python:
+-    passed: 364
+-    failed: 0
++  scala_suites: 39
++  scala_tests: 202
++  python_tests: 364
+   port_contract: passed
+   yosys_structure: passed
++  publication_consistency: passed
+   verilator_lint:
+     status: passed
+-    reviewed_warnings: 856
+-    warning_signature_sha256: 49ee79a696ad5ef217cf5e2c5cd8e7bc3b45a80a1f135eaf86fe247b56996364
++    reviewed_warnings: 861
+     categories: [CMPCONST, UNUSEDSIGNAL]
+-  publication_consistency: passed
+-
+-chiplab_simulation:
+-  evidence_scope: last_fully_validated_candidate_60fba4
+-  func_lab19:
+-    - {seed: 1, cycles: 586705, status: passed}
+-    - {seed: 19557, cycles: 585844, status: passed}
+-    - {seed: 5570815, cycles: 585047, status: passed}
+-  func_advance:
+-    - {seed: 1, cycles: 15108, status: passed}
+-    - {seed: 19557, cycles: 15087, status: passed}
+-    - {seed: 5570815, cycles: 15059, status: passed}
+-  perf20:
+-    status: passed_20_of_20
+-    total_cpu_cycles: 83234731
+-    immediate_baseline_cycles: 83234678
+-    delta_cycles: 53
+-    regression_percent: 0.000064
+-    previous_candidate_cycles: 83234731
+-    result_log_sha256: 9cb35f4c1ac7ba5b16f801b588050315f3a0cbafdd21d3c53e4cc511f74db77c
+ 
+-linux_verilator:
+-  evidence_scope: last_fully_validated_candidate_60fba4
+-  clean_official_equivalent:
+-    limit_ns: 50000000
+-    cycles: 24999995
+-    instructions: 13924596
+-    status: passed_without_mismatch
+-    log_sha256: c499a6ce328effe88bc676968752e95c89968cd26dc5e6906d7d5b3d758720af
+-  patched_random_axi:
+-    - seed: 1
+-      limit_ns: 200000000
+-      cycles: 99999995
+-      instructions: 41695962
+-      status: passed_without_mismatch
+-      log_sha256: 0ee1ee4a8e93d7bacbbd1959e61abfa68f83824b5b50846d946771027ab466db
+-    - seed: 19557
+-      limit_ns: 200000000
+-      cycles: 99999995
+-      instructions: 41695981
+-      status: passed_without_mismatch
+-      log_sha256: 62caabb239f25f209f8bb99fdbd04b803d63ba2ea6a2afe9278f519dd1f8f9a1
+-    - seed: 5570815
+-      limit_ns: 200000000
+-      cycles: 99999995
+-      instructions: 41692624
+-      status: passed_without_mismatch
+-      log_sha256: 5032e8d451a0a38051008b84a8f2c34b210e3a5a4619a51b0181f7eb827258b8
+-  milestone: "Linux 5.14 early console and memory initialization; no shell evidence"
++matching_complete_soc:
++  status: not_yet_accepted
++  evidence_rule: "setup and hold must be nonnegative, DRC errors zero, and bitstream complete for the exact RTL hash"
+ 
+-complete_soc:
+-  evidence_scope: last_fully_validated_candidate_60fba4
+-  source_commit: 60fba481888a8f7e5a2f0ba0b76c91422a117309
+-  generated_rtl_sha256: 137657aa0c594334568cc386571d13aa9cdc828c8fc45c56ed421be15912c209
+-  chiplab_commit: c398d274812f164d387146fa7d8f612a4a1296d9
+-  tool: "Vivado 2023.2"
+-  part: xc7a200tfbg676-2
+-  profile: perf
+-  target_cpu_mhz: 100
+-  actual_cpu_mhz: 100.0
+-  actual_sys_mhz: 100.0
+-  actual_ddr_mhz: 200.0
+-  implementation: complete
+-  write_bitstream: complete
+-  timing_met: true
+-  wns_ns: 0.044
+-  tns_ns: 0.0
+-  whs_ns: 0.050
+-  ths_ns: 0.0
+-  drc_errors: 0
+-  drc_warnings: 27
+-  build_elapsed_seconds: 1795
+-  resources:
+-    slice_luts: 88967
+-    slice_registers: 53697
+-    block_ram_tiles: 65.5
+-    ramb36: 57
+-    ramb18: 17
+-    dsp48: 8
+-  bitstream_sha256: 6302203cd181748ce5a703312843b5ae80c824b8c94c150151eca05a2e191986
+-  probes_sha256: 3e36db904e602bae47d72e9f8b54a553903de4ccf5ff72ce88942c87280dfcdb
+-  routed_dcp_sha256: 26a3b5be86e1b8be39308d3fcad90b3c6f4c379dcd3fc98b1eb22f31eaa150d7
+-  archive: Stable_Backup/cpu_60fba481888a_chiplab_c398d274812f_perf_100mhz_20260804-054923_stable
+-
+-complete_soc_func:
+-  evidence_scope: last_fully_validated_candidate_60fba4
+-  source_commit: e26ccfa823e81c41f1191365fdcf8f89395b1248
+-  implementation_commit: 60fba481888a8f7e5a2f0ba0b76c91422a117309
+-  generated_rtl_sha256: 137657aa0c594334568cc386571d13aa9cdc828c8fc45c56ed421be15912c209
+-  chiplab_commit: c398d274812f164d387146fa7d8f612a4a1296d9
+-  tool: "Vivado 2023.2"
+-  part: xc7a200tfbg676-2
+-  profile: func
+-  requested_cpu_mhz: platform_default
+-  actual_cpu_mhz: 32.726797
+-  actual_sys_mhz: 100.0
+-  actual_ddr_mhz: 200.0
+-  implementation: complete
+-  write_bitstream: complete
+-  timing_met: true
+-  wns_ns: 0.978
+-  whs_ns: 0.052
+-  drc_errors: 0
+-  bitstream_sha256: 30c8543f99e69e0d312d630a67ffc589590eb82197821d82bcd96b6a1a5b3289
+-  probes_sha256: 3e36db904e602bae47d72e9f8b54a553903de4ccf5ff72ce88942c87280dfcdb
+-  routed_dcp_sha256: a109133a9489ef80bd3136636fc38303ac1a9ef566b2f3c3fd4aa54cb66db8be
+-  archive: Stable_Backup/cpu_e26ccfa823e8_chiplab_c398d274812f_func_20260804-061935_stable
+-
+-team_board_func:
+-  evidence_scope: last_fully_validated_candidate_60fba4
+-  status: passed_58_of_58
+-  job_id: 20260803-223955-1ceb232c
+-  profile: func58
+-  source_commit: e26ccfa823e81c41f1191365fdcf8f89395b1248
+-  implementation_commit: 60fba481888a8f7e5a2f0ba0b76c91422a117309
+-  chiplab_commit: c398d274812f164d387146fa7d8f612a4a1296d9
+-  board_protocol: nscscc-system-reset-v1
+-  actual_cpu_mhz: 32.726797
+-  seeds: [F0, FF, A5]
+-  final_num_data: 0x3A00003A
+-  package_sha256: 4d3ebd3754f165d0af4c2e37e33e54bc67f9f5d7619c8a4467025d549cc30687
+-  board_summary_sha256: 30e6ce8c36736bad30ff414e0021023e87e547eb702300e0f1100141da43aa1b
+-  func_vio_sha256: 76fc3c7b522750ed2dd7336fa2a9bc121691fb216dbbaf0bc82b017ce761f977
+-  programming_summary_sha256: 783bb11dcf94cf6f7d672173bf6c62a9af467589d03e268a07b5ce78b3f6cee4
+-  vivado_metrics_sha256: 06863a6a86388293ccce08987687caad57ddf75cfcdfdb138fef363468d4f395
+-
+-team_board_perf:
+-  evidence_scope: last_fully_validated_candidate_60fba4
+-  status: passed_20_of_20
+-  job_id: 20260803-220447-d9b5b478
+-  profile: perf20
+-  source_commit: 60fba481888a8f7e5a2f0ba0b76c91422a117309
+-  chiplab_commit: c398d274812f164d387146fa7d8f612a4a1296d9
+-  board_protocol: nscscc-system-reset-v1
+-  actual_cpu_mhz: 100.0
+-  package_sha256: 36c1e997335b9785ace7b78c645a689918b243d1c8f6c8ed9e4cff11b29ead37
+-  perf_vio_sha256: 9e86d7f50b7ad74466a9846b11e31e29285042411b8b6b31bcf96eab4ed31823
+-  selected_soc_count_total: 79537915
+-  selected_cpu_count_total: 79524833
+-  main_control:
+-    source_commit: d9bab16ef46540eb3348b0781afc4d0949f28adc
+-    job_id: 20260803-221038-4ad4237a
+-    package_sha256: acb5fb7352a332000b237d6bd0cbc7b212bfe42d234cb548d79a7f44f0e7e7c7
+-    perf_vio_sha256: e65a18e203e5b8be8af1a06257aa3c7594379da69862d91ca6ec55f6504337f6
+-    selected_soc_count_total: 79537886
+-    selected_cpu_count_total: 79525432
+-  delta_vs_main:
+-    soc_count: 29
+-    soc_percent: 0.000036
+-    cpu_count: -599
+-    cpu_percent: -0.000753
+-  interpretation: "No measurable ordinary-path performance regression; the delta is board-run variation, not an optimization claim."
++matching_board_evaluation:
++  status: not_run
++  evidence_rule: "old candidate perf20 and func58 results are historical and are not inherited"
+ 
+-historical_board_baseline:
+-  applies_to_commit: da71fd32e0db3d13f1964895bbafeb5d2e5af412
+-  profile: perf20
+-  decisive_min_soc_count: 74446699
+-  decisive_seconds_at_100mhz: 0.74446699
+-  current_candidate_status: passed_on_current_c398_flow
++performance_simulation:
++  status: skipped_for_final_schedule
++  evidence_rule: "no perf20 cycle claim is attached to this exact candidate"
+ 
+-acceptance:
+-  local_architecture_and_soc: satisfied
+-  official_ci: not_run
+-  team_board: func58_and_perf20_passed
+-  linux_shell: not_satisfied
+-  next_priority: "Complete Store-path sub-counters and paired performance workloads, then select an independently A/B-tested candidate; hot development may combine timing-aware candidates into one implementation milestone."
+-  timing_risk: "The latest matching P1 timing sample is WNS -0.449 ns. Hot RTL work should preserve timing-aware boundaries; combine independent candidates into one implementation, use converged builds as board milestones, and retain unconverged WNS/top-N paths as next-iteration information without a separate timing-only pass."
+-  board_note: "No active-candidate board run: the available dd469ea performance bitstream has negative setup slack, no matching function bitstream exists, and board ownership was not explicitly confirmed."
++linux_acceptance:
++  status: not_satisfied
++  latest_local_milestone: kernel_early_boot
++  missing: "matching hardware boot through interactive shell and required system operations"
+ 
+-reproduce:
+-  local_commands:
+-    - make cpu-check
+-    - make sim RUN_SOFTWARE=func/func_lab19
+-    - make sim RUN_SOFTWARE=func/func_advance
+-    - make soc-impl PERF_CPU_MHZ=100 SOC_ARCHIVE_CLASS=candidate
+-  locked_reference: reference/manifest.lock
++history_policy:
++  summary: "Previous candidate timing, simulation, and board records remain in Git history and Stable_Backup only."
++  inheritance: forbidden_across_rtl_hashes
+diff --git a/reference/README.md b/reference/README.md
+index 0326be9..4151abe 100644
+--- a/reference/README.md
++++ b/reference/README.md
+@@ -10,6 +10,11 @@
+ * `component-replacements/core-top.json`：生成顶层的替换哈希；逻辑目标为 `rtl/mycpu_top.v`。
+ * `core-top-lint-waivers.json`：锁定版 Verilator 对当前完整 RTL 的精确告警集合，只接受已审查的 `CMPCONST` 和 `UNUSEDSIGNAL` 类别。
+ 
++`manifest.lock` 中的 `chiplab_diff @ a2e11b...` 是旧组件替换/差分工具仍需复现的历史输入，
++不是当前 SoC 平台版本。当前提交、仿真、完整实现和 CI 平台固定为
++`nscscc2026 @ c398d274812f164d387146fa7d8f612a4a1296d9`，记录在
++`docs/refactor/status.yml`。不要为了改写平台说明而刷新 manifest hash 和整套 RTL 发布台账。
++
+ 每次 Scala RTL 变化后，在锁定工具环境中运行 `make refresh-metadata`，或从工作区根目录运行 `make cpu-locked-gates`。该流程先执行无抑制 lint 审计，拒绝新告警类别、真实错误、跳过项或工具漂移，再原子更新发布哈希和 lint 告警签名；正式 lint 随后仍会使用新签名做一次抑制闭环。
+ 
+ 旧标量流水线的 payload layout、stage contract 和 active mixed-overlay 数据已经删除，不再是 OoO 核的生成或验收输入。

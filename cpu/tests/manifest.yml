@@ -1,0 +1,24 @@
+schema_version: 1
+description: "只通过公开合同和结构化证据验证；测试适配不得删除断言。"
+tests:
+  - name: generation
+    path: tests/python/test_generation_contract.py
+    categories: [artifact, harness]
+  - name: interface
+    path: tests/python/test_core_interface.py
+    categories: [DUT, artifact]
+  - name: simulation
+    path: tests/python/test_sim_contract.py
+    categories: [artifact, harness, DUT]
+  - name: toolchain
+    path: tests/python/test_toolchain_contract.py
+    categories: [config, artifact]
+  - name: repository
+    path: tests/python/test_repository_contract.py
+    categories: [config, artifact]
+  - name: cache-memory
+    path: tests/python/test_cache_memory_contract.py
+    categories: [DUT]
+  - name: candidate
+    path: tests/python/test_candidate_manifest.py
+    categories: [artifact]

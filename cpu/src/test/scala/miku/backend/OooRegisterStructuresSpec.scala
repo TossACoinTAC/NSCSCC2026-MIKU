@@ -1,0 +1,396 @@
+package miku.backend
+
+import miku.core._
+import org.scalatest.funsuite.AnyFunSuite
+import spinal.core._
+import spinal.core.sim._
+
+private final class OooRegisterMapProbe(config: OooCoreConfig) extends Component {
+  val io = new Bundle {
+    val renameValid = in Bits (config.renameWidth bits)
+    val renameSource1 = in Vec (UInt(config.archRegIndexWidth bits), config.renameWidth)
+    val renameSource2 = in Vec (UInt(config.archRegIndexWidth bits), config.renameWidth)
+    val renameDestination = in Vec (UInt(config.archRegIndexWidth bits), config.renameWidth)
+    val renamePdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.renameWidth)
+    val renamePsrc1 = out Vec (UInt(config.physicalRegIndexWidth bits), config.renameWidth)
+    val renamePsrc2 = out Vec (UInt(config.physicalRegIndexWidth bits), config.renameWidth)
+    val renameSource1Ready = out Bits (config.renameWidth bits)
+    val renameSource2Ready = out Bits (config.renameWidth bits)
+    val renameOldPdst = out Vec (UInt(config.physicalRegIndexWidth bits), config.renameWidth)
+    val writebackValid = in Bits (config.writebackWidth bits)
+    val writebackPdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
+    val commitValid = in Bits (config.commitWidth bits)
+    val commitArch = in Vec (UInt(config.archRegIndexWidth bits), config.commitWidth)
+    val commitPdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.commitWidth)
+    val commitPreviousPdst = out Vec (UInt(config.physicalRegIndexWidth bits), config.commitWidth)
+    val flush = in Bool ()
+  }
+  noIoPrefix()
+
+  val registerMap = new OooRegisterMap(config)
+  registerMap.io.renameValid := io.renameValid
+  registerMap.io.renameSource1 := io.renameSource1
+  registerMap.io.renameSource2 := io.renameSource2
+  registerMap.io.renameDestination := io.renameDestination
+  registerMap.io.renamePdst := io.renamePdst
+  registerMap.io.writebackValid := io.writebackValid
+  registerMap.io.writebackPdst := io.writebackPdst
+  registerMap.io.commitValid := io.commitValid
+  registerMap.io.commitArch := io.commitArch
+  registerMap.io.commitPdst := io.commitPdst
+  registerMap.io.flush := io.flush
+
+  io.renamePsrc1 := registerMap.io.renamePsrc1
+  io.renamePsrc2 := registerMap.io.renamePsrc2
+  io.renameSource1Ready := registerMap.io.renameSource1Ready
+  io.renameSource2Ready := registerMap.io.renameSource2Ready
+  io.renameOldPdst := registerMap.io.renameOldPdst
+  io.commitPreviousPdst := registerMap.io.commitPreviousPdst
+}
+
+class OooRegisterStructuresSpec extends AnyFunSuite {
+  test("physical register zero ignores same-cycle writeback bypass") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-registers")
+      .compile(new OooPhysicalRegisterFile(config))
+      .doSim("ooo-prf-zero-bypass", 0x50524630) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        dut.io.writeValid #= 0
+        dut.io.flush #= false
+        dut.io.debugReadAddress #= 0
+        for (port <- 0 until config.executionWidth * 2) {
+          dut.io.readAddress(port) #= 0
+        }
+        for (port <- 0 until config.writebackWidth) {
+          dut.io.write(port).pdst #= 0
+          dut.io.write(port).data #= 0
+        }
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+
+        dut.io.writeValid #= 1
+        dut.io.write(0).pdst #= 0
+        dut.io.write(0).data #= BigInt("deadbeef", 16)
+        sleep(1)
+        assert(dut.io.readData(0).toBigInt == 0)
+        assert(dut.io.debugReadData.toBigInt == 0)
+
+        dut.clockDomain.waitSampling()
+        dut.io.writeValid #= 0
+        sleep(1)
+        assert(dut.io.readData(0).toBigInt == 0)
+        assert(dut.io.debugReadData.toBigInt == 0)
+      }
+  }
+
+  private def clearFreeListInputs(dut: OooFreeList, config: OooCoreConfig): Unit = {
+    dut.io.allocateValid #= 0
+    dut.io.allocateAccept #= false
+    dut.io.commitFreeValid #= 0
+    dut.io.flush #= false
+    for (lane <- 0 until config.commitWidth) {
+      dut.io.commitFreePdst(lane) #= 0
+    }
+  }
+
+  private def freeListSample(dut: OooFreeList): Unit = {
+    dut.clockDomain.waitSampling()
+    sleep(1)
+  }
+
+  private def checkAllocation(
+      dut: OooFreeList,
+      expected: Seq[Int],
+      ready: Boolean = true
+  ): Unit = {
+    sleep(1)
+    assert(dut.io.allocateReady.toBoolean == ready)
+    for ((pdst, lane) <- expected.zipWithIndex) {
+      assert(dut.io.allocatePdst(lane).toBigInt == pdst)
+    }
+  }
+
+  private def clearInputs(dut: OooRegisterMapProbe, config: OooCoreConfig): Unit = {
+    dut.io.renameValid #= 0
+    dut.io.writebackValid #= 0
+    dut.io.commitValid #= 0
+    dut.io.flush #= false
+    for (lane <- 0 until config.renameWidth) {
+      dut.io.renameSource1(lane) #= 0
+      dut.io.renameSource2(lane) #= 0
+      dut.io.renameDestination(lane) #= 0
+      dut.io.renamePdst(lane) #= 0
+    }
+    for (lane <- 0 until config.writebackWidth) {
+      dut.io.writebackPdst(lane) #= 0
+    }
+    for (lane <- 0 until config.commitWidth) {
+      dut.io.commitArch(lane) #= 0
+      dut.io.commitPdst(lane) #= 0
+    }
+  }
+
+  private def sample(dut: OooRegisterMapProbe): Unit = {
+    dut.clockDomain.waitSampling()
+    sleep(1)
+  }
+
+  test("rename handles same-cycle RAW and WAW in lane order") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-registers")
+      .compile(new OooRegisterMapProbe(config))
+      .doSim("ooo-register-same-cycle-dependencies", 0x5241) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        dut.io.renameValid #= 3
+        dut.io.renameDestination(0) #= 5
+        dut.io.renameDestination(1) #= 5
+        dut.io.renameSource1(1) #= 5
+        dut.io.renamePdst(0) #= 10
+        dut.io.renamePdst(1) #= 11
+        sleep(1)
+
+        assert(dut.io.renamePsrc1(0).toBigInt == 0)
+        assert((dut.io.renameSource1Ready.toBigInt & 1) == 1)
+        assert(dut.io.renamePsrc1(1).toBigInt == 10)
+        assert((dut.io.renameSource1Ready.toBigInt & 2) == 0)
+        assert(dut.io.renameOldPdst(0).toBigInt == 0)
+        assert(dut.io.renameOldPdst(1).toBigInt == 10)
+      }
+  }
+
+  test("writeback wakes the current physical source and commit history is ordered") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-registers")
+      .compile(new OooRegisterMapProbe(config))
+      .doSim("ooo-register-wakeup-and-commit-history", 0x5242) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        dut.io.renameValid #= 1
+        dut.io.renameDestination(0) #= 7
+        dut.io.renamePdst(0) #= 12
+        sample(dut)
+
+        dut.io.renameValid #= 0
+        dut.io.renameSource1(0) #= 7
+        dut.io.writebackValid #= 1
+        dut.io.writebackPdst(0) #= 12
+        sleep(1)
+        assert(dut.io.renamePsrc1(0).toBigInt == 12)
+        assert((dut.io.renameSource1Ready.toBigInt & 1) == 1)
+
+        dut.io.writebackValid #= 0
+        dut.io.commitValid #= 3
+        dut.io.commitArch(0) #= 7
+        dut.io.commitArch(1) #= 7
+        dut.io.commitPdst(0) #= 12
+        dut.io.commitPdst(1) #= 13
+        sleep(1)
+        assert(dut.io.commitPreviousPdst(0).toBigInt == 0)
+        assert(dut.io.commitPreviousPdst(1).toBigInt == 12)
+        sample(dut)
+
+        dut.io.commitValid #= 0
+        dut.io.flush #= true
+        sample(dut)
+        assert(dut.io.renamePsrc1(0).toBigInt == 13)
+      }
+  }
+
+  test("free list flush restores the committed allocation head") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-free-list")
+      .compile(new OooFreeList(config))
+      .doSim("ooo-free-list-flush-head", 0x4651) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearFreeListInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        freeListSample(dut)
+
+        dut.io.allocateValid #= 7
+        dut.io.allocateAccept #= true
+        checkAllocation(dut, Seq(1, 2, 3))
+        freeListSample(dut)
+
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.commitFreeValid #= 7
+        freeListSample(dut)
+
+        dut.io.commitFreeValid #= 0
+        dut.io.allocateValid #= 7
+        dut.io.allocateAccept #= true
+        checkAllocation(dut, Seq(4, 5, 6))
+        freeListSample(dut)
+
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.flush #= true
+        freeListSample(dut)
+
+        dut.io.flush #= false
+        dut.io.allocateValid #= 7
+        checkAllocation(dut, Seq(4, 5, 6))
+      }
+  }
+
+  test("free list applies a delayed retirement batch during recovery flush") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-free-list")
+      .compile(new OooFreeList(config))
+      .doSim("ooo-free-list-delayed-commit-flush", 0x4653) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearFreeListInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        freeListSample(dut)
+
+        // p1..p3 become architectural mappings.
+        dut.io.allocateValid #= 7
+        dut.io.allocateAccept #= true
+        checkAllocation(dut, Seq(1, 2, 3))
+        freeListSample(dut)
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.commitFreeValid #= 7
+        freeListSample(dut)
+
+        // p4 commits as the replacement for p1 while p5/p6 remain speculative.
+        // Its registered retirement batch arrives together with recovery.
+        dut.io.commitFreeValid #= 0
+        dut.io.allocateValid #= 7
+        dut.io.allocateAccept #= true
+        checkAllocation(dut, Seq(4, 5, 6))
+        freeListSample(dut)
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.commitFreeValid #= 1
+        dut.io.commitFreePdst(0) #= 1
+        dut.io.flush #= true
+        freeListSample(dut)
+
+        dut.io.commitFreeValid #= 0
+        dut.io.commitFreePdst(0) #= 0
+        dut.io.flush #= false
+        dut.io.allocateValid #= 7
+        checkAllocation(dut, Seq(5, 6, 7))
+      }
+  }
+
+  test("free list recycles committed registers across pointer wrap") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-free-list")
+      .compile(new OooFreeList(config))
+      .doSim("ooo-free-list-wrap-recycle", 0x4652) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearFreeListInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        freeListSample(dut)
+
+        dut.io.allocateValid #= 7
+        dut.io.allocateAccept #= true
+        checkAllocation(dut, Seq(1, 2, 3))
+        freeListSample(dut)
+
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.commitFreeValid #= 7
+        freeListSample(dut)
+
+        dut.io.commitFreeValid #= 0
+        dut.io.allocateValid #= 7
+        dut.io.allocateAccept #= true
+        checkAllocation(dut, Seq(4, 5, 6))
+        freeListSample(dut)
+
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.commitFreeValid #= 7
+        for (lane <- 0 until config.commitWidth) {
+          dut.io.commitFreePdst(lane) #= lane + 1
+        }
+        freeListSample(dut)
+
+        dut.io.commitFreeValid #= 0
+        for (lane <- 0 until config.commitWidth) {
+          dut.io.commitFreePdst(lane) #= 0
+        }
+        dut.io.allocateValid #= 7
+        dut.io.allocateAccept #= true
+        for (_ <- 0 until 19) {
+          freeListSample(dut)
+        }
+
+        dut.io.allocateAccept #= false
+        checkAllocation(dut, Seq(1, 2, 3))
+        dut.io.allocateAccept #= true
+        freeListSample(dut)
+
+        dut.io.allocateAccept #= false
+        dut.io.allocateValid #= 1
+        sleep(1)
+        assert(!dut.io.allocateReady.toBoolean)
+
+        dut.io.allocateValid #= 0
+        dut.io.commitFreeValid #= 1
+        dut.io.commitFreePdst(0) #= 4
+        freeListSample(dut)
+
+        dut.io.commitFreeValid #= 0
+        dut.io.commitFreePdst(0) #= 0
+        dut.io.allocateValid #= 1
+        checkAllocation(dut, Seq(4))
+      }
+  }
+
+  test("free list exposes conservative rename-group capacity") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-free-list")
+      .compile(new OooFreeList(config))
+      .doSim("ooo-free-list-group-capacity", 0x4654) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearFreeListInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        freeListSample(dut)
+
+        dut.io.allocateValid #= 7
+        dut.io.allocateAccept #= true
+        for (_ <- 0 until 20) freeListSample(dut)
+        assert(dut.io.allocateCapacityReady.toBoolean)
+
+        // Consume one of the last three entries directly. One exact request
+        // still fits, while an arbitrary three-wide rename group does not.
+        dut.io.allocateValid #= 1
+        freeListSample(dut)
+        dut.io.allocateAccept #= false
+        sleep(1)
+        assert(dut.io.allocateReady.toBoolean)
+        assert(!dut.io.allocateCapacityReady.toBoolean)
+      }
+  }
+}
