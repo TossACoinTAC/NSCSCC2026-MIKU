@@ -85,8 +85,9 @@ if [[ $lanes == 3 ]]; then
   fi
 fi
 
-cpu_commit=$(git -C "$cpu_dir" rev-parse HEAD)
-cpu_short=${cpu_commit:0:12}
+cpu_commit=$(git -C "$workspace" rev-parse HEAD)
+cpu_source_sha=$(python3 "$workspace/scripts/common/content_hash.py" "$cpu_dir")
+cpu_short=${cpu_source_sha:0:12}
 variant=$profile
 if [[ $suite != standard ]]; then
   variant="$profile-$suite"
@@ -101,12 +102,13 @@ if [[ ! -f $manifest || ! -x $model ]]; then
   exit 1
 fi
 grep -Fxq "cpu_commit=$cpu_commit" "$manifest"
+grep -Fxq "cpu_source_sha256=$cpu_source_sha" "$manifest"
 grep -Fxq "chiplab_commit=$chiplab_commit" "$manifest"
 grep -Fxq "profile=$profile" "$manifest"
 grep -Fxq "suite=$suite" "$manifest"
 if [[ $suite != standard ]]; then
   expected_patch_sha=$(awk -F= '$1 == "official_software_patch_sha256" {print $2}' "$manifest")
-  actual_patch_sha=$(sha256sum "$workspace/tools/sim-patches/official-software-switch.patch" | awk '{print $1}')
+  actual_patch_sha=$(sha256sum "$workspace/scripts/sim/official-software-switch.patch" | awk '{print $1}')
   if [[ -z $expected_patch_sha || $actual_patch_sha != "$expected_patch_sha" ]]; then
     printf 'prepared official-software harness patch is stale; run make sim-prepare again\n' >&2
     exit 1
@@ -119,7 +121,7 @@ if [[ $actual_model_sha != "$expected_model_sha" ]]; then
   exit 1
 fi
 expected_rtl_sha=$(awk -F= '$1 == "rtl_sha256" {print $2}' "$manifest")
-actual_rtl_sha=$(sha256sum "$cpu_dir/rtl/mycpu_top.v" | awk '{print $1}')
+actual_rtl_sha=$(sha256sum "$workspace/build/rtl/mycpu_top.v" | awk '{print $1}')
 if [[ $actual_rtl_sha != "$expected_rtl_sha" ]]; then
   printf 'current generated RTL differs from the prepared model; run make sim-prepare again\n' >&2
   exit 1
@@ -257,7 +259,7 @@ run_one() {
       if [[ ! -f m01-counters.json ]]; then
         printf 'instrumented model did not produce m01-counters.json\n' > m01-check.txt
         counter_status=1
-      elif ! "$workspace/tools/check-m01-counters" m01-counters.json > m01-check.txt 2>&1; then
+      elif ! "$workspace/scripts/sim/check-m01-counters" m01-counters.json > m01-check.txt 2>&1; then
         counter_status=1
       else
         printf 'm01_counters_sha256=%s\n' "$(sha256sum m01-counters.json | awk '{print $1}')" >> run-manifest.txt
@@ -329,6 +331,13 @@ EOF
     fi
     printf '%s\n' "$verdict" > verdict.txt
     printf '%s\n' "$result" > exit-code.txt
+    cycles=$(sed -n 's/^total clock[[:space:]]*is[[:space:]]*\([0-9][0-9]*\).*/\1/p' run.log | tail -n 1)
+    cycles=${cycles:-0}
+    result_status=pass
+    [[ $result == 0 ]] || result_status=fail
+    cat > sim-result.json <<EOF
+{"schema_version":1,"status":"$result_status","workload":"$workload","seed":$seed,"cycles":$cycles,"model_sha256":"$actual_model_sha","end_reason":"$verdict"}
+EOF
     exit "$result"
   )
 }
@@ -353,8 +362,8 @@ done
 matrix_id=$(printf '%s\n' "$profile|$suite|$memory_mode|$workloads|$seeds|$lanes|$time_limit" | sha256sum | cut -c1-12)
 summary="$run_root/matrix_${matrix_id}_summary.txt"
 {
-  printf 'cpu_commit=%s\nprofile=%s\nsuite=%s\nmemory_mode=%s\nworkloads=%s\nseeds=%s\nlanes=%s\n' \
-    "$cpu_commit" "$profile" "$suite" "$memory_mode" "$workloads" "$seeds" "$lanes"
+  printf 'cpu_commit=%s\ncpu_source_sha256=%s\nprofile=%s\nsuite=%s\nmemory_mode=%s\nworkloads=%s\nseeds=%s\nlanes=%s\n' \
+    "$cpu_commit" "$cpu_source_sha" "$profile" "$suite" "$memory_mode" "$workloads" "$seeds" "$lanes"
   for workload in "${workload_list[@]}"; do
     slug=${workload//\//__}
     for seed in "${seed_list[@]}"; do

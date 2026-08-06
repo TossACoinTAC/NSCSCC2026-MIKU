@@ -1,0 +1,31 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace_root=${WORKSPACE_ROOT:-$(CDPATH= cd -- "$script_dir/../.." && pwd)}
+image=${DOCKER_IMAGE:-nscscc-dev:ubuntu24.04-v1}
+cache_volume=${DOCKER_CACHE_VOLUME:-nscscc-sbt-cache-v1}
+workdir=${CONTAINER_WORKDIR:-$workspace_root}
+
+[ "$#" -gt 0 ] || {
+  printf 'usage: %s command [argument ...]\n' "$0" >&2
+  exit 2
+}
+
+host_uid=$(id -u)
+host_gid=$(id -g)
+docker run --rm --user 0 -v "$cache_volume:/cache" "$image" sh -ec \
+  'mkdir -p /cache/sbt /cache/ivy; chown "$1:$2" /cache /cache/sbt /cache/ivy' sh \
+  "$host_uid" "$host_gid"
+
+exec docker run --rm -i \
+  --user "$host_uid:$host_gid" \
+  -e HOME=/tmp \
+  -e COURSIER_CACHE=/cache/coursier \
+  -e CPU_SBT_TARGET="$workspace_root/build/cpu/sbt-target" \
+  -e SPINAL_SIM_WORKSPACE_ROOT="${SPINAL_SIM_WORKSPACE_ROOT:-$workspace_root/build/cpu/test-workspaces}" \
+  -e SPINAL_SIM_WORKSPACE="${SPINAL_SIM_WORKSPACE:-$workspace_root/build/cpu/test-workspace}" \
+  -v "$workspace_root:$workspace_root" \
+  -v "$cache_volume:/cache" \
+  -w "$workdir" \
+  "$image" "$@"

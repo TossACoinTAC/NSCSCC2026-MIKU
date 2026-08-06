@@ -1,0 +1,12 @@
+diff --git a/chip/soc_demo/sim/soc_top.v b/chip/soc_demo/sim/soc_top.v
+--- a/chip/soc_demo/sim/soc_top.v
++++ b/chip/soc_demo/sim/soc_top.v
+@@ -921,7 +921,8 @@ confreg #(
+     .BUS_WIDTH      (BUS_WIDTH),
+     .DATA_WIDTH     (DATA_WIDTH),
+-    .CPU_WIDTH      (CPU_WIDTH)
++    .CPU_WIDTH      (CPU_WIDTH),
++    .SIMULATION     (1'b1)
+ 
+ )confreg
+ (

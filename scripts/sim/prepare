@@ -67,14 +67,16 @@ if [[ ! $jobs =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
-cpu_commit=$(git -C "$cpu_dir" rev-parse HEAD)
-cpu_short=${cpu_commit:0:12}
+root_commit=$(git -C "$workspace" rev-parse HEAD)
+cpu_source_sha=$(python3 "$workspace/scripts/common/content_hash.py" "$cpu_dir")
+cpu_commit=$root_commit
+cpu_short=${cpu_source_sha:0:12}
 chiplab_head=$(git -C "$chiplab_dir" rev-parse HEAD)
 if [[ $chiplab_head != "$chiplab_commit" ]]; then
   printf 'Chiplab HEAD %s does not match locked commit %s\n' "$chiplab_head" "$chiplab_commit" >&2
   exit 1
 fi
-rtl="$cpu_dir/rtl/mycpu_top.v"
+rtl="$workspace/build/rtl/mycpu_top.v"
 if [[ ! -f $rtl ]]; then
   printf 'generated RTL is missing: %s\n' "$rtl" >&2
   exit 1
@@ -100,17 +102,22 @@ mkdir -p "$staging/IP/myCPU"
 install -m 0444 "$rtl" "$staging/IP/myCPU/mycpu_top.v"
 export CHIPLAB_HOME="$staging"
 
-patch_file="$workspace/tools/sim-patches/difftest-interrupt-memory-order.patch"
+patch_file="$workspace/scripts/sim/difftest-interrupt-memory-order.patch"
 patch_lock="$patch_file.sha256"
 patch_sha=none
-m01_patch_file="$workspace/tools/sim-patches/m01-perf-monitor.patch"
+m01_patch_file="$workspace/scripts/sim/m01-perf-monitor.patch"
 m01_patch_lock="$m01_patch_file.sha256"
-m01_source_lock="$workspace/tools/sim-instrumentation/manifest.sha256"
+m01_source_lock="$workspace/scripts/sim/manifest.sha256"
 m01_patch_sha=none
 m01_source_sha=none
-official_patch_file="$workspace/tools/sim-patches/official-software-switch.patch"
+official_patch_file="$workspace/scripts/sim/official-software-switch.patch"
 official_patch_lock="$official_patch_file.sha256"
 official_patch_sha=none
+simulation_patch_file="$workspace/scripts/sim/confreg-simulation-mode.patch"
+simulation_patch_lock="$simulation_patch_file.sha256"
+(cd "$workspace" && sha256sum -c "$simulation_patch_lock")
+simulation_patch_sha=$(sha256sum "$simulation_patch_file" | awk '{print $1}')
+TMPDIR=/tmp patch -d "$staging" -p1 --forward --batch < "$simulation_patch_file"
 if [[ $suite != standard ]]; then
   (cd "$workspace" && sha256sum -c "$official_patch_lock")
   official_patch_sha=$(sha256sum "$official_patch_file" | awk '{print $1}')
@@ -124,9 +131,9 @@ if [[ $profile == instrumented ]]; then
   (cd "$workspace" && sha256sum -c "$m01_source_lock")
   m01_patch_sha=$(sha256sum "$m01_patch_file" | awk '{print $1}')
   m01_source_sha=$(sha256sum "$m01_source_lock" | awk '{print $1}')
-  install -m 0444 "$workspace/tools/sim-instrumentation/perf_monitor.h" \
+  install -m 0444 "$workspace/scripts/sim/perf_monitor.h" \
     "$staging/sims/verilator/testbench/include/perf_monitor.h"
-  install -m 0444 "$workspace/tools/sim-instrumentation/perf_monitor.cpp" \
+  install -m 0444 "$workspace/scripts/sim/perf_monitor.cpp" \
     "$staging/sims/verilator/testbench/perf_monitor.cpp"
   TMPDIR=/tmp patch -d "$staging" -p1 --forward --batch < "$m01_patch_file"
   if ! awk '
@@ -147,13 +154,13 @@ read -r -a config_words <<< "$config_args"
 (cd "$run_dir" && make clean)
 case "$suite" in
 perf20)
-  "$workspace/tools/stage-perf20-software" \
+  "$workspace/scripts/sim/stage-perf20" \
     --chiplab-dir "$staging" \
     --run-dir "$run_dir" \
     --workloads "$workloads"
   ;;
 func58)
-  "$workspace/tools/stage-func58-software" \
+  "$workspace/scripts/sim/stage-func58" \
     --chiplab-dir "$staging" \
     --run-dir "$run_dir" \
     --workloads "$workloads"
@@ -180,26 +187,32 @@ if grep -Fxq 'TRACE_COMP=y' "$run_dir/config-software.mak"; then
   done
 fi
 
-git -C "$cpu_dir" status --short > "$staging/cpu-status.txt"
-git -C "$cpu_dir" diff --binary > "$staging/cpu-dirty.patch"
+git -C "$workspace" status --short -- cpu > "$staging/cpu-status.txt"
+git -C "$workspace" diff --binary -- cpu > "$staging/cpu-dirty.patch"
+git -C "$chiplab_dir" status --short > "$staging/chiplab-status.txt"
+git -C "$chiplab_dir" diff --binary > "$staging/chiplab-dirty.patch"
 manifest="$staging/sim-prepared-manifest.txt"
 cat > "$manifest" <<EOF
 format=nscc-sim-prepared-v2
 profile=$profile
 suite=$suite
+root_commit=$root_commit
 cpu_commit=$cpu_commit
+cpu_source_sha256=$cpu_source_sha
 chiplab_commit=$chiplab_commit
 workloads=$workloads
 config_args=$config_args
 cpu_dirty_patch_sha256=$(sha256sum "$staging/cpu-dirty.patch" | awk '{print $1}')
+chiplab_dirty_patch_sha256=$(sha256sum "$staging/chiplab-dirty.patch" | awk '{print $1}')
 rtl_sha256=$(sha256sum "$rtl" | awk '{print $1}')
 model_sha256=$(sha256sum "$run_dir/output" | awk '{print $1}')
 difftest_sha256=$(sha256sum "$staging/sims/verilator/testbench/difftest.cpp" | awk '{print $1}')
 instrumentation_patch_sha256=$patch_sha
 official_software_patch_sha256=$official_patch_sha
+simulation_patch_sha256=$simulation_patch_sha
 m01_patch_sha256=$m01_patch_sha
 m01_source_manifest_sha256=$m01_source_sha
-verilator=$($workspace/tools/verilator-local --version | head -n 1)
+verilator=$(verilator --version | head -n 1)
 java=$(java -version 2>&1 | head -n 1)
 EOF
 
