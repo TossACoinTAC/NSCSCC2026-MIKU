@@ -1,0 +1,3 @@
+# These patches are byte-locked migration or simulator evidence.
+cpu/reference/migration/*.patch whitespace=-blank-at-eol,-blank-at-eof
+scripts/sim/*.patch whitespace=-blank-at-eol,-blank-at-eof
