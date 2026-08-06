@@ -1,0 +1,10 @@
+{
+    "files.watcherExclude": {
+        "**/build/**": true,
+        "**/target/**": true,
+        "**/chiplab/**": true,
+        "**/nscscc-linux-kernel/**": true
+    },
+    "metals.sbtScript": "scripts/env/bsp",
+    "metals.enableSemanticHighlighting": true
+}

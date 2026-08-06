@@ -1,0 +1,9 @@
+**
+!docker/
+!docker/**
+!cpu/
+!cpu/reference/
+!cpu/reference/manifest.lock
+!chiplab/
+!chiplab/toolchains/
+!chiplab/toolchains/**

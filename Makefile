@@ -1,748 +1,217 @@
-SHELL := /bin/zsh
+SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
-LOCAL_TOOL_DIR := $(ROOT_DIR)/tools/.local
-LOCAL_TOOL_BIN := $(ROOT_DIR)/tools/bin
-CPU_DIR ?= $(ROOT_DIR)/nscscc-cpu
-CPU_REL_DIR := $(shell realpath --relative-to="$(ROOT_DIR)" "$(CPU_DIR)")
-CPU_CONTAINER_DIR := /work/$(CPU_REL_DIR)
-CHIPLAB_HOME := $(ROOT_DIR)/chiplab
-CHIPLAB_TOOLCHAIN_DIR := $(CHIPLAB_HOME)/toolchains
-CHIPLAB_GCC_BIN := $(CHIPLAB_TOOLCHAIN_DIR)/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin
-CHIPLAB_QEMU_BIN := $(CHIPLAB_TOOLCHAIN_DIR)/la32r-QEMU-x86_64-ubuntu-22.04
-SIM_PATH := $(LOCAL_TOOL_BIN):$(CHIPLAB_GCC_BIN):$(CHIPLAB_QEMU_BIN)
-TEAM_CI_DIR ?= $(ROOT_DIR)/nscscc-team-ci
-SUBMISSION_DIR ?= $(ROOT_DIR)/T2026144230012607
-OFFICIAL_CI_TEMPLATE_DIR ?= $(ROOT_DIR)/build/official-ci-template
-SIM_DIR ?= $(CHIPLAB_HOME)/sims/verilator/run_prog
-SOC_PERF_CHIPLAB_DIR ?= $(ROOT_DIR)/build/chiplab-perf
-SOC_RUN_DIR ?= $(SOC_PERF_CHIPLAB_DIR)/fpga/nscscc-team/run_vivado
-SOC_PLATFORM_IP_DIR ?= $(SOC_PERF_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/xilinx_ip
-SOC_VIO_DIR ?= $(SOC_PLATFORM_IP_DIR)/vio
-SOC_PROJECT_XPR ?= $(SOC_RUN_DIR)/project/loongson.xpr
-SOC_IMPL_DIR ?= $(SOC_RUN_DIR)/project/loongson.runs/impl_1
-SOC_TIMING_REPORT ?= $(SOC_IMPL_DIR)/timing_summary.rpt
-SOC_INCREMENTAL_DIR ?= $(ROOT_DIR)/build/vivado/incremental
-SOC_INCREMENTAL_REFERENCE_SOURCE ?= $(SOC_IMPL_DIR)/soc_top_routed.dcp
-SOC_INCREMENTAL_REFERENCE_DCP ?= $(SOC_INCREMENTAL_DIR)/reference/soc_top_routed.dcp
-SOC_INCREMENTAL_REFERENCE_MANIFEST ?= $(SOC_INCREMENTAL_DIR)/reference/manifest.txt
-SOC_INCREMENTAL_REUSE_REPORT ?= $(SOC_INCREMENTAL_DIR)/results/incremental_reuse.rpt
-SOC_FUNC_CHIPLAB_DIR ?= $(ROOT_DIR)/build/chiplab-func
-SOC_FUNC_RUN_DIR ?= $(SOC_FUNC_CHIPLAB_DIR)/fpga/nscscc-team/run_vivado
-SOC_FUNC_IMPL_DIR ?= $(SOC_FUNC_RUN_DIR)/project/loongson.runs/impl_1
-SOC_TIMING_POLICY ?= strict
-SOC_ARCHIVE_CLASS ?= candidate
-SOC_ARCHIVE_NAME ?= perf_$(PERF_CPU_MHZ)mhz
-SOC_ARCHIVE_REQUESTED_CPU_MHZ ?= $(PERF_CPU_MHZ)
-GATE_DOCKERFILE ?= $(ROOT_DIR)/docker/nscscc-local-gates.Dockerfile
-GATE_IMAGE ?= nscscc-local-gates:ubuntu24.04-v1
+-include $(ROOT_DIR)/config/local.env
 
+WORKSPACE_ROOT ?= $(ROOT_DIR)
+CPU_DIR ?= $(ROOT_DIR)/cpu
+CHIPLAB_HOME ?= $(ROOT_DIR)/chiplab
+LINUX_KERNEL_DIR ?= $(ROOT_DIR)/nscscc-linux-kernel
+LABAGENT_DIR ?= $(ROOT_DIR)/fpga-lab-agent
+CHIPLAB_TOOLCHAINS ?= $(CHIPLAB_HOME)/toolchains
+BUILD_ROOT ?= $(ROOT_DIR)/build
+DOCKER_IMAGE ?= nscscc-dev:ubuntu24.04-v1
+DOCKERFILE ?= $(ROOT_DIR)/docker/nscscc-dev.Dockerfile
+DOCKER_CACHE_VOLUME ?= nscscc-sbt-cache-v1
 VIVADO_HOME ?= /opt/Xilinx/Vivado/2023.2
 VIVADO ?= $(VIVADO_HOME)/bin/vivado
 SURFER ?= /mnt/d/Surfer/surfer.exe
-VERILATOR_HOME ?= $(LOCAL_TOOL_DIR)/verilator/5.020/share/verilator
-SIM_CPU_DIR ?= $(CPU_DIR)/rtl
-SIM_EXTRA_LIBS ?= -llz4
-CPU_SBT ?= $(ROOT_DIR)/tools/sbt-local
+JOBS ?= 8
 CPU_TEST ?=
-
 RUN_SOFTWARE ?= func/func_lab19
 TIME_LIMIT ?= 1300000
-JOBS ?= 8
 AXI_SEED ?= 5570815
-PERF_CPU_MHZ ?= 100
-SIM_CONFIG_ARGS ?= --run $(RUN_SOFTWARE) --disable-simu-trace --output-uart-info --dump-fst
-WAVE ?= $(SIM_DIR)/log/$(RUN_SOFTWARE)_log/simu_trace.fst
 SIM_PROFILE ?= clean
 SIM_SUITE ?= standard
 SIM_MEMORY_MODE ?= random
-SIM_ARTIFACT_ROOT ?= $(ROOT_DIR)/build/sim
+SIM_ARTIFACT_ROOT ?= $(BUILD_ROOT)/sim
 SIM_WORKLOADS ?= $(RUN_SOFTWARE)
 SIM_SEEDS ?= $(AXI_SEED)
 SIM_LANES ?= 2
 SIM_ALLOW_THREE ?= 0
 SIM_LANE_PEAK_MB ?=
-SIM_PREPARE_MODEL_RUN ?= $(if $(filter perf20,$(SIM_SUITE)),coremark,$(RUN_SOFTWARE))
-SIM_PREPARE_CONFIG_ARGS ?= --run $(SIM_PREPARE_MODEL_RUN) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst
-# Local software simulation omits the long-tail stringsearch case.  The complete perf20 image,
-# including stringsearch, remains mandatory in the actual-board flow.
-PERF20_WORKLOADS := perf20/bitcount,perf20/bubble_sort,perf20/coremark,perf20/crc32,perf20/dhrystone,perf20/quick_sort,perf20/select_sort,perf20/sha,perf20/stream_copy,perf20/fireye_A0,perf20/fireye_B2,perf20/fireye_C0,perf20/fireye_D1,perf20/fireye_I2,perf20/inner_product,perf20/lookup_table,perf20/loop_induction,perf20/my_memcmp,perf20/minmax_sequence
-PERF20_TIME_LIMIT ?= 600000000
-FUNC58_WORKLOADS := func58
-FUNC58_SEEDS ?= 240,255,141
-FUNC58_TIME_LIMIT ?= 30000000
-OFFICIAL_SIM_LANES ?= 3
-OFFICIAL_SIM_LANE_PEAK_MB ?= 8
-
+PERF_CPU_MHZ ?= 100
 CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
-OFFICIAL_CI_TEMPLATE_COMMIT ?= 6915882af5c8d3a0c856f570cb914920a3e5ff99
-OFFICIAL_CI_TEMPLATE_URL ?= ssh://git@111.4.16.59:63222/2026nscsccteam/ci-template-sync-lab-20260721/ci-template.git
-MAIN_CPU_COMMIT ?= d9bab16ef46540eb3348b0781afc4d0949f28adc
+PERF20_TIME_LIMIT ?= 600000000
+FUNC58_TIME_LIMIT ?= 30000000
+PERF20_WORKLOADS := perf20/bitcount,perf20/bubble_sort,perf20/coremark,perf20/crc32,perf20/dhrystone,perf20/quick_sort,perf20/select_sort,perf20/sha,perf20/stream_copy,perf20/stringsearch,perf20/fireye_A0,perf20/fireye_B2,perf20/fireye_C0,perf20/fireye_D1,perf20/fireye_I2,perf20/inner_product,perf20/lookup_table,perf20/loop_induction,perf20/my_memcmp,perf20/minmax_sequence
+FUNC58_WORKLOADS := func58
 
-.PHONY: help doctor toolchain-check chiplab-toolchains status ci-production-sync ci-check gate-image cpu-locked-gates cpu-locked-gates-run cpu-test cpu-check cpu-generate chiplab-sync \
-	sim-configure sim-build sim-run sim sim-prepare sim-matrix wave soc-project soc-impl soc-timing \
-	func58-prepare func58-sim perf20-prepare perf20-sim \
-	soc-func soc-perf soc-timing-check soc-incremental-reference soc-impl-incremental \
-	soc-archive soc-incremental-archive
+CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_CACHE_VOLUME=$(DOCKER_CACHE_VOLUME) $(ROOT_DIR)/scripts/env/run-in-container
+CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+.PHONY: help doctor status ide-setup env-build toolchain-check chiplab-toolchains \
+  cpu-test cpu-test-all cpu-generate cpu-check cpu-locked-gates chiplab-sync \
+  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-timing \
+  clean clean-build clean-cpu clean-sim clean-vivado clean-chiplab clean-ide-state clean-all
 
 help:
 	@printf '%s\n' \
-		'NSCSCC 2026 workspace entry points' \
-		'' \
-		'  make doctor          Check WSL2, tools, paths, branches, and platform revision' \
-		'  make toolchain-check Verify the workspace-local SBT and Verilator lock' \
-		'  make chiplab-toolchains  Verify Chiplab compiler/NEMU/QEMU/picolibc hashes' \
-		'  make status          Show root and nested repository state (read-only)' \
-		'  make ci-production-sync  Fetch and verify the production GitLab CI template' \
-		'  make ci-check        Validate the submission include and production CI pins' \
-		'  make gate-image      Build the reusable locked Verilator/Yosys image' \
-		'  make cpu-locked-gates Refresh version metadata and run RTL gates in that locked image' \
-		'  make cpu-locked-gates-run  Reuse the existing locked image without rebuilding it' \
-		'  make cpu-test        Run one focused Scala suite (CPU_TEST=fully.qualified.Suite)' \
-		'  make cpu-check       Run the nscscc-cpu local correctness/publication gates' \
-		'  make cpu-generate    Generate and publish mycpu_top.v from SpinalHDL' \
-		'  make chiplab-sync    Generate CPU RTL and copy it into Chiplab IP/myCPU' \
-		'  make sim              Build software/model and run Verilator' \
-		'  make sim-prepare      Build one isolated, hash-locked Verilator model/profile' \
-		'  make sim-matrix       Run prepared workloads/seeds in isolated runtime directories' \
-		'  make func58-sim       Run the official 58-point function image with three AXI seeds' \
-		'  make perf20-sim       Run all 20 official performance programs in deterministic Verilator memory' \
-		'  make wave             Open WAVE in Windows Surfer' \
-		'  make soc-project      Recreate an isolated c398 performance Vivado project' \
-		'  make soc-func         Run a clean isolated functional-test SoC implementation' \
-		'  make soc-impl         Run the 100 MHz complete-SoC implementation and timing gate' \
-		'  make soc-archive      Archive the latest implementation with class and timing status' \
-		'  make soc-incremental-reference  Preserve the latest routed DCP outside the Vivado project' \
-		'  make soc-impl-incremental  Re-synthesize, then implement with the preserved routed DCP' \
-		'  make soc-incremental-archive  Archive the current incremental artifacts and hashes' \
-		'  make soc-perf         Run the official performance-clock SoC flow (default: 100 MHz)' \
-		'  make soc-timing       Print key lines from the latest implementation timing report' \
-		'  make soc-timing-check Reject the latest report if setup/hold timing is negative' \
-		'' \
-		'Common overrides:' \
-		'  RUN_SOFTWARE=func/func_lab19  TIME_LIMIT=1300000  JOBS=8  AXI_SEED=5570815' \
-		'  SIM_PROFILE=clean|instrumented  SIM_SUITE=standard|func58|perf20' \
-		'  SIM_ARTIFACT_ROOT=path          Isolate prepared models and runtime evidence' \
-		'  SIM_MEMORY_MODE=random|ideal  SIM_WORKLOADS=a,b  SIM_SEEDS=1,2  SIM_LANES=2' \
-		'  PERF_CPU_MHZ=100' \
-		'  SOC_ARCHIVE_CLASS=candidate|stable' \
-		'  SOC_TIMING_POLICY=strict|report  (report is only for comparison artifacts)' \
-		'  WAVE=/absolute/path/to/file.fst  VIVADO_HOME=/path/to/Vivado/2023.2'
-
-toolchain-check:
-	"$(ROOT_DIR)/tools/toolchain-check"
-
-chiplab-toolchains:
-	"$(ROOT_DIR)/tools/chiplab-toolchains-local"
+		'NSCSCC 2026 MIKU 工作区入口' '' \
+		'  make doctor             只读检查路径、Docker 和嵌套仓库' \
+		'  make status             显示根仓库及受支持子仓库状态' \
+		'  make ide-setup          生成指向 cpu/build.sbt 的 BSP 配置' \
+		'  make env-build          构建锁定 CPU/仿真工具镜像' \
+		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
+		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
+		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
+		'  make sim                单个软件仿真（RUN_SOFTWARE 可覆盖）' \
+		'  make sim-prepare        生成一次隔离 Chiplab/Verilator 模型' \
+		'  make sim-matrix         独立 workload/seed 并行运行' \
+		'  make func58-sim         全 func58 固定 seeds' \
+		'  make perf20-sim         完整 perf20（包含 stringsearch）' \
+		'  make linux-sim          Linux 软件仿真入口' \
+		'  make soc-impl           Vivado 宿主机完整 SoC 实现' \
+		'  make wave WAVE=...      用宿主机 Surfer 查看波形' \
+		'  make clean              清理可再生构建输出，保留 IDE 状态' \
+		'  make clean-all          额外清理显式 IDE 状态' '' \
+		'路径覆盖：VIVADO_HOME VIVADO SURFER CHIPLAB_TOOLCHAINS DOCKER_IMAGE JOBS SIM_LANES'
 
 doctor:
-	@set -u; \
-	missing=0; \
-	check_cmd() { \
-		if command -v "$$1" >/dev/null 2>&1; then \
-			printf '[ok]      %-12s %s\n' "$$1" "$$(command -v "$$1")"; \
-		else \
-			printf '[missing] %-12s\n' "$$1"; \
-			missing=1; \
-		fi; \
-	}; \
-	check_dir() { \
-		if [[ -d "$$2" ]]; then \
-			printf '[ok]      %-12s %s\n' "$$1" "$$2"; \
-		else \
-			printf '[missing] %-12s %s\n' "$$1" "$$2"; \
-			missing=1; \
-		fi; \
-	}; \
-	if grep -qi microsoft /proc/sys/kernel/osrelease; then \
-		printf '[ok]      %-12s %s\n' WSL2 "$$(uname -r)"; \
-	else \
-		printf '[warning] %-12s %s\n' WSL2 "$$(uname -r)"; \
-	fi; \
-	check_dir CPU_DIR "$(CPU_DIR)"; \
-	check_dir CHIPLAB_HOME "$(CHIPLAB_HOME)"; \
-	check_dir TEAM_CI_DIR "$(TEAM_CI_DIR)"; \
-	check_dir SUBMISSION "$(SUBMISSION_DIR)"; \
-	check_cmd java; \
-	if [[ -x "$(CPU_SBT)" ]]; then \
-		printf '[ok]      %-12s %s\n' SBTWrapper "$(CPU_SBT)"; \
-	else \
-		printf '[missing] %-12s %s\n' SBTWrapper "$(CPU_SBT)"; \
-		missing=1; \
-	fi; \
-	if "$(ROOT_DIR)/tools/verilator-local" --version >/dev/null 2>&1; then \
-		printf '[ok]      %-12s %s\n' Verilator 'workspace lock 5.020'; \
-	else \
-		printf '[missing] %-12s %s\n' Verilator 'tools/.local/verilator/5.020'; \
-		missing=1; \
-	fi; \
-	check_cmd git; \
-	check_cmd make; \
-	check_cmd wslpath; \
-	if [[ -x "$(VIVADO)" ]]; then \
-		printf '[ok]      %-12s %s\n' Vivado "$(VIVADO)"; \
-	else \
-		printf '[missing] %-12s %s\n' Vivado "$(VIVADO)"; \
-		missing=1; \
-	fi; \
-	if [[ -f "$(SURFER)" ]]; then \
-		printf '[ok]      %-12s %s\n' Surfer "$(SURFER)"; \
-	else \
-		printf '[missing] %-12s %s\n' Surfer "$(SURFER)"; \
-		missing=1; \
-	fi; \
-	if [[ -d "$(CPU_DIR)/.git" ]]; then \
-		printf '[info]    %-12s branch=%s head=%s\n' CPU \
-			"$$(git -C "$(CPU_DIR)" branch --show-current)" \
-			"$$(git -C "$(CPU_DIR)" rev-parse --short=12 HEAD)"; \
-	fi; \
-	if git -C "$(CHIPLAB_HOME)" rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
-		chiplab_head="$$(git -C "$(CHIPLAB_HOME)" rev-parse HEAD)"; \
-		chiplab_branch="$$(git -C "$(CHIPLAB_HOME)" branch --show-current)"; \
-		[[ -n "$$chiplab_branch" ]] || chiplab_branch=detached; \
-		printf '[info]    %-12s branch=%s head=%s\n' Chiplab \
-			"$$chiplab_branch" \
-			"$${chiplab_head:0:12}"; \
-		if [[ "$$chiplab_head" == "$(CHIPLAB_COMMIT)" ]]; then \
-			printf '[ok]      %-12s %s\n' ChiplabCI "$(CHIPLAB_COMMIT)"; \
-		else \
-			printf '[error]   Chiplab must be checked out at exact CI snapshot %s\n' \
-				"$(CHIPLAB_COMMIT)"; \
-			missing=1; \
-		fi; \
-	fi; \
-	if git -C "$(SUBMISSION_DIR)" rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
-		printf '[info]    %-12s branch=%s head=%s\n' Submission \
-			"$$(git -C "$(SUBMISSION_DIR)" branch --show-current)" \
-			"$$(git -C "$(SUBMISSION_DIR)" rev-parse --short=12 HEAD)"; \
-	fi; \
-	exit "$$missing"
+	@WORKSPACE_ROOT=$(ROOT_DIR) VIVADO=$(VIVADO) SURFER=$(SURFER) DOCKER_IMAGE=$(DOCKER_IMAGE) \
+		python3 scripts/env/doctor.py
 
 status:
-	@printf '%s\n' '== workspace root =='
-	@git -C "$(ROOT_DIR)" status --short --branch
-	@printf '%s\n' '== nscscc-cpu =='
-	@git -C "$(CPU_DIR)" status --short --branch
-	@printf '%s\n' '== chiplab =='
-	@git -C "$(CHIPLAB_HOME)" status --short --branch
-	@printf '%s\n' '== nscscc-team-ci =='
-	@git -C "$(TEAM_CI_DIR)" status --short --branch
-	@printf '%s\n' '== official submission =='
-	@git -C "$(SUBMISSION_DIR)" status --short --branch
+	@printf '%s\n' '== 根仓库 ==' && git status --short --branch
+	@for repo in chiplab nscscc-linux-kernel fpga-lab-agent; do \
+		if git -C "$$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+			printf '== %s ==\n' "$$repo"; git -C "$$repo" status --short --branch; \
+		else \
+			printf '== %s ==\n未初始化（运行 git submodule update --init）\n' "$$repo"; \
+		fi; \
+	done
 
-ci-production-sync:
-	@mkdir -p "$(dir $(OFFICIAL_CI_TEMPLATE_DIR))"
-	@if [[ ! -d "$(OFFICIAL_CI_TEMPLATE_DIR)/.git" ]]; then \
-		git clone --no-checkout "$(OFFICIAL_CI_TEMPLATE_URL)" \
-			"$(OFFICIAL_CI_TEMPLATE_DIR)"; \
-	fi
-	@git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" fetch origin master
-	@actual="$$(git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" rev-parse origin/master)"; \
-	if [[ "$$actual" != "$(OFFICIAL_CI_TEMPLATE_COMMIT)" ]]; then \
-		printf 'production CI template moved: expected %s, found %s\n' \
-			"$(OFFICIAL_CI_TEMPLATE_COMMIT)" "$$actual" >&2; \
-		exit 1; \
-	fi; \
-	printf 'production CI template: %s\n' "$$actual"
+ide-setup:
+	@python3 scripts/env/ide_setup.py
 
-ci-check: ci-production-sync
-	@ruby -e 'require "yaml"; YAML.load_file(ARGV.fetch(0))' \
-		"$(SUBMISSION_DIR)/.gitlab-ci.yml"
-	@git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" show \
-		"$(OFFICIAL_CI_TEMPLATE_COMMIT):parent.yml" | \
-		ruby -e 'require "yaml"; YAML.load(STDIN.read)'
-	@git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" show \
-		"$(OFFICIAL_CI_TEMPLATE_COMMIT):child.yml" | \
-		ruby -e 'require "yaml"; YAML.load(STDIN.read)'
-	@git -C "$(OFFICIAL_CI_TEMPLATE_DIR)" show \
-		"$(OFFICIAL_CI_TEMPLATE_COMMIT):child.yml" | \
-		rg -q 'EXPECTED_CHIPLAB_COMMIT: "$(CHIPLAB_COMMIT)"'
-	@rg -q "project: '2026nscsccteam/ci-template-sync-lab-20260721/ci-template'" \
-		"$(SUBMISSION_DIR)/.gitlab-ci.yml"
-	@printf 'production CI pins Chiplab %s\n' "$(CHIPLAB_COMMIT)"
+env-build:
+	docker build --pull=false -f "$(DOCKERFILE)" -t "$(DOCKER_IMAGE)" "$(ROOT_DIR)"
 
-gate-image:
-	docker build --pull=false -f "$(GATE_DOCKERFILE)" -t "$(GATE_IMAGE)" \
-		"$(ROOT_DIR)/docker"
+toolchain-check: env-build
+	@$(CONTAINER_RUN) sh -ec 'java -version; sbt --version; verilator --version; yosys -V; loongarch32r-linux-gnusf-gcc --version | head -n 1'
 
-cpu-locked-gates: gate-image cpu-locked-gates-run
-
-cpu-locked-gates-run: cpu-generate
-	@if [[ "$(CPU_REL_DIR)" == ".." || "$(CPU_REL_DIR)" == ../* ]]; then \
-		printf 'CPU_DIR must be inside the workspace for locked gates: %s\n' "$(CPU_DIR)" >&2; \
-		exit 2; \
-	fi
-	@docker image inspect "$(GATE_IMAGE)" >/dev/null 2>&1 || { \
-		printf 'locked gate image not found: %s\n' "$(GATE_IMAGE)" >&2; \
-		printf 'build it first with: make gate-image\n' >&2; \
-		exit 1; \
-	}
-	rm -rf "$(CPU_DIR)/build/core_top/locked-gates"
-	docker run --rm \
-		--user "$$(id -u):$$(id -g)" \
-		-e HOME=/tmp \
-		-v "$(ROOT_DIR):/work" \
-		-v "$(ROOT_DIR):$(ROOT_DIR)" \
-		-w "$(CPU_CONTAINER_DIR)" \
-		"$(GATE_IMAGE)" sh -ec ' \
-			git config --global --add safe.directory "$(CPU_CONTAINER_DIR)"; \
-			python3 -I tools/core_top_gate.py refresh-metadata \
-				--repo-root . --manifest reference/manifest.lock \
-				--ports reference/core-top.ports.json --rtl rtl/mycpu_top.v \
-				--replacement-spec reference/component-replacements/core-top.json \
-				--lint-waivers reference/core-top-lint-waivers.json \
-				--out-dir build/core_top/locked-gates/metadata \
-				--verilator /usr/bin/verilator; \
-			python3 -I tools/core_top_gate.py port-check \
-				--repo-root . --manifest reference/manifest.lock \
-				--ports reference/core-top.ports.json --rtl rtl/mycpu_top.v \
-				--out-dir build/core_top/locked-gates/port --yosys /usr/bin/yosys; \
-			python3 -I tools/core_top_gate.py lint \
-				--repo-root . --manifest reference/manifest.lock \
-				--ports reference/core-top.ports.json --rtl rtl/mycpu_top.v \
-				--out-dir build/core_top/locked-gates/lint \
-				--verilator /usr/bin/verilator --environment-profile locked \
-				--waivers reference/core-top-lint-waivers.json; \
-			python3 -I tools/core_top_gate.py yosys-check \
-				--repo-root . --manifest reference/manifest.lock \
-				--ports reference/core-top.ports.json --rtl rtl/mycpu_top.v \
-				--out-dir build/core_top/locked-gates/yosys --yosys /usr/bin/yosys; \
-			python3 -I tools/core_top_gate.py publish-check \
-				--repo-root . --manifest reference/manifest.lock \
-				--ports reference/core-top.ports.json --rtl rtl/mycpu_top.v \
-				--tracked-rtl rtl/mycpu_top.v \
-				--replacement-spec reference/component-replacements/core-top.json \
-				--out-dir build/core_top/locked-gates/publish \
-		'
-
-cpu-check:
-	TMPDIR=/tmp $(MAKE) -C "$(CPU_DIR)" scala test \
-		SBT="$(CPU_SBT)"
-	$(MAKE) cpu-locked-gates-run
-	TMPDIR=/tmp $(MAKE) -C "$(CPU_DIR)" python-test
+chiplab-toolchains:
+	@CHIPLAB_TOOLCHAIN_ROOT="$(CHIPLAB_TOOLCHAINS)" scripts/chiplab/check-toolchains
 
 cpu-test:
-	@if [[ -z "$(strip $(CPU_TEST))" ]]; then \
-		printf 'CPU_TEST is required, for example: make cpu-test CPU_TEST=openla500.backend.OooRobSpec\n' >&2; \
-		exit 2; \
-	fi
-	@test_file="$(CPU_DIR)/spinal/src/test/scala/$(subst .,/,$(CPU_TEST)).scala"; \
-	if [[ ! -f "$$test_file" ]]; then \
-		printf 'Scala suite source not found: %s\n' "$$test_file" >&2; \
-		exit 2; \
-	fi
-	cd "$(CPU_DIR)/spinal" && TMPDIR=/tmp "$(CPU_SBT)" -batch \
-		"testOnly $(CPU_TEST)"
+	@test -n "$(strip $(CPU_TEST))" || { printf 'CPU_TEST 必须是完整 suite 名称\n' >&2; exit 2; }
+	@test -f "$(CPU_DIR)/src/test/scala/$(subst .,/,$(CPU_TEST)).scala" || { printf '找不到 Scala suite: %s\n' "$(CPU_TEST)" >&2; exit 2; }
+	@CPU_SBT_TARGET="$(BUILD_ROOT)/cpu/sbt-target" SPINAL_SIM_WORKSPACE_ROOT="$(BUILD_ROOT)/cpu/test-workspaces" SPINAL_SIM_WORKSPACE="$(BUILD_ROOT)/cpu/test-workspace" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "testOnly $(CPU_TEST)"'
+
+cpu-test-all:
+	@CPU_SBT_TARGET="$(BUILD_ROOT)/cpu/sbt-target" SPINAL_SIM_WORKSPACE_ROOT="$(BUILD_ROOT)/cpu/test-workspaces" SPINAL_SIM_WORKSPACE="$(BUILD_ROOT)/cpu/test-workspace" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch test'
 
 cpu-generate:
-	$(MAKE) -C "$(CPU_DIR)" generate-core SBT="$(CPU_SBT)"
+	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
+	@rm -rf "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
+	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
+	@CPU_SBT_TARGET="$(BUILD_ROOT)/cpu/sbt-target" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw"'
+	@test -f "$(BUILD_ROOT)/rtl/raw/core_top.v"
+	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" package \
+		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
+		--ports "$(CPU_DIR)/reference/core-top.ports.json" --rtl "$(BUILD_ROOT)/rtl/raw/core_top.v" \
+		--out-dir "$(BUILD_ROOT)/rtl/package"
+	@install -m 0644 "$(BUILD_ROOT)/rtl/package/rtl/mycpu_top.v" "$(BUILD_ROOT)/rtl/mycpu_top.v"
+	@$(CONTAINER_RUN) python3 scripts/cpu/write_generation_manifest.py --root "$(ROOT_DIR)" \
+		--raw "$(BUILD_ROOT)/rtl/raw/core_top.v" --published "$(BUILD_ROOT)/rtl/mycpu_top.v" \
+		--out "$(BUILD_ROOT)/rtl/generation-manifest.json"
+
+cpu-locked-gates: cpu-generate
+	@mkdir -p "$(BUILD_ROOT)/gates"
+	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" port-check \
+		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
+		--ports "$(CPU_DIR)/reference/core-top.ports.json" --rtl "$(BUILD_ROOT)/rtl/mycpu_top.v" \
+		--out-dir "$(BUILD_ROOT)/gates/port" --yosys /usr/bin/yosys
+	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" lint \
+		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
+		--ports "$(CPU_DIR)/reference/core-top.ports.json" --rtl "$(BUILD_ROOT)/rtl/mycpu_top.v" \
+		--out-dir "$(BUILD_ROOT)/gates/lint" --verilator /usr/bin/verilator --environment-profile local
+	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" yosys-check \
+		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
+		--ports "$(CPU_DIR)/reference/core-top.ports.json" --rtl "$(BUILD_ROOT)/rtl/mycpu_top.v" \
+		--out-dir "$(BUILD_ROOT)/gates/yosys" --yosys /usr/bin/yosys
+
+cpu-check: cpu-test-all cpu-generate cpu-locked-gates
+	@$(CONTAINER_RUN) python3 -I -m unittest discover \
+		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
 
 chiplab-sync: cpu-generate
-	@test -f "$(CPU_DIR)/rtl/mycpu_top.v"
-	@test -f "$(CPU_DIR)/xilinx_ip/sram/data_bank_sram.xcix"
-	@test -f "$(CPU_DIR)/xilinx_ip/sram/tagv_sram.xcix"
-	@mkdir -p "$(CHIPLAB_HOME)/IP/myCPU/xilinx_ip/data_bank_sram"
-	@mkdir -p "$(CHIPLAB_HOME)/IP/myCPU/xilinx_ip/tagv_sram"
-	install -m 0644 "$(CPU_DIR)/rtl/mycpu_top.v" \
-		"$(CHIPLAB_HOME)/IP/myCPU/mycpu_top.v"
-	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/data_bank_sram.xcix" \
-		"$(CHIPLAB_HOME)/IP/myCPU/xilinx_ip/data_bank_sram/data_bank_sram.xcix"
-	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/tagv_sram.xcix" \
-		"$(CHIPLAB_HOME)/IP/myCPU/xilinx_ip/tagv_sram/tagv_sram.xcix"
+	@test "$(CHIPLAB_HOME)" != "$(ROOT_DIR)/cpu"
+	@install -D -m 0644 "$(BUILD_ROOT)/rtl/mycpu_top.v" "$(CHIPLAB_HOME)/IP/myCPU/mycpu_top.v"
+	@printf 'Chiplab CPU RTL 已同步；平台 IP 和 SRAM XCI 未被修改。\n'
 
-sim-configure: cpu-generate chiplab-toolchains
-	cd "$(SIM_DIR)" && ./configure.sh $(SIM_CONFIG_ARGS)
-
-sim-build: sim-configure
-	$(MAKE) -C "$(SIM_DIR)" clean
-	PATH="$(SIM_PATH):$$PATH" $(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" verilator \
-		MYCPU_SRC="$(SIM_CPU_DIR)" VERILATOR_HOME="$(VERILATOR_HOME)"
-	PATH="$(SIM_PATH):$$PATH" $(MAKE) -C "$(SIM_DIR)" -j"$(JOBS)" testbench \
-		MYCPU_SRC="$(SIM_CPU_DIR)" VERILATOR_HOME="$(VERILATOR_HOME)" \
-		ALL_LIB='./obj_dir/*__ALL.a $(SIM_EXTRA_LIBS)'
-	PATH="$(SIM_PATH):$$PATH" $(MAKE) -C "$(SIM_DIR)" soft_compile
-
-sim-run: sim-build
-	PATH="$(SIM_PATH):$$PATH" $(MAKE) -C "$(SIM_DIR)" simulation_run_prog \
-		TIME_LIMIT="$(TIME_LIMIT)" BUS_DELAY_RANDOM_SEED="$(AXI_SEED)"
-
-sim: sim-run
-
-sim-prepare: cpu-generate chiplab-toolchains
-	"$(ROOT_DIR)/tools/sim-prepare" \
-		--workspace "$(ROOT_DIR)" \
-		--artifact-root "$(SIM_ARTIFACT_ROOT)" \
-		--cpu-dir "$(CPU_DIR)" \
-		--chiplab-dir "$(CHIPLAB_HOME)" \
-		--chiplab-commit "$(CHIPLAB_COMMIT)" \
-		--profile "$(SIM_PROFILE)" \
-		--suite "$(SIM_SUITE)" \
-		--workloads "$(SIM_WORKLOADS)" \
-		--config-args "$(SIM_PREPARE_CONFIG_ARGS)" \
-		--jobs "$(JOBS)" \
-		--sim-path "$(SIM_PATH)" \
-		--verilator-home "$(VERILATOR_HOME)" \
-		--extra-libs "$(SIM_EXTRA_LIBS)"
+sim-prepare: cpu-generate
+	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/prepare" \
+		--workspace "$(ROOT_DIR)" --artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" \
+		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
+		--profile "$(SIM_PROFILE)" --suite "$(SIM_SUITE)" --workloads "$(SIM_WORKLOADS)" \
+		--config-args '--run $(RUN_SOFTWARE) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst' \
+		--jobs "$(JOBS)" --sim-path "$(CONTAINER_SIM_PATH)" --verilator-home /usr/share/verilator --extra-libs '-llz4'
 
 sim-matrix:
-	"$(ROOT_DIR)/tools/sim-matrix" \
-		--workspace "$(ROOT_DIR)" \
-		--artifact-root "$(SIM_ARTIFACT_ROOT)" \
-		--cpu-dir "$(CPU_DIR)" \
-		--chiplab-commit "$(CHIPLAB_COMMIT)" \
-		--profile "$(SIM_PROFILE)" \
-		--suite "$(SIM_SUITE)" \
-		--memory-mode "$(SIM_MEMORY_MODE)" \
-		--workloads "$(SIM_WORKLOADS)" \
-		--seeds "$(SIM_SEEDS)" \
-		--lanes "$(SIM_LANES)" \
-		--time-limit "$(TIME_LIMIT)" \
-		--sim-path "$(SIM_PATH)" \
-		--allow-three "$(SIM_ALLOW_THREE)" \
-		--lane-peak-mb "$(SIM_LANE_PEAK_MB)"
+	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" \
+		--workspace "$(ROOT_DIR)" --artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" \
+		--chiplab-commit "$(CHIPLAB_COMMIT)" --profile "$(SIM_PROFILE)" --suite "$(SIM_SUITE)" \
+		--memory-mode "$(SIM_MEMORY_MODE)" --workloads "$(SIM_WORKLOADS)" --seeds "$(SIM_SEEDS)" \
+		--lanes "$(SIM_LANES)" --time-limit "$(TIME_LIMIT)" --sim-path "$(CONTAINER_SIM_PATH)" \
+		--allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
 
-func58-prepare:
-	$(MAKE) sim-prepare \
-		SIM_PROFILE=clean \
-		SIM_SUITE=func58 \
-		SIM_WORKLOADS="$(FUNC58_WORKLOADS)" \
-		SIM_PREPARE_CONFIG_ARGS='--run func/func_lab19 --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst'
+sim: sim-prepare sim-matrix
 
-func58-sim: func58-prepare
-	$(MAKE) sim-matrix \
-		SIM_PROFILE=clean \
-		SIM_SUITE=func58 \
-		SIM_MEMORY_MODE=random \
-		SIM_WORKLOADS="$(FUNC58_WORKLOADS)" \
-		SIM_SEEDS="$(FUNC58_SEEDS)" \
-		SIM_LANES="$(OFFICIAL_SIM_LANES)" \
-		SIM_ALLOW_THREE=1 \
-		SIM_LANE_PEAK_MB="$(OFFICIAL_SIM_LANE_PEAK_MB)" \
-		TIME_LIMIT="$(FUNC58_TIME_LIMIT)"
+func58-sim:
+	@$(MAKE) sim-prepare SIM_PROFILE=clean SIM_SUITE=func58 SIM_WORKLOADS="$(FUNC58_WORKLOADS)" RUN_SOFTWARE=func/func_lab19
+	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" --workspace "$(ROOT_DIR)" \
+		--artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
+		--profile clean --suite func58 --memory-mode random --workloads "$(FUNC58_WORKLOADS)" \
+		--seeds 240,255,141 --lanes "$(SIM_LANES)" --time-limit "$(FUNC58_TIME_LIMIT)" \
+		--sim-path "$(CONTAINER_SIM_PATH)" --allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
 
-perf20-prepare:
-	$(MAKE) sim-prepare \
-		SIM_PROFILE=clean \
-		SIM_SUITE=perf20 \
-		SIM_WORKLOADS="$(PERF20_WORKLOADS)" \
-		SIM_PREPARE_CONFIG_ARGS='--run coremark --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst'
+perf20-sim:
+	@$(MAKE) sim-prepare SIM_PROFILE=clean SIM_SUITE=perf20 SIM_WORKLOADS="$(PERF20_WORKLOADS)" RUN_SOFTWARE=coremark
+	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" --workspace "$(ROOT_DIR)" \
+		--artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
+		--profile clean --suite perf20 --memory-mode ideal --workloads "$(PERF20_WORKLOADS)" \
+		--seeds 0 --lanes "$(SIM_LANES)" --time-limit "$(PERF20_TIME_LIMIT)" \
+		--sim-path "$(CONTAINER_SIM_PATH)" --allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
 
-perf20-sim: perf20-prepare
-	$(MAKE) sim-matrix \
-		SIM_PROFILE=clean \
-		SIM_SUITE=perf20 \
-		SIM_MEMORY_MODE=ideal \
-		SIM_WORKLOADS="$(PERF20_WORKLOADS)" \
-		SIM_SEEDS=0 \
-		SIM_LANES="$(OFFICIAL_SIM_LANES)" \
-		SIM_ALLOW_THREE=1 \
-		SIM_LANE_PEAK_MB="$(OFFICIAL_SIM_LANE_PEAK_MB)" \
-		TIME_LIMIT="$(PERF20_TIME_LIMIT)"
+linux-sim: cpu-generate
+	@$(MAKE) sim RUN_SOFTWARE=linux SIM_WORKLOADS=linux
 
 wave:
-	@test -f "$(WAVE)" || { printf 'waveform not found: %s\n' "$(WAVE)" >&2; exit 1; }
-	@test -f "$(SURFER)" || { printf 'Surfer not found: %s\n' "$(SURFER)" >&2; exit 1; }
+	@test -f "$(SURFER)" || { printf 'Surfer 不存在: %s\n' "$(SURFER)" >&2; exit 1; }
+	@test -n "$(WAVE)" || { printf '请指定 WAVE=/absolute/path/to/file.fst\n' >&2; exit 2; }
 	"$(SURFER)" "$$(wslpath -w "$(WAVE)")"
 
-soc-project: cpu-generate
-	@perf_dir="$$(realpath -m -- "$(SOC_PERF_CHIPLAB_DIR)")"; \
-	case "$$perf_dir" in \
-		"$(ROOT_DIR)"/build/*) ;; \
-		*) printf 'SOC_PERF_CHIPLAB_DIR must be below %s/build\n' "$(ROOT_DIR)" >&2; exit 2 ;; \
-	esac; \
-	rm -rf -- "$$perf_dir"; \
-	mkdir -p "$$perf_dir"
-	git -C "$(CHIPLAB_HOME)" archive "$(CHIPLAB_COMMIT)" | \
-		tar -xf - -C "$(SOC_PERF_CHIPLAB_DIR)"
-	rm -rf "$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU"
-	mkdir -p "$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/data_bank_sram"
-	mkdir -p "$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/tagv_sram"
-	install -m 0644 "$(CPU_DIR)/rtl/mycpu_top.v" \
-		"$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/mycpu_top.v"
-	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/data_bank_sram.xcix" \
-		"$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/data_bank_sram/data_bank_sram.xcix"
-	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/tagv_sram.xcix" \
-		"$(SOC_PERF_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/tagv_sram/tagv_sram.xcix"
-	sed -i '2s|.*|// `define RUN_FUNC_TEST|' \
-		"$(SOC_PERF_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/soc_config.vh"
-	sed -i '3s|.*|`define RUN_PERF_TEST|' \
-		"$(SOC_PERF_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/soc_config.vh"
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch \
-		-source generate_perf_pll.tcl -tclargs "$(PERF_CPU_MHZ)" \
-		"$(SOC_PLATFORM_IP_DIR)/clk_pll/clk_pll.xci" \
-		"$(SOC_RUN_DIR)/perf_clock_generated.txt"
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch -source create_project.tcl
-
-soc-impl: soc-project
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch -source bit.tcl \
-		-tclargs perf "$(PERF_CPU_MHZ)"
-	@set +e; \
-	$(MAKE) soc-timing-check; \
-	timing_status=$$?; \
-	set -e; \
-	$(MAKE) soc-archive SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"; \
-	exit "$$timing_status"
+soc-impl: cpu-generate
+	@VIVADO="$(VIVADO)" PERF_CPU_MHZ="$(PERF_CPU_MHZ)" \
+		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-perf"
 
 soc-func: cpu-generate
-	@func_dir="$$(realpath -m -- "$(SOC_FUNC_CHIPLAB_DIR)")"; \
-	case "$$func_dir" in \
-		"$(ROOT_DIR)"/build/*) ;; \
-		*) printf 'SOC_FUNC_CHIPLAB_DIR must be below %s/build\n' "$(ROOT_DIR)" >&2; exit 2 ;; \
-	esac; \
-	rm -rf -- "$$func_dir"; \
-	mkdir -p "$$func_dir"
-	git -C "$(CHIPLAB_HOME)" archive "$(CHIPLAB_COMMIT)" | \
-		tar -xf - -C "$(SOC_FUNC_CHIPLAB_DIR)"
-	rm -rf "$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU"
-	mkdir -p "$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/data_bank_sram"
-	mkdir -p "$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/tagv_sram"
-	install -m 0644 "$(CPU_DIR)/rtl/mycpu_top.v" \
-		"$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/mycpu_top.v"
-	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/data_bank_sram.xcix" \
-		"$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/data_bank_sram/data_bank_sram.xcix"
-	install -m 0644 "$(CPU_DIR)/xilinx_ip/sram/tagv_sram.xcix" \
-		"$(SOC_FUNC_CHIPLAB_DIR)/IP/myCPU/xilinx_ip/tagv_sram/tagv_sram.xcix"
-	sed -i '2s|.*|`define RUN_FUNC_TEST|' \
-		"$(SOC_FUNC_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/soc_config.vh"
-	sed -i '3s|.*|// `define RUN_PERF_TEST|' \
-		"$(SOC_FUNC_CHIPLAB_DIR)/chip/soc_demo/nscscc-team/soc_config.vh"
-	cd "$(SOC_FUNC_RUN_DIR)" && "$(VIVADO)" -mode batch \
-		-source create_project.tcl
-	cd "$(SOC_FUNC_RUN_DIR)" && "$(VIVADO)" -mode batch \
-		-source bit.tcl -tclargs func
-	$(MAKE) soc-archive \
-		CHIPLAB_HOME="$(SOC_FUNC_CHIPLAB_DIR)" \
-		CHIPLAB_COMMIT="$(CHIPLAB_COMMIT)" \
-		SOC_IMPL_DIR="$(SOC_FUNC_IMPL_DIR)" \
-		SOC_ARCHIVE_NAME=func \
-		SOC_ARCHIVE_REQUESTED_CPU_MHZ=platform-default \
-		SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
-
-soc-archive:
-	@set -eu; \
-	case "$(SOC_ARCHIVE_CLASS)" in \
-		candidate|stable) ;; \
-		*) printf 'SOC_ARCHIVE_CLASS must be candidate or stable\n' >&2; exit 2 ;; \
-	esac; \
-	validation="$(SOC_IMPL_DIR)/clock_timing_validation.txt"; \
-	cpu_short="$$(git -C "$(CPU_DIR)" rev-parse --short=12 HEAD)"; \
-	if [[ -e "$(CHIPLAB_HOME)/.git" ]]; then \
-		chiplab_commit="$$(git -C "$(CHIPLAB_HOME)" rev-parse HEAD)"; \
-	else \
-		chiplab_commit="$(CHIPLAB_COMMIT)"; \
-	fi; \
-	chiplab_short="$$(printf '%.12s' "$$chiplab_commit")"; \
-	for artifact in \
-		"$(CPU_DIR)/rtl/mycpu_top.v" \
-		"$(SOC_IMPL_DIR)/soc_top.bit" \
-		"$(SOC_IMPL_DIR)/soc_top.ltx" \
-		"$(SOC_IMPL_DIR)/soc_top_routed.dcp" \
-		"$(SOC_IMPL_DIR)/timing_summary.rpt" \
-		"$$validation" \
-		"$(SOC_IMPL_DIR)/soc_top_drc_routed.rpt"; do \
-		test -s "$$artifact" || { \
-			printf 'implementation artifact missing or empty: %s\n' "$$artifact" >&2; \
-			exit 1; \
-		}; \
-	done; \
-	build_time="$$(date -r "$$validation" +%Y%m%d-%H%M%S)"; \
-	archive="$(ROOT_DIR)/Stable_Backup/cpu_$${cpu_short}_chiplab_$${chiplab_short}_$(SOC_ARCHIVE_NAME)_$${build_time}_$(SOC_ARCHIVE_CLASS)"; \
-	if awk -F= ' \
-		$$1 == "setup_wns_ns" { setup=$$2; have_setup=1 } \
-		$$1 == "hold_wns_ns" { hold=$$2; have_hold=1 } \
-		END { exit !(have_setup && have_hold && setup >= 0 && hold >= 0) } \
-	' "$$validation"; then \
-		timing_status=pass; \
-	else \
-		timing_status=fail; \
-	fi; \
-	if [[ "$(SOC_ARCHIVE_CLASS)" == stable && "$$timing_status" != pass ]]; then \
-		printf 'cannot mark negative-slack implementation as stable\n' >&2; \
-		exit 1; \
-	fi; \
-	if [[ -e "$$archive" ]]; then \
-		printf 'implementation artifacts already archived: %s\n' "$$archive"; \
-		exit 0; \
-	fi; \
-	mkdir -p "$$archive"; \
-	install -m 0644 "$(CPU_DIR)/rtl/mycpu_top.v" "$$archive/mycpu_top.v"; \
-	for file in soc_top.bit soc_top.ltx soc_top_routed.dcp timing_summary.rpt \
-		clock_timing_validation.txt soc_top_drc_routed.rpt; do \
-		install -m 0644 "$(SOC_IMPL_DIR)/$$file" "$$archive/$$file"; \
-	done; \
-	{ \
-		printf 'artifact_class=%s\n' "$(SOC_ARCHIVE_CLASS)"; \
-		printf 'timing_status=%s\n' "$$timing_status"; \
-		printf 'cpu_commit=%s\n' "$$(git -C "$(CPU_DIR)" rev-parse HEAD)"; \
-		printf 'chiplab_commit=%s\n' "$$chiplab_commit"; \
-		printf 'requested_cpu_mhz=%s\n' "$(SOC_ARCHIVE_REQUESTED_CPU_MHZ)"; \
-		for file in mycpu_top.v soc_top.bit soc_top.ltx soc_top_routed.dcp \
-			timing_summary.rpt clock_timing_validation.txt soc_top_drc_routed.rpt; do \
-			printf '%s_sha256=%s\n' "$${file//./_}" \
-				"$$(sha256sum "$$archive/$$file" | awk '{print $$1}')"; \
-		done; \
-		printf '%s\n' 'clock_timing_validation:'; \
-		sed 's/^/  /' "$$archive/clock_timing_validation.txt"; \
-	} > "$$archive/manifest.txt"; \
-	printf '%s implementation (%s timing) archived: %s\n' \
-		"$(SOC_ARCHIVE_CLASS)" "$$timing_status" "$$archive"
-
-soc-incremental-reference:
-	@test -f "$(SOC_INCREMENTAL_REFERENCE_SOURCE)" || { \
-		printf 'incremental reference DCP not found: %s\n' \
-			"$(SOC_INCREMENTAL_REFERENCE_SOURCE)" >&2; \
-		exit 1; \
-	}
-	@mkdir -p "$(dir $(SOC_INCREMENTAL_REFERENCE_DCP))"
-	install -m 0644 "$(SOC_INCREMENTAL_REFERENCE_SOURCE)" \
-		"$(SOC_INCREMENTAL_REFERENCE_DCP)"
-	@dcp_hash="$$(sha256sum "$(SOC_INCREMENTAL_REFERENCE_DCP)" | awk '{print $$1}')"; \
-	rtl_hash="$$(sha256sum "$(CPU_DIR)/rtl/mycpu_top.v" | awk '{print $$1}')"; \
-	{ \
-		printf 'reference_dcp=%s\n' "$(SOC_INCREMENTAL_REFERENCE_DCP)"; \
-		printf 'reference_dcp_sha256=%s\n' "$$dcp_hash"; \
-		printf 'source_dcp=%s\n' "$(SOC_INCREMENTAL_REFERENCE_SOURCE)"; \
-		printf 'chiplab_head=%s\n' \
-			"$$(git -C "$(CHIPLAB_HOME)" rev-parse HEAD)"; \
-		printf 'cpu_head_at_staging=%s\n' \
-			"$$(git -C "$(CPU_DIR)" rev-parse HEAD)"; \
-		printf 'workspace_rtl_sha256_at_staging=%s\n' "$$rtl_hash"; \
-		printf '%s\n' \
-			'provenance_note=workspace CPU/RTL values describe staging context; the DCP itself does not embed a source commit or RTL hash'; \
-	} > "$(SOC_INCREMENTAL_REFERENCE_MANIFEST)"
-	@printf 'incremental reference: %s\n' "$(SOC_INCREMENTAL_REFERENCE_DCP)"
-	@sha256sum "$(SOC_INCREMENTAL_REFERENCE_DCP)"
-
-soc-impl-incremental: soc-incremental-reference
-	@case "$(SOC_TIMING_POLICY)" in \
-		strict|report) ;; \
-		*) printf 'SOC_TIMING_POLICY must be strict or report\n' >&2; exit 2 ;; \
-	esac
-	$(MAKE) soc-project
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch \
-		-source "$(ROOT_DIR)/tools/vivado/configure_incremental_impl.tcl" \
-		-tclargs "$(SOC_PROJECT_XPR)" "$(SOC_INCREMENTAL_REFERENCE_DCP)"
-	@set +e; \
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch -source bit.tcl \
-		-tclargs perf "$(PERF_CPU_MHZ)"; \
-	bit_status=$$?; \
-	cd "$(SOC_RUN_DIR)" && "$(VIVADO)" -mode batch \
-		-source "$(ROOT_DIR)/tools/vivado/report_incremental_reuse.tcl" \
-		-tclargs "$(SOC_PROJECT_XPR)" "$(SOC_INCREMENTAL_REUSE_REPORT)"; \
-	report_status=$$?; \
-	set -e; \
-	(( report_status == 0 )) || exit "$$report_status"; \
-	if (( bit_status != 0 )); then \
-		if [[ "$(SOC_TIMING_POLICY)" != report ]]; then \
-			exit "$$bit_status"; \
-		fi; \
-		validation="$(SOC_IMPL_DIR)/clock_timing_validation.txt"; \
-		bitstream="$(SOC_IMPL_DIR)/soc_top.bit"; \
-		test -s "$$validation" && test -s "$$bitstream" || { \
-			printf 'Vivado failed before producing a validated comparison bitstream\n' >&2; \
-			exit "$$bit_status"; \
-		}; \
-		awk -F= -v expected="$(PERF_CPU_MHZ)" ' \
-			$$1 == "actual_cpu_mhz" { cpu=$$2 } \
-			$$1 == "actual_sys_mhz" { sys=$$2 } \
-			$$1 == "actual_ddr_mhz" { ddr=$$2 } \
-			$$1 == "setup_wns_ns" { setup=$$2 } \
-			$$1 == "hold_wns_ns" { hold=$$2 } \
-			END { \
-				tol=expected * 0.01; if (tol < 0.001) tol=0.001; \
-				dcpu=cpu-expected; if (dcpu < 0) dcpu=-dcpu; \
-				exit !((dcpu <= tol) && sys == 100 && ddr == 200 && \
-					(setup < 0 || hold < 0)); \
-			} \
-		' "$$validation" || { \
-			printf 'Vivado failure was not an allowed negative-slack comparison result\n' >&2; \
-			exit "$$bit_status"; \
-		}; \
-		printf 'comparison bitstream retained despite negative slack (SOC_TIMING_POLICY=report)\n'; \
-	fi
-	@if [[ "$(SOC_TIMING_POLICY)" == strict ]]; then \
-		$(MAKE) soc-timing-check; \
-	else \
-		$(MAKE) soc-timing; \
-	fi
-	$(MAKE) soc-incremental-archive
-
-soc-incremental-archive:
-	@set -u; \
-	cpu_short="$$(git -C "$(CPU_DIR)" rev-parse --short=12 HEAD)"; \
-	chiplab_short="$$(git -C "$(CHIPLAB_HOME)" rev-parse --short=12 HEAD)"; \
-	archive="$(ROOT_DIR)/Stable_Backup/cpu_$${cpu_short}_chiplab_$${chiplab_short}_incremental_$(PERF_CPU_MHZ)mhz"; \
-	for artifact in \
-		"$(CPU_DIR)/rtl/mycpu_top.v" \
-		"$(SOC_IMPL_DIR)/soc_top.bit" \
-		"$(SOC_IMPL_DIR)/soc_top_routed.dcp" \
-		"$(SOC_IMPL_DIR)/timing_summary.rpt" \
-		"$(SOC_IMPL_DIR)/clock_timing_validation.txt" \
-		"$(SOC_IMPL_DIR)/soc_top_drc_routed.rpt" \
-		"$(SOC_IMPL_DIR)/soc_top_incremental_reuse_routed.rpt" \
-		"$(SOC_INCREMENTAL_REUSE_REPORT)" \
-		"$(SOC_INCREMENTAL_REFERENCE_MANIFEST)"; do \
-		test -s "$$artifact" || { \
-			printf 'incremental artifact missing or empty: %s\n' "$$artifact" >&2; \
-			exit 1; \
-		}; \
-	done; \
-	mkdir -p "$$archive"; \
-	install -m 0644 "$(CPU_DIR)/rtl/mycpu_top.v" "$$archive/mycpu_top.v"; \
-	install -m 0644 "$(SOC_IMPL_DIR)/soc_top.bit" "$$archive/soc_top.bit"; \
-	install -m 0644 "$(SOC_IMPL_DIR)/soc_top_routed.dcp" \
-		"$$archive/soc_top_routed.dcp"; \
-	install -m 0644 "$(SOC_IMPL_DIR)/timing_summary.rpt" \
-		"$$archive/timing_summary.rpt"; \
-	install -m 0644 "$(SOC_IMPL_DIR)/clock_timing_validation.txt" \
-		"$$archive/clock_timing_validation.txt"; \
-	install -m 0644 "$(SOC_IMPL_DIR)/soc_top_drc_routed.rpt" \
-		"$$archive/soc_top_drc_routed.rpt"; \
-	install -m 0644 "$(SOC_IMPL_DIR)/soc_top_incremental_reuse_routed.rpt" \
-		"$$archive/incremental_reuse_routed.rpt"; \
-	install -m 0644 "$(SOC_INCREMENTAL_REUSE_REPORT)" \
-		"$$archive/incremental_reuse_hierarchical.rpt"; \
-	install -m 0644 "$(SOC_INCREMENTAL_REFERENCE_MANIFEST)" \
-		"$$archive/reference_manifest.txt"; \
-	{ \
-		printf 'cpu_commit=%s\n' "$$(git -C "$(CPU_DIR)" rev-parse HEAD)"; \
-		printf 'chiplab_commit=%s\n' "$$(git -C "$(CHIPLAB_HOME)" rev-parse HEAD)"; \
-		printf 'requested_cpu_mhz=%s\n' "$(PERF_CPU_MHZ)"; \
-		printf 'reference_dcp_sha256=%s\n' \
-			"$$(sha256sum "$(SOC_INCREMENTAL_REFERENCE_DCP)" | awk '{print $$1}')"; \
-		for file in mycpu_top.v soc_top.bit soc_top_routed.dcp timing_summary.rpt \
-			clock_timing_validation.txt soc_top_drc_routed.rpt \
-			incremental_reuse_routed.rpt incremental_reuse_hierarchical.rpt \
-			reference_manifest.txt; do \
-			printf '%s_sha256=%s\n' "$${file//./_}" \
-				"$$(sha256sum "$$archive/$$file" | awk '{print $$1}')"; \
-		done; \
-		printf '%s\n' 'clock_timing_validation:'; \
-		sed 's/^/  /' "$$archive/clock_timing_validation.txt"; \
-	} > "$$archive/manifest.txt"; \
-	printf 'incremental artifacts archived: %s\n' "$$archive"
-
-soc-perf: soc-impl
+	@VIVADO="$(VIVADO)" PERF_CPU_MHZ=32.726797 \
+		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-func"
 
 soc-timing:
-	@report="$(SOC_TIMING_REPORT)"; \
-	test -f "$$report" || { printf 'timing report not found: %s\n' "$$report" >&2; exit 1; }; \
-	rg -n 'Design Timing Summary|WNS\(ns\)|TNS\(ns\)|WHS\(ns\)|THS\(ns\)|Timing constraints are not met|All user specified timing constraints are met' "$$report"
+	@find "$(BUILD_ROOT)" -name timing_summary.rpt -print | sort | tail -1 | xargs -r rg -n "WNS|TNS|Slack|Timing"
 
-soc-timing-check:
-	@report="$(SOC_TIMING_REPORT)"; \
-	test -f "$$report" || { printf 'timing report not found: %s\n' "$$report" >&2; exit 1; }; \
-	summary="$$(awk -f "$(ROOT_DIR)/tools/vivado/parse_timing_summary.awk" \
-		"$$report")" || { \
-		printf 'cannot parse timing summary: %s\n' "$$report" >&2; \
-		exit 1; \
-	}; \
-	read -r wns tns whs ths <<< "$$summary"; \
-	printf 'complete-SoC timing: WNS=%s ns TNS=%s ns WHS=%s ns THS=%s ns\n' \
-		"$$wns" "$$tns" "$$whs" "$$ths"; \
-	awk -v wns="$$wns" -v tns="$$tns" -v whs="$$whs" -v ths="$$ths" \
-		'BEGIN { exit !((wns + 0) >= 0 && (tns + 0) == 0 && (whs + 0) >= 0 && (ths + 0) == 0) }' || { \
-		printf 'timing gate failed: setup and hold slack must be nonnegative, TNS/THS must be zero\n' >&2; \
-		exit 1; \
-	}
+clean-build:
+	@python3 scripts/common/clean.py build
+
+clean-cpu:
+	@python3 scripts/common/clean.py cpu
+
+clean-sim:
+	@python3 scripts/common/clean.py sim
+
+clean-vivado:
+	@python3 scripts/common/clean.py vivado
+
+clean-chiplab:
+	@scripts/chiplab/clean-generated.sh "$(CHIPLAB_HOME)"
+
+clean-ide-state:
+	@python3 scripts/common/clean.py ide
+
+clean: clean-build clean-cpu clean-sim clean-vivado
+
+clean-all: clean clean-chiplab clean-ide-state
