@@ -1,0 +1,54 @@
+schema_version: 2
+updated_at: "2026-08-05T23:16:00+08:00"
+branch: dev/ECHO
+
+active_candidate:
+  core_name: MIKU
+  core_name_expansion: "MIKU Is Kinda Unordered"
+  source_commit: 42d9f36
+  equivalent_rtl_commit: 2c11ca6730a94b26e2de74eb33a4a1568ab9ad92
+  generated_rtl_sha256: 0625976bcfc430c7084f9e4dcb7bb7bf391714b474150b994aa29201526d986a
+  chiplab_commit: c398d274812f164d387146fa7d8f612a4a1296d9
+  requested_cpu_mhz: 100
+  actual_cpu_mhz: 100
+  source_state: "committed; only the pre-existing deleted AGENTS.md remains dirty"
+  namespace_migration:
+    from: openla500
+    to: miku
+    rtl_byte_identical_before_generation_recheck: true
+    external_interface_changed: false
+
+local_gates:
+  command: make cpu-check
+  status: passed
+  scala_suites: 39
+  scala_tests: 202
+  python_tests: 364
+  port_contract: passed
+  yosys_structure: passed
+  publication_consistency: passed
+  verilator_lint:
+    status: passed
+    reviewed_warnings: 861
+    categories: [CMPCONST, UNUSEDSIGNAL]
+
+matching_complete_soc:
+  status: not_yet_accepted
+  evidence_rule: "setup and hold must be nonnegative, DRC errors zero, and bitstream complete for the exact RTL hash"
+
+matching_board_evaluation:
+  status: not_run
+  evidence_rule: "old candidate perf20 and func58 results are historical and are not inherited"
+
+performance_simulation:
+  status: skipped_for_final_schedule
+  evidence_rule: "no perf20 cycle claim is attached to this exact candidate"
+
+linux_acceptance:
+  status: not_satisfied
+  latest_local_milestone: kernel_early_boot
+  missing: "matching hardware boot through interactive shell and required system operations"
+
+history_policy:
+  summary: "Previous candidate timing, simulation, and board records remain in Git history and Stable_Backup only."
+  inheritance: forbidden_across_rtl_hashes
