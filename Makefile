@@ -31,6 +31,7 @@ SIM_SEEDS ?= $(AXI_SEED)
 SIM_LANES ?= 2
 SIM_ALLOW_THREE ?= 0
 SIM_LANE_PEAK_MB ?=
+SIM_REBUILD ?= 0
 PERF_CPU_MHZ ?= 100
 CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
 PERF20_TIME_LIMIT ?= 600000000
@@ -57,7 +58,7 @@ help:
 		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
 		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
 		'  make sim                单个软件仿真（RUN_SOFTWARE 可覆盖）' \
-		'  make sim-prepare        生成一次隔离 Chiplab/Verilator 模型' \
+		'  make sim-prepare        生成或复用内容寻址的 Chiplab/Verilator 模型' \
 		'  make sim-matrix         独立 workload/seed 并行运行' \
 		'  make func58-sim         全 func58 固定 seeds' \
 		'  make perf20-sim         完整 perf20（包含 stringsearch）' \
@@ -66,7 +67,8 @@ help:
 		'  make wave WAVE=...      用宿主机 Surfer 查看波形' \
 		'  make clean              清理可再生构建输出，保留 IDE 状态' \
 		'  make clean-all          额外清理显式 IDE 状态' '' \
-		'路径覆盖：VIVADO_HOME VIVADO SURFER CHIPLAB_TOOLCHAINS DOCKER_IMAGE JOBS SIM_LANES'
+		'路径覆盖：VIVADO_HOME VIVADO SURFER CHIPLAB_TOOLCHAINS DOCKER_IMAGE JOBS SIM_LANES' \
+		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项'
 
 doctor:
 	@WORKSPACE_ROOT=$(ROOT_DIR) VIVADO=$(VIVADO) SURFER=$(SURFER) DOCKER_IMAGE=$(DOCKER_IMAGE) \
@@ -147,7 +149,8 @@ sim-prepare: cpu-generate
 		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
 		--profile "$(SIM_PROFILE)" --suite "$(SIM_SUITE)" --workloads "$(SIM_WORKLOADS)" \
 		--config-args '--run $(RUN_SOFTWARE) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst' \
-		--jobs "$(JOBS)" --sim-path "$(CONTAINER_SIM_PATH)" --verilator-home /usr/share/verilator --extra-libs '-llz4'
+		--jobs "$(JOBS)" --sim-path "$(CONTAINER_SIM_PATH)" --verilator-home /usr/share/verilator --extra-libs '-llz4' \
+		--rebuild "$(SIM_REBUILD)"
 
 sim-matrix:
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" \

@@ -113,7 +113,10 @@ def validate_generation_manifest(document: dict[str, Any]) -> None:
 
 
 def validate_sim_result(document: dict[str, Any]) -> None:
-    required = {"schema_version", "status", "workload", "seed", "cycles", "model_sha256", "end_reason"}
+    required = {
+        "schema_version", "status", "workload", "seed", "cycles",
+        "model_sha256", "model_key", "software_key", "end_reason",
+    }
     if not required.issubset(document):
         raise ContractError(f"仿真结果缺少字段: {sorted(required - set(document))}")
     if document["status"] not in {"pass", "fail", "timeout", "error"}:
@@ -124,6 +127,11 @@ def validate_sim_result(document: dict[str, Any]) -> None:
         raise ContractError("仿真 cycles 必须是非负整数")
     if re.fullmatch(r"[0-9a-f]{64}", str(document["model_sha256"])) is None:
         raise ContractError("仿真模型哈希错误")
+    if document["schema_version"] != 2:
+        raise ContractError("仿真结果 schema 版本错误")
+    for key in ("model_key", "software_key"):
+        if re.fullmatch(r"[0-9a-f]{64}", str(document[key])) is None:
+            raise ContractError(f"仿真缓存身份错误: {key}")
 
 
 def classify_failure(message: str) -> str:

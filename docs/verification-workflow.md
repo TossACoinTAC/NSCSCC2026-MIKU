@@ -14,9 +14,9 @@
    运行候选。测试失败先归类为 config/harness/artifact/DUT。
 4. **廉价门禁**：单个 ScalaTest suite、全 ScalaTest、Python 黑盒合同、Spinal
    生成和公开 `core_top` 端口检查。失败时不启动长仿真或 Vivado。
-5. **隔离仿真**：`sim-prepare` 只生成一次只读模型；每个 workload/seed 使用独立
-   `ram.dat`、tmp、日志和 `sim-result.json`。func58 使用固定三个 AXI seed；perf20
-   一次跑完整 20 项，包含 `stringsearch`。
+5. **隔离仿真**：`sim-prepare` 按内容身份生成或复用只读平台、模型和软件缓存；每个
+   workload/seed 使用独立 `ram.dat`、tmp、日志和 `sim-result.json`。func58 使用固定
+   三个 AXI seed；perf20 一次跑完整 20 项，包含 `stringsearch`。
 6. **性能归因**：保存每项 cycles、end reason、模型 hash 和 seed。对前端、后端、
    LSU/cache、memory/AXI、DIV 和 predictor 只使用同一 baseline 的 paired A/B；
    不用几何平均掩盖单项退化。
@@ -29,7 +29,8 @@
 
 ## 二、并行与流水线
 
-模型编译、SBT 和 Vivado implementation 遵守独占约束。模型编译完成后最多两个隔离
+模型缓存未命中时，模型编译、SBT 和 Vivado implementation 遵守独占约束。模型编译完成
+后最多两个隔离
 Verilator runtime；以 `free -h` 的 `available` 和实测 lane 峰值为依据，不能只看宿主机
 任务管理器百分比。Vivado 运行期间可以做只读文档、manifest 计算和短 Python 合同测试，
 但不启动另一个 Vivado、SBT 或长仿真。
@@ -53,6 +54,24 @@ CPU 修改
 同一轮可以累积多个高优先级、相互独立的候选，再做一次综合；但每项仍保留独立
 `unique perf pairs`，不能因为组合收益好就掩盖某项正确性或时序退化。若综合未收敛，
 先保存失败路径作为下一轮信息，不把负 WNS 候选标成稳定版本。
+
+### 仿真缓存合同
+
+`build/sim/cache/` 下的三层缓存分别承担不同身份：
+
+- `platforms/` 是按 Chiplab 锁定提交导出的持久只读平台树，本地 Chiplab dirty patch
+  不进入模型输入，也不再为每次仿真创建临时快照；
+- `models/` 由平台 key、生成 RTL hash、harness patch、配置参数和 Verilator 工具身份
+  共同寻址，只在这些编译输入变化时重新翻译 Verilog、编译 C++ 并链接模型；
+- `software/` 由 suite、workload 集、软件输入 hash 和 staging 工具寻址。官方 func58 和
+  perf20 使用 Chiplab 已锁定的 object，不会因重复执行 `make perf20-sim` 重新编译；
+- `prepared/` 只保存本次请求到三层缓存的不可变引用及 dirty patch 证据；`runs/` 再按
+  model/software/workload/seed/memory mode 隔离运行输出。
+
+缓存命中前必须复核 manifest、模型 hash、软件文件 hash 和当前 RTL hash。任何不一致都
+归为 `artifact`，不得启动仿真。`SIM_REBUILD=1 make sim-prepare ...` 可显式重建当前身份的
+平台、模型和软件项；`make clean-sim` 才会删除整套仿真缓存。cache key 只包含实际编译或
+运行输入，文档提交和 Git 提交号仅作 provenance，因此无关提交不会强制重编模型。
 
 ## 三、失败分类与证据
 
@@ -83,3 +102,8 @@ forwarding、dirty writeback 或 uncached ordering 问题时，即使只来自�
 不删 `.vscode/`、`.bsp/`、`.metals/`、`.scala-build/`、`Post_Impl_Bundles/`、
 `Stable_Backup/`、Chiplab toolchains 或任何嵌套仓库源码。`make clean-ide-state` 和
 `make clean-chiplab` 是显式操作，范围分别见 Makefile 和脚本。
+
+SBT 可能生成 `cpu/target/`、`cpu/project/target/` 和
+`cpu/project/project/target/`。最后一个目录是元构建的编译状态，不表示源码中嵌套了
+第二个 `project/`；三者都被忽略，并由 `make clean-cpu` 清理。正式源码入口仍只有
+`cpu/build.sbt` 与 `cpu/project/{build.properties,plugins.sbt}`。

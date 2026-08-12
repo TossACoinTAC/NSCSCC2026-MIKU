@@ -42,6 +42,7 @@ trap cleanup EXIT
 gcc -O2 -o "$converter_dir/convert" "$chiplab_dir/software/bsp/env/convert.c"
 
 IFS=',' read -r -a workload_list <<< "$workloads"
+template_object_dir=
 for workload in "${workload_list[@]}"; do
   if [[ $workload != perf20/* ]]; then
     printf 'perf20 workload must use perf20/<benchmark>, got %s\n' "$workload" >&2
@@ -54,8 +55,15 @@ for workload in "${workload_list[@]}"; do
   fi
   object_dir="$run_dir/obj/${workload}_obj/obj"
   mkdir -p "$object_dir"
-  install -m 0444 "$source_dir/main.elf" "$object_dir/main.elf"
-  install -m 0444 "$source_dir/inst_data.bin" "$object_dir/inst_data.bin"
-  install -m 0444 "$source_dir/test.s" "$object_dir/test.s"
-  "$converter_dir/convert" inst_data.bin "$object_dir/"
+  if [[ -z $template_object_dir ]]; then
+    install -m 0444 "$source_dir/main.elf" "$object_dir/main.elf"
+    install -m 0444 "$source_dir/inst_data.bin" "$object_dir/inst_data.bin"
+    install -m 0444 "$source_dir/test.s" "$object_dir/test.s"
+    "$converter_dir/convert" inst_data.bin "$object_dir/"
+    template_object_dir=$object_dir
+  else
+    while IFS= read -r -d '' file; do
+      ln "$file" "$object_dir/${file##*/}"
+    done < <(find "$template_object_dir" -maxdepth 1 -type f -print0)
+  fi
 done

@@ -11,8 +11,10 @@ from contracts import ContractError, classify_failure, validate_sim_result
 class SimulationContractTest(unittest.TestCase):
     def test_result(self) -> None:
         validate_sim_result({
-            "schema_version": 1, "status": "pass", "workload": "perf20/coremark",
-            "seed": 1, "cycles": 123, "model_sha256": "a" * 64, "end_reason": "test_finish",
+            "schema_version": 2, "status": "pass", "workload": "perf20/coremark",
+            "seed": 1, "cycles": 123, "model_sha256": "a" * 64,
+            "model_key": "b" * 64, "software_key": "c" * 64,
+            "end_reason": "test_finish",
         })
 
     def test_result_negative(self) -> None:
@@ -23,6 +25,15 @@ class SimulationContractTest(unittest.TestCase):
         self.assertEqual(classify_failure("missing model artifact"), "config")
         self.assertEqual(classify_failure("malformed manifest JSON"), "artifact")
         self.assertEqual(classify_failure("DUT mismatch at commit"), "dut")
+
+    def test_cache_identity_is_required(self) -> None:
+        with self.assertRaises(ContractError):
+            validate_sim_result({
+                "schema_version": 2, "status": "pass", "workload": "func58",
+                "seed": 1, "cycles": 123, "model_sha256": "a" * 64,
+                "model_key": "short", "software_key": "c" * 64,
+                "end_reason": "test_finish",
+            })
 
 
 if __name__ == "__main__":

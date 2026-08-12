@@ -75,6 +75,9 @@ if [[ ! $time_limit =~ ^[0-9]+$ ]]; then
   printf 'TIME_LIMIT must be a nonnegative integer\n' >&2
   exit 2
 fi
+workspace=$(realpath -m "$workspace")
+artifact_root=$(realpath -m "$artifact_root")
+cpu_dir=$(realpath -m "$cpu_dir")
 if [[ $lanes == 3 ]]; then
   available_mb=$(awk '/^MemAvailable:/ {print int($2 / 1024)}' /proc/meminfo)
   if [[ $allow_three != 1 || ! $lane_peak_mb =~ ^[0-9]+$ || $lane_peak_mb -ge 2560 || $available_mb -le 6144 ]]; then
@@ -92,20 +95,43 @@ variant=$profile
 if [[ $suite != standard ]]; then
   variant="$profile-$suite"
 fi
-prepared="$artifact_root/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$variant"
+workload_key=$(printf 'suite=%s\nworkloads=%s\n' "$suite" "$workloads" | sha256sum | awk '{print $1}')
+prepared="$artifact_root/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/${variant}_workloads_${workload_key:0:12}"
 manifest="$prepared/sim-prepared-manifest.txt"
-run_prog="$prepared/sims/verilator/run_prog"
-model="$run_prog/output"
-if [[ ! -f $manifest || ! -x $model ]]; then
-  printf 'prepared model not found for current CPU/profile: %s\n' "$prepared" >&2
+if [[ ! -f $manifest || ! -L $prepared/model || ! -L $prepared/software ]]; then
+  printf 'prepared simulation request not found: %s\n' "$prepared" >&2
   printf 'run make sim-prepare first\n' >&2
   exit 1
 fi
-grep -Fxq "cpu_commit=$cpu_commit" "$manifest"
+model_dir=$(readlink -f "$prepared/model")
+software_dir=$(readlink -f "$prepared/software")
+case "$model_dir/" in
+  "$artifact_root/cache/models/"*) ;;
+  *) printf 'prepared model points outside the simulation cache: %s\n' "$model_dir" >&2; exit 1 ;;
+esac
+case "$software_dir/" in
+  "$artifact_root/cache/software/"*) ;;
+  *) printf 'prepared software points outside the simulation cache: %s\n' "$software_dir" >&2; exit 1 ;;
+esac
+model="$model_dir/sims/verilator/run_prog/output"
+model_manifest="$model_dir/model-manifest.txt"
+software_manifest="$software_dir/software-manifest.txt"
+software_checksums="$software_dir/software-files.sha256"
+if [[ ! -x $model || ! -f $model_manifest || ! -f $software_manifest || ! -f $software_checksums ]]; then
+  printf 'prepared cache entry is incomplete; run make sim-prepare again\n' >&2
+  exit 1
+fi
+grep -Fxq 'format=nscscc-sim-prepared-v3' "$manifest"
 grep -Fxq "cpu_source_sha256=$cpu_source_sha" "$manifest"
 grep -Fxq "chiplab_commit=$chiplab_commit" "$manifest"
 grep -Fxq "profile=$profile" "$manifest"
 grep -Fxq "suite=$suite" "$manifest"
+grep -Fxq "workloads=$workloads" "$manifest"
+grep -Fxq "workload_key=$workload_key" "$manifest"
+model_key=$(awk -F= '$1 == "model_key" {print $2}' "$manifest")
+software_key=$(awk -F= '$1 == "software_key" {print $2}' "$manifest")
+grep -Fxq "model_key=$model_key" "$model_manifest"
+grep -Fxq "software_key=$software_key" "$software_manifest"
 if [[ $suite != standard ]]; then
   expected_patch_sha=$(awk -F= '$1 == "official_software_patch_sha256" {print $2}' "$manifest")
   actual_patch_sha=$(sha256sum "$workspace/scripts/sim/official-software-switch.patch" | awk '{print $1}')
@@ -113,6 +139,10 @@ if [[ $suite != standard ]]; then
     printf 'prepared official-software harness patch is stale; run make sim-prepare again\n' >&2
     exit 1
   fi
+fi
+if ! (cd "$software_dir" && sha256sum -c software-files.sha256 >/dev/null); then
+  printf 'prepared software cache hash mismatch; run make sim-prepare again\n' >&2
+  exit 1
 fi
 expected_model_sha=$(awk -F= '$1 == "model_sha256" {print $2}' "$manifest")
 actual_model_sha=$(sha256sum "$model" | awk '{print $1}')
@@ -127,7 +157,7 @@ if [[ $actual_rtl_sha != "$expected_rtl_sha" ]]; then
   exit 1
 fi
 
-run_root="$artifact_root/runs/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/$variant/$memory_mode"
+run_root="$artifact_root/runs/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/${variant}_model_${model_key:0:12}_software_${software_key:0:12}/$memory_mode"
 mkdir -p "$run_root"
 IFS=',' read -r -a workload_list <<< "$workloads"
 IFS=',' read -r -a seed_list <<< "$seeds"
@@ -149,7 +179,7 @@ run_one() {
   local seed=$2
   local slug=${workload//\//__}
   local lane_dir="$run_root/$slug/seed_$seed/limit_${time_limit}ns"
-  local object_dir="$run_prog/obj/${workload}_obj/obj"
+  local object_dir="$software_dir/obj/${workload}_obj/obj"
   local official_switch_value=ff
   local runtime_switch_value=ff
   local benchmark_index=0
@@ -190,8 +220,8 @@ run_one() {
   mkdir -p "$lane_dir/logs"
   install -m 0644 "$object_dir/rom.vlog" "$lane_dir/rom.vlog"
   install -m 0644 "$object_dir/rom.vlog" "$lane_dir/ram.dat"
-  if [[ -f $run_prog/log/${workload}_log/golden_trace.txt ]]; then
-    install -m 0644 "$run_prog/log/${workload}_log/golden_trace.txt" "$lane_dir/golden_trace.txt"
+  if [[ -f $software_dir/log/${workload}_log/golden_trace.txt ]]; then
+    install -m 0644 "$software_dir/log/${workload}_log/golden_trace.txt" "$lane_dir/golden_trace.txt"
   fi
   local end_pc=0
   local end_pc_strategy=none
@@ -213,7 +243,7 @@ run_one() {
     fi
   fi
   {
-    printf 'format=nscc-sim-run-v2\n'
+    printf 'format=nscscc-sim-run-v3\n'
     printf 'cpu_commit=%s\n' "$cpu_commit"
     printf 'chiplab_commit=%s\n' "$chiplab_commit"
     printf 'profile=%s\n' "$profile"
@@ -227,6 +257,8 @@ run_one() {
     printf 'end_pc=%s\n' "$end_pc"
     printf 'end_pc_strategy=%s\n' "$end_pc_strategy"
     printf 'model_sha256=%s\n' "$actual_model_sha"
+    printf 'model_key=%s\n' "$model_key"
+    printf 'software_key=%s\n' "$software_key"
     printf 'software_rom_sha256=%s\n' "$(sha256sum "$object_dir/rom.vlog" | awk '{print $1}')"
   } > "$lane_dir/run-manifest.txt"
   (
@@ -240,7 +272,7 @@ run_one() {
       switch_args=(--switch "$runtime_switch_value")
     fi
     set +e
-    CHIPLAB_HOME="$prepared" PATH="$sim_path:$PATH" /usr/bin/time -v \
+    CHIPLAB_HOME="$model_dir" PATH="$sim_path:$PATH" /usr/bin/time -v \
       "$model" \
       "${bus_args[@]}" \
       "${switch_args[@]}" \
@@ -336,7 +368,7 @@ EOF
     result_status=pass
     [[ $result == 0 ]] || result_status=fail
     cat > sim-result.json <<EOF
-{"schema_version":1,"status":"$result_status","workload":"$workload","seed":$seed,"cycles":$cycles,"model_sha256":"$actual_model_sha","end_reason":"$verdict"}
+{"schema_version":2,"status":"$result_status","workload":"$workload","seed":$seed,"cycles":$cycles,"model_sha256":"$actual_model_sha","model_key":"$model_key","software_key":"$software_key","end_reason":"$verdict"}
 EOF
     exit "$result"
   )

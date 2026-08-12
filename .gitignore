@@ -12,6 +12,7 @@
 /build/
 /cpu/target/
 /cpu/project/target/
+/cpu/project/project/target/
 **/__pycache__/
 *.pyc
 /.Xil/
