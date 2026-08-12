@@ -48,6 +48,11 @@ XCI，Chiplab 的平台 XCI 保持原位。
 做影响分析、适配 schema/fixture/解析器、先跑 baseline、再跑候选、最后保存
 哈希证据。不得通过删除断言、放宽超时或屏蔽 warning 修复测试。
 
+测试设施修改必须面向稳定的公开接口、结构化结果和硬件外部输入语义，并对后续
+源码演进保持向前兼容；不得为某次源码重命名、某个内部层级或单个 benchmark 添加特判。
+适配完成后必须先证明旧 baseline 仍通过，再用真实端到端 workload 验证候选；源码
+文本匹配不能替代运行时合同。
+
 便宜检查顺序是 Scala/合同测试、RTL 生成和静态门禁、Verilator 定向和多 seed、
 func58/perf20/Linux 软件仿真、Vivado SoC 实现、必要时后仿真，最后才是远程
 板卡。Scala/SBT 同一工作树只运行一个实例；Vivado 实现独占主要资源；隔离

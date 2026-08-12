@@ -11,7 +11,9 @@
    或工具环境变化。每一类声明预期不变量和观测指标。
 3. **测试适配**：根据 `cpu/tests/manifest.yml` 做影响分析；只修改 schema、fixture
    或解析器，不删除 DUT 断言。先用 baseline 验证测试工具能够拒绝一个错误输入，再
-   运行候选。测试失败先归类为 config/harness/artifact/DUT。
+   运行候选。测试设施的修改必须面向稳定公开接口并对源码演进保持向前兼容，不能为某次
+   内部重命名、层级调整或单个 workload 写特判。测试失败先归类为
+   config/harness/artifact/DUT。
 4. **廉价门禁**：单个 ScalaTest suite、全 ScalaTest、Python 黑盒合同、Spinal
    生成和公开 `core_top` 端口检查。失败时不启动长仿真或 Vivado。
 5. **隔离仿真**：`sim-prepare` 按内容身份生成或复用只读平台、模型和软件缓存；每个
@@ -72,6 +74,18 @@ CPU 修改
 归为 `artifact`，不得启动仿真。`SIM_REBUILD=1 make sim-prepare ...` 可显式重建当前身份的
 平台、模型和软件项；`make clean-sim` 才会删除整套仿真缓存。cache key 只包含实际编译或
 运行输入，文档提交和 Git 提交号仅作 provenance，因此无关提交不会强制重编模型。
+
+### 测试设施向前兼容合同
+
+测试与 CPU 内部实现之间只允许通过公开 `core_top`/AXI/debug 合同、软件镜像、仿真
+参数和结构化结果通信。重命名内部类、拆分模块或改变生成层级时，既有测试不应需要
+同步搜索替换。解析器只读取 `sim-result.json`、结果 JSON 和明确的公开日志字段，不以
+Scala/Verilog/C++ 内部符号、源码行号或构造顺序作为断言。
+
+适配验证至少包含三步：旧 baseline 和默认参数继续通过、一个错误输入能被拒绝、一个
+真实端到端 workload 能到达公开结束点并生成完整结果。静态补丁可应用性检查只能证明
+harness 可构建，不能替代运行验证；超时首先与软件启动成本和端点策略比对，不直接
+归为 DUT 回归。
 
 ## 三、失败分类与证据
 

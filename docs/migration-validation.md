@@ -53,3 +53,17 @@ Verilator 零 warning lint、Yosys 结构检查和 16 个 Python 合同测试。
 测试 `.class`、测试报告和 SpinalSim 工作区均位于 `cpu/target/`；SBT 一级元构建输出
 位于 `cpu/project/target/`；RTL 仍发布到 `build/rtl/`。删除未使用的 `sbt-scalafmt`
 插件后，冷构建没有重新生成 `cpu/project/project/`，根目录也没有生成 `build/cpu/`。
+
+软件仿真使用按内容寻址的只读平台、Verilator 模型和软件缓存完成端到端复核。为保持
+测试设施向前兼容，官方软件选择通过通用 `--switch` 参数持续驱动 SoC 顶层拨码输入；
+默认值仍为 `ff`，没有绑定 CPU 内部名称或 dhrystone 特例。clean perf20、ideal memory、
+seed 0 的 dhrystone 到达公开 `test_finish` 端点，LED 均为 1，CPU 周期为 `5887`：
+
+- 模型 key：`fa862138e4f4f09a6f0583a208c42f2628d46a52c809e0d66218cc3e986d9299`
+- 模型 SHA-256：`ad7cbd35418483a2526f14d06fe9ca0585d83d55bd3199dac7710f7f6a51b24d`
+- 软件 key：`5bdd4b294f1bf1f85b70a21cc73928faf8032ef2e9b2b836098fe8562c785912`
+
+最初的 2,000,000 ns smoke 在 allbench 镜像启动搬运阶段超时，按 `config/harness`
+流程排查后将验证窗口调为 20,000,000 ns；最终通过结果来自同一 RTL 和软件镜像，不能
+把前一次未到端点误报为 DUT 失败。未传 `--switch` 的短运行快照仍为 `ff`，证明默认
+行为保持不变。
