@@ -10,12 +10,12 @@ import stat
 
 SCOPES = {
     "build": (
-        "build/cpu", "build/rtl", "build/gates", "build/sim", "build/chiplab",
+        "build/rtl", "build/gates", "build/sim", "build/chiplab",
         "build/vivado", "build/reports", "build/tmp", "build/pre-migration-stringsearch",
     ),
     "cpu": (
         "build/cpu", "build/rtl", "build/gates", "cpu/target", "cpu/project/target",
-        "cpu/project/project/target",
+        "cpu/project/project",
         "cpu/tests/python/__pycache__", "scripts/cpu/__pycache__", "scripts/common/__pycache__",
         "scripts/env/__pycache__",
     ),

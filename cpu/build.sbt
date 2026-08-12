@@ -41,8 +41,6 @@ val spinalVersion = lockedVersion("spinalhdl")
 
 ThisBuild / scalacOptions ++= Seq("-deprecation", "-feature", "-unchecked", "-Werror")
 
-target := file(sys.env.getOrElse("CPU_SBT_TARGET", "target"))
-
 libraryDependencies ++= Seq(
   compilerPlugin("com.github.spinalhdl" %% "spinalhdl-idsl-plugin" % spinalVersion),
   "com.github.spinalhdl" %% "spinalhdl-core" % spinalVersion,

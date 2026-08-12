@@ -99,16 +99,16 @@ chiplab-toolchains:
 cpu-test:
 	@test -n "$(strip $(CPU_TEST))" || { printf 'CPU_TEST 必须是完整 suite 名称\n' >&2; exit 2; }
 	@test -f "$(CPU_DIR)/src/test/scala/$(subst .,/,$(CPU_TEST)).scala" || { printf '找不到 Scala suite: %s\n' "$(CPU_TEST)" >&2; exit 2; }
-	@CPU_SBT_TARGET="$(BUILD_ROOT)/cpu/sbt-target" SPINAL_SIM_WORKSPACE_ROOT="$(BUILD_ROOT)/cpu/test-workspaces" SPINAL_SIM_WORKSPACE="$(BUILD_ROOT)/cpu/test-workspace" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "testOnly $(CPU_TEST)"'
+	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "testOnly $(CPU_TEST)"'
 
 cpu-test-all:
-	@CPU_SBT_TARGET="$(BUILD_ROOT)/cpu/sbt-target" SPINAL_SIM_WORKSPACE_ROOT="$(BUILD_ROOT)/cpu/test-workspaces" SPINAL_SIM_WORKSPACE="$(BUILD_ROOT)/cpu/test-workspace" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch test'
+	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch test'
 
 cpu-generate:
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@rm -rf "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
-	@CPU_SBT_TARGET="$(BUILD_ROOT)/cpu/sbt-target" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw"'
+	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw"'
 	@test -f "$(BUILD_ROOT)/rtl/raw/core_top.v"
 	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" package \
 		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \

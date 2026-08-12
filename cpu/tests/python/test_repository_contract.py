@@ -36,9 +36,19 @@ class RepositoryContractTest(unittest.TestCase):
     def test_cpu_source_boundary(self) -> None:
         self.assertTrue((ROOT / "cpu/build.sbt").is_file())
         self.assertTrue((ROOT / "cpu/src/main/scala").is_dir())
+        self.assertTrue((ROOT / "cpu/project/build.properties").is_file())
+        self.assertFalse((ROOT / "cpu/project/plugins.sbt").exists())
+        self.assertFalse((ROOT / "cpu/project/project").exists())
+        self.assertFalse((ROOT / "build/cpu").exists())
         self.assertFalse((ROOT / "cpu/spinal").exists())
         self.assertFalse((ROOT / "nscscc-cpu").exists())
         self.assertFalse((ROOT / "tools").exists())
+
+        build_definition = (ROOT / "cpu/build.sbt").read_text(encoding="utf-8")
+        container_runner = (ROOT / "scripts/env/run-in-container").read_text(encoding="utf-8")
+        self.assertNotIn("CPU_SBT_TARGET", build_definition)
+        self.assertNotIn("CPU_SBT_TARGET", container_runner)
+        self.assertIn("cpu/target/spinal-sim", container_runner)
 
 
 if __name__ == "__main__":

@@ -22,9 +22,8 @@ exec docker run --rm -i \
   --user "$host_uid:$host_gid" \
   -e HOME=/tmp \
   -e COURSIER_CACHE=/cache/coursier \
-  -e CPU_SBT_TARGET="$workspace_root/build/cpu/sbt-target" \
-  -e SPINAL_SIM_WORKSPACE_ROOT="${SPINAL_SIM_WORKSPACE_ROOT:-$workspace_root/build/cpu/test-workspaces}" \
-  -e SPINAL_SIM_WORKSPACE="${SPINAL_SIM_WORKSPACE:-$workspace_root/build/cpu/test-workspace}" \
+  -e SPINAL_SIM_WORKSPACE_ROOT="${SPINAL_SIM_WORKSPACE_ROOT:-$workspace_root/cpu/target/spinal-sim/workspaces}" \
+  -e SPINAL_SIM_WORKSPACE="${SPINAL_SIM_WORKSPACE:-$workspace_root/cpu/target/spinal-sim/contracts}" \
   -v "$workspace_root:$workspace_root" \
   -v "$cache_volume:/cache" \
   -w "$workdir" \

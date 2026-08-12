@@ -103,7 +103,8 @@ forwarding、dirty writeback 或 uncached ordering 问题时，即使只来自�
 `Stable_Backup/`、Chiplab toolchains 或任何嵌套仓库源码。`make clean-ide-state` 和
 `make clean-chiplab` 是显式操作，范围分别见 Makefile 和脚本。
 
-SBT 可能生成 `cpu/target/`、`cpu/project/target/` 和
-`cpu/project/project/target/`。最后一个目录是元构建的编译状态，不表示源码中嵌套了
-第二个 `project/`；三者都被忽略，并由 `make clean-cpu` 清理。正式源码入口仍只有
-`cpu/build.sbt` 与 `cpu/project/{build.properties,plugins.sbt}`。
+SBT 的普通编译、测试报告和 SpinalSim 工作区统一位于 `cpu/target/`；生成并发布的
+RTL 仍位于 `build/rtl/`。`cpu/project/target/` 是 SBT 读取 `build.properties` 时产生的
+一级元构建输出，属于正常结构。当前工程没有 SBT 插件，因此 `cpu/project/` 只保留
+`build.properties`，不会再形成容易误解的 `cpu/project/project/`。上述两个 `target/`
+均被忽略，并由 `make clean-cpu` 清理；根目录不再使用 `build/cpu/`。
