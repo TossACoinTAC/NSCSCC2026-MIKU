@@ -7,22 +7,22 @@ import spinal.lib._
 final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     extends Component {
   private val loadStorePort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.LoadStore))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
   require(loadStorePort >= 0)
 
   val io = new Bundle {
     val renameValid = in Bits (config.renameWidth bits)
-    val rename = in Vec (OooDecodedUop(config), config.renameWidth)
+    val rename = in Vec (DecodedMicroOp(config), config.renameWidth)
     val renameReady = out Bits (config.renameWidth bits)
 
     val issueValid = out Bits (config.executionWidth bits)
-    val issue = out Vec (OooRenamedUop(config), config.executionWidth)
+    val issue = out Vec (RenamedMicroOp(config), config.executionWidth)
     val issueSource1 = out Vec (Bits(config.xlen bits), config.executionWidth)
     val issueSource2 = out Vec (Bits(config.xlen bits), config.executionWidth)
     val issueReady = in Bits (config.executionWidth bits)
 
     val completionValid = in Bits (config.writebackWidth bits)
-    val completion = in Vec (OooCompletion(config), config.writebackWidth)
+    val completion = in Vec (Completion(config), config.writebackWidth)
     val directWakeupValid = in Bits (config.executionWidth bits)
     val directWakeupPdst =
       in Vec (UInt(config.physicalRegIndexWidth bits), config.executionWidth)
@@ -41,7 +41,7 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     val loadStoreIssueOccupancy = out UInt (log2Up(config.issueQueueEntriesPerPort + 1) bits)
     val storeDataOccupancy = out UInt (log2Up(config.storeQueueEntries + 1) bits)
     val memoryAllocateValid = out Bits (config.renameWidth bits)
-    val memoryAllocate = out Vec (OooLsqAllocate(config), config.renameWidth)
+    val memoryAllocate = out Vec (LoadStoreQueueAllocate(config), config.renameWidth)
     val releaseLoadValid = in Bits (config.commitWidth bits)
     val releaseStoreValid = in Bits (config.commitWidth bits)
     val committedMemoryEpoch = out UInt (config.memoryEpochWidth bits)
@@ -53,29 +53,29 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     val debugReadData = out Bits (config.xlen bits)
 
     val commitValid = out Bits (config.commitWidth bits)
-    val commit = out Vec (OooCommitRecord(config), config.commitWidth)
+    val commit = out Vec (CommitRecord(config), config.commitWidth)
     val recoveryValid = out Bool ()
-    val recovery = out(OooRecoveryRequest(config))
+    val recovery = out(RecoveryRequest(config))
     val predictorUpdateCapacity = in UInt (log2Up(config.commitWidth + 1) bits)
     val flush = in Bool ()
   }
 
-  val registerMap = new OooRegisterMap(config)
-  val freeList = new OooFreeList(config)
-  val rob = new OooRob(config)
-  val lsqAllocator = new OooLsqAllocator(config)
-  val prf = new OooPhysicalRegisterFile(config)
-  val dispatchQueue = new OooDispatchQueue(config)
-  val dispatchWindow = new OooDispatchWindow(config)
-  val router = new OooDispatchRouter(config)
-  val issueQueues = (0 until config.executionWidth).map(index => new OooIssueQueue(config, index))
-  val storeDataQueue = new OooStoreDataQueue(config)
+  val registerMap = new RenameMap(config)
+  val freeList = new PhysicalRegisterFreeList(config)
+  val rob = new ReorderBuffer(config)
+  val lsqAllocator = new LoadStoreQueueAllocator(config)
+  val prf = new PhysicalRegisterFile(config)
+  val dispatchQueue = new DispatchQueue(config)
+  val dispatchWindow = new DispatchWindow(config)
+  val router = new DispatchRouter(config)
+  val issueQueues = (0 until config.executionWidth).map(index => new IssueQueue(config, index))
+  val storeDataQueue = new StoreDataQueue(config)
 
   private val ordinaryIssuePorts = (0 until config.executionWidth).filter(_ != loadStorePort)
   val issueAddressValid = Vec.fill(ordinaryIssuePorts.size)(RegInit(False))
-  val issueAddressUop = Vec.fill(ordinaryIssuePorts.size)(Reg(OooRenamedUop(config)))
+  val issueAddressUop = Vec.fill(ordinaryIssuePorts.size)(Reg(RenamedMicroOp(config)))
   val issueOperandValid = RegInit(B(0, config.executionWidth bits))
-  val issueOperandUop = Vec.fill(config.executionWidth)(Reg(OooRenamedUop(config)))
+  val issueOperandUop = Vec.fill(config.executionWidth)(Reg(RenamedMicroOp(config)))
   val issueOperandSource1 = Vec.fill(config.executionWidth)(Reg(Bits(config.xlen bits)))
   val issueOperandSource2 = Vec.fill(config.executionWidth)(Reg(Bits(config.xlen bits)))
   val recoveryEpoch = Reg(UInt(config.recoveryEpochWidth bits)) init (0)
@@ -86,9 +86,9 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val committedMemoryEpoch = Reg(UInt(config.memoryEpochWidth bits)) init (0)
   val speculativeMemoryEpoch = Reg(UInt(config.memoryEpochWidth bits)) init (0)
 
-  val renamedInput = Vec(OooRenamedUop(config), config.renameWidth)
+  val renamedInput = Vec(RenamedMicroOp(config), config.renameWidth)
   val renamedMemoryEpoch = Vec(UInt(config.memoryEpochWidth bits), config.renameWidth)
-  val dispatchInput = Vec(OooRenamedUop(config), config.renameWidth)
+  val dispatchInput = Vec(RenamedMicroOp(config), config.renameWidth)
   for (lane <- 0 until config.renameWidth) {
     val writesPhysicalDestination =
       io.rename(lane).writesGpr && io.rename(lane).rd =/= 0
@@ -111,9 +111,9 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
       val precedingBarrier = Bits(lane bits)
       for (preceding <- 0 until lane) {
         precedingBarrier(preceding) := io.renameValid(preceding) &&
-          (io.rename(preceding).systemOperation === OooSystemOp.dataBarrier ||
-            io.rename(preceding).systemOperation === OooSystemOp.instructionBarrier ||
-            io.rename(preceding).systemOperation === OooSystemOp.cacheOperation)
+          (io.rename(preceding).systemOperation === SystemOperation.dataBarrier ||
+            io.rename(preceding).systemOperation === SystemOperation.instructionBarrier ||
+            io.rename(preceding).systemOperation === SystemOperation.cacheOperation)
       }
       renamedMemoryEpoch(lane) := speculativeMemoryEpoch +
         CountOne(precedingBarrier).resize(config.memoryEpochWidth)
@@ -230,18 +230,18 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val acceptedBarrier = Bits(config.renameWidth bits)
   for (lane <- 0 until config.renameWidth) {
     acceptedBarrier(lane) := accepted(lane) &&
-      (io.rename(lane).systemOperation === OooSystemOp.dataBarrier ||
-        io.rename(lane).systemOperation === OooSystemOp.instructionBarrier ||
-        io.rename(lane).systemOperation === OooSystemOp.cacheOperation)
+      (io.rename(lane).systemOperation === SystemOperation.dataBarrier ||
+        io.rename(lane).systemOperation === SystemOperation.instructionBarrier ||
+        io.rename(lane).systemOperation === SystemOperation.cacheOperation)
   }
   val acceptedBarrierCount = CountOne(acceptedBarrier).resize(config.memoryEpochWidth)
 
   val committedBarrier = Bits(config.commitWidth bits)
   for (lane <- 0 until config.commitWidth) {
     committedBarrier(lane) := rob.io.commitValid(lane) && rob.io.commit(lane).retired &&
-      (rob.io.commit(lane).systemOperation === OooSystemOp.dataBarrier ||
-        rob.io.commit(lane).systemOperation === OooSystemOp.instructionBarrier ||
-        rob.io.commit(lane).systemOperation === OooSystemOp.cacheOperation)
+      (rob.io.commit(lane).systemOperation === SystemOperation.dataBarrier ||
+        rob.io.commit(lane).systemOperation === SystemOperation.instructionBarrier ||
+        rob.io.commit(lane).systemOperation === SystemOperation.cacheOperation)
   }
   val committedBarrierCount = CountOne(committedBarrier).resize(config.memoryEpochWidth)
   val nextCommittedMemoryEpoch = committedMemoryEpoch + committedBarrierCount

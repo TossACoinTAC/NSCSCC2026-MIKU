@@ -8,18 +8,18 @@ import miku.privileged._
 import spinal.core._
 import spinal.lib._
 
-private[core] final case class OooRetiredPredictorUpdate(config: OooCoreConfig) extends Bundle {
+private[core] final case class RetiredPredictorUpdate(config: OooCoreConfig) extends Bundle {
   val pc = UInt(config.xlen bits)
   val taken = Bool()
   val target = UInt(config.xlen bits)
-  val branchType = UInt(OooPredictedBranchType.Width bits)
+  val branchType = UInt(PredictedBranchType.Width bits)
   val metadata = Bits(16 bits)
   val isCall = Bool()
   val isReturn = Bool()
 }
 
 /** Lossless width adapter from three-wide retirement to the predictor's single table-write port. */
-private[core] final class OooPredictorUpdateQueue(
+private[core] final class PredictorUpdateQueue(
     config: OooCoreConfig,
     depth: Int = 8
 ) extends Component {
@@ -31,15 +31,15 @@ private[core] final class OooPredictorUpdateQueue(
 
   val io = new Bundle {
     val pushValid = in Bits (config.commitWidth bits)
-    val push = in Vec (OooRetiredPredictorUpdate(config), config.commitWidth)
+    val push = in Vec (RetiredPredictorUpdate(config), config.commitWidth)
     val pushCapacity = out UInt (capacityWidth bits)
     val popValid = out Bool ()
-    val pop = out(OooRetiredPredictorUpdate(config))
+    val pop = out(RetiredPredictorUpdate(config))
     val popReady = in Bool ()
     val occupancy = out UInt (countWidth bits)
   }
 
-  val entries = Vec.fill(depth)(Reg(OooRetiredPredictorUpdate(config)))
+  val entries = Vec.fill(depth)(Reg(RetiredPredictorUpdate(config)))
   val head = Reg(UInt(pointerWidth bits)) init (0)
   val tail = Reg(UInt(pointerWidth bits)) init (0)
   val count = Reg(UInt(countWidth bits)) init (0)
@@ -85,37 +85,37 @@ private[core] final class OooPredictorUpdateQueue(
   */
 final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) extends Component {
   val io = new Bundle {
-    val instructionTranslationRequest = master(Stream(OooTranslationRequest(config)))
-    val instructionTranslationResponse = slave(Stream(OooTranslationResponse(config)))
-    val dataTranslationRequest = master(Stream(OooTranslationRequest(config)))
-    val dataTranslationResponse = slave(Stream(OooTranslationResponse(config)))
+    val instructionTranslationRequest = master(Stream(TranslationRequest(config)))
+    val instructionTranslationResponse = slave(Stream(TranslationResponse(config)))
+    val dataTranslationRequest = master(Stream(TranslationRequest(config)))
+    val dataTranslationResponse = slave(Stream(TranslationResponse(config)))
     val dataTranslationBypassAddress = out UInt (config.xlen bits)
-    val dataTranslationBypass = in(OooTranslationBypass(config))
+    val dataTranslationBypass = in(TranslationBypass(config))
     val reservationValid = in Bool ()
     val reservationLineAddress = in Bits (config.reservationAddressWidth bits)
 
     val uncachedInstructionRequestValid = out Bool ()
-    val uncachedInstructionRequest = out(OooInstructionCacheRequest(config))
+    val uncachedInstructionRequest = out(InstructionCacheRequest(config))
     val uncachedInstructionRequestReady = in Bool ()
     val uncachedInstructionResponseValid = in Bool ()
-    val uncachedInstructionResponse = in(OooInstructionCacheResponse(config))
+    val uncachedInstructionResponse = in(InstructionCacheResponse(config))
     val uncachedDataRequestValid = out Bool ()
-    val uncachedDataRequest = out(OooCacheRequest(config))
+    val uncachedDataRequest = out(CacheRequest(config))
     val uncachedDataRequestReady = in Bool ()
     val uncachedDataResponseValid = in Bool ()
-    val uncachedDataResponse = in(OooCacheResponse(config))
+    val uncachedDataResponse = in(CacheResponse(config))
 
     val memoryReadValid = out Bool ()
-    val memoryRead = out(OooLineReadRequest(config))
+    val memoryRead = out(LineReadRequest(config))
     val memoryReadReady = in Bool ()
     val memoryReadBeatValid = in Bool ()
-    val memoryReadBeat = in(OooLineReadBeat(config))
+    val memoryReadBeat = in(LineReadBeat(config))
     val memoryReadBeatReady = out Bool ()
     val memoryWriteValid = out Bool ()
-    val memoryWrite = out(OooLineWriteRequest(config))
+    val memoryWrite = out(LineWriteRequest(config))
     val memoryWriteReady = in Bool ()
     val memoryWriteResponseValid = in Bool ()
-    val memoryWriteResponse = in(OooLineWriteResponse(config))
+    val memoryWriteResponse = in(LineWriteResponse(config))
     val memoryBusIdle = in Bool ()
 
     val systemReadValid = out Bool ()
@@ -134,12 +134,12 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
     val externalRedirectTarget = in UInt (config.xlen bits)
 
     val commitValid = out Bits (config.commitWidth bits)
-    val commit = out Vec (OooCommitRecord(config), config.commitWidth)
-    val commitMemory = out Vec (OooMemoryCommitObservation(config), config.commitWidth)
+    val commit = out Vec (CommitRecord(config), config.commitWidth)
+    val commitMemory = out Vec (MemoryCommitObservation(config), config.commitWidth)
     val recoveryValid = out Bool ()
-    val recovery = out(OooRecoveryRequest(config))
+    val recovery = out(RecoveryRequest(config))
     val debugCommitValid = out Bool ()
-    val debugCommit = out(OooCommitRecord(config))
+    val debugCommit = out(CommitRecord(config))
     val csrWriteValid = out Bool ()
     val csrWriteAddress = out UInt (14 bits)
     val csrWriteData = out Bits (config.xlen bits)
@@ -166,7 +166,7 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
     val reservationLineAddressUpdate = out Bits (config.reservationAddressWidth bits)
     val exceptionValid = out Bool ()
     val exceptionPc = out UInt (config.xlen bits)
-    val exception = out(OooExceptionMeta())
+    val exception = out(ExceptionMetadata())
 
     val cacheInvalidate = in Bool ()
     val dataCacheInvalidate = in Bool ()
@@ -178,9 +178,9 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
   }
 
   val frontend = new OooFrontend(config)
-  val decodeRenameBuffer = new OooDecodeRenameBuffer(config)
+  val decodeRenameBuffer = new DecodeRenameBuffer(config)
   val backend = new OooBackendWithDataCache(config)
-  val predictorUpdateQueue = new OooPredictorUpdateQueue(config)
+  val predictorUpdateQueue = new PredictorUpdateQueue(config)
   backend.io.predictorUpdateCapacity := predictorUpdateQueue.io.pushCapacity
 
   io.instructionTranslationRequest.valid := frontend.io.translationRequest.valid
@@ -230,14 +230,14 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
   backend.io.uncachedDataResponse := io.uncachedDataResponse
 
   val recoveryPending = RegInit(False)
-  val recoveryPayload = Reg(OooRecoveryRequest(config))
+  val recoveryPayload = Reg(RecoveryRequest(config))
   val recoveryCapture = backend.io.recoveryValid && !recoveryPending &&
     !io.externalRedirectValid
   recoveryPending := recoveryCapture
   when(recoveryCapture) { recoveryPayload := backend.io.recovery }
 
   val exceptionRecovery = recoveryPending &&
-    recoveryPayload.cause === OooRecoveryCause.exception
+    recoveryPayload.cause === RecoveryCause.exception
   val internalRedirectValid = recoveryPending || io.externalRedirectValid
   val internalRedirectTarget = UInt(config.xlen bits)
   internalRedirectTarget := recoveryPayload.target
@@ -260,7 +260,7 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
       backend.io.commit(lane).retired && backend.io.commit(lane).isBranch &&
       !internalRedirectValid
   }
-  val retiredPredictorUpdate = Vec(OooRetiredPredictorUpdate(config), config.commitWidth)
+  val retiredPredictorUpdate = Vec(RetiredPredictorUpdate(config), config.commitWidth)
   for (lane <- 0 until config.commitWidth) {
     val commit = backend.io.commit(lane)
     retiredPredictorUpdate(lane).pc := commit.pc
@@ -268,8 +268,8 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
     retiredPredictorUpdate(lane).target := commit.branchTarget
     retiredPredictorUpdate(lane).branchType := commit.predictorType
     retiredPredictorUpdate(lane).metadata := commit.predictorMetadata
-    retiredPredictorUpdate(lane).isCall := commit.predictorType === OooPredictedBranchType.call
-    retiredPredictorUpdate(lane).isReturn := commit.predictorType === OooPredictedBranchType.ret
+    retiredPredictorUpdate(lane).isCall := commit.predictorType === PredictedBranchType.call
+    retiredPredictorUpdate(lane).isReturn := commit.predictorType === PredictedBranchType.ret
     predictorUpdateQueue.io.push(lane) := retiredPredictorUpdate(lane)
   }
   predictorUpdateQueue.io.pushValid := committedBranch
@@ -292,7 +292,7 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
   val stagedPredictorRetireValid = Reg(Bits(config.commitWidth bits)) init (0)
   val stagedPredictorRetireTaken = Reg(Bits(config.commitWidth bits)) init (0)
   val stagedPredictorRetireType = Vec.fill(config.commitWidth)(
-    Reg(UInt(OooPredictedBranchType.Width bits)) init (OooPredictedBranchType.direct)
+    Reg(UInt(PredictedBranchType.Width bits)) init (PredictedBranchType.direct)
   )
   val stagedPredictorRetireIsCall = Reg(Bits(config.commitWidth bits)) init (0)
   val stagedPredictorRetireIsReturn = Reg(Bits(config.commitWidth bits)) init (0)

@@ -8,10 +8,10 @@ import miku.privileged._
 import spinal.core._
 import spinal.lib._
 
-final case class OooFrontendSlot(config: OooCoreConfig) extends Bundle {
+final case class FrontendSlot(config: OooCoreConfig) extends Bundle {
   val pc = UInt(config.xlen bits)
   val instruction = Bits(32 bits)
-  val exception = OooExceptionMeta()
+  val exception = ExceptionMetadata()
   val predictedTaken = Bool()
   val predictedTarget = UInt(config.xlen bits)
   val predictorMetadata = Bits(16 bits)
@@ -33,20 +33,20 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   require(fetchGroupBytes == 16)
 
   val io = new Bundle {
-    val translationRequest = master(Stream(OooTranslationRequest(config)))
-    val translationResponse = slave(Stream(OooTranslationResponse(config)))
+    val translationRequest = master(Stream(TranslationRequest(config)))
+    val translationResponse = slave(Stream(TranslationResponse(config)))
 
     val cacheRequestValid = out Bool ()
     val cacheUncachedRequestValid = out Bool ()
-    val cacheRequest = out(OooInstructionCacheRequest(config))
+    val cacheRequest = out(InstructionCacheRequest(config))
     val cacheRequestReady = in Bool ()
     val cacheHitResponsePending = in Bool ()
     val cacheResponseValid = in Bool ()
-    val cacheResponse = in(OooInstructionCacheResponse(config))
+    val cacheResponse = in(InstructionCacheResponse(config))
     val cacheKill = out Bool ()
 
     val decodeValid = out Bits (config.decodeWidth bits)
-    val decoded = out Vec (OooDecodedUop(config), config.decodeWidth)
+    val decoded = out Vec (DecodedMicroOp(config), config.decodeWidth)
     val decodeReady = in Bits (config.decodeWidth bits)
 
     val redirectValid = in Bool ()
@@ -55,7 +55,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     val predictorUpdatePc = in UInt (config.xlen bits)
     val predictorUpdateTaken = in Bool ()
     val predictorUpdateTarget = in UInt (config.xlen bits)
-    val predictorUpdateType = in UInt (OooPredictedBranchType.Width bits)
+    val predictorUpdateType = in UInt (PredictedBranchType.Width bits)
     val predictorUpdateMetadata = in Bits (16 bits)
     val predictorUpdateIsCall = in Bool ()
     val predictorUpdateIsReturn = in Bool ()
@@ -63,7 +63,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     val predictorRetireValid = in Bits (config.commitWidth bits)
     val predictorRetireTaken = in Bits (config.commitWidth bits)
     val predictorRetireType = in Vec (
-      UInt(OooPredictedBranchType.Width bits),
+      UInt(PredictedBranchType.Width bits),
       config.commitWidth
     )
     val predictorRetireIsCall = in Bits (config.commitWidth bits)
@@ -76,11 +76,11 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     val occupancy = out UInt (countWidth bits)
     val predictorDebugTaken = out Bool ()
     val predictorDebugHit = out Bool ()
-    val predictorDebugType = out UInt (OooPredictedBranchType.Width bits)
+    val predictorDebugType = out UInt (PredictedBranchType.Width bits)
     val predictorDebugPhtState = out UInt (2 bits)
   }
 
-  val entries = Vec.fill(config.instructionBufferEntries)(Reg(OooFrontendSlot(config)))
+  val entries = Vec.fill(config.instructionBufferEntries)(Reg(FrontendSlot(config)))
   for (entry <- entries) {
     entry.pc.addAttribute("extract_reset", "no")
     entry.instruction.addAttribute("extract_reset", "no")
@@ -106,7 +106,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val translatedPhysicalAddress = Reg(UInt(config.xlen bits))
   val translatedUncached = Reg(Bool())
   val translatedExceptionValid = RegInit(False)
-  val translatedException = Reg(OooExceptionMeta())
+  val translatedException = Reg(ExceptionMetadata())
   val cacheOutstanding = RegInit(False)
   val cacheDropPending = RegInit(False)
   val cacheResponseContextPending = RegInit(False)
@@ -119,33 +119,33 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val cachePc = Reg(UInt(config.xlen bits)) init (U(config.resetVector, config.xlen bits))
   val pendingResponsePc = Reg(UInt(config.xlen bits)) init (U(config.resetVector, config.xlen bits))
   val predictionPendingValid = RegInit(False)
-  val pendingPrediction = Vec.fill(config.fetchWidth)(Reg(OooBankedFetchPrediction(config)))
-  val translatedPrediction = Vec.fill(config.fetchWidth)(Reg(OooBankedFetchPrediction(config)))
-  val cachePrediction = Vec.fill(config.fetchWidth)(Reg(OooBankedFetchPrediction(config)))
+  val pendingPrediction = Vec.fill(config.fetchWidth)(Reg(BankedFetchPrediction(config)))
+  val translatedPrediction = Vec.fill(config.fetchWidth)(Reg(BankedFetchPrediction(config)))
+  val cachePrediction = Vec.fill(config.fetchWidth)(Reg(BankedFetchPrediction(config)))
   val pendingResponsePrediction =
-    Vec.fill(config.fetchWidth)(Reg(OooBankedFetchPrediction(config)))
+    Vec.fill(config.fetchWidth)(Reg(BankedFetchPrediction(config)))
   for (lane <- 0 until config.fetchWidth) {
     pendingPrediction(lane).hit.init(False)
     pendingPrediction(lane).phtValid.init(False)
-    pendingPrediction(lane).branchType.init(OooPredictedBranchType.conditional)
+    pendingPrediction(lane).branchType.init(PredictedBranchType.conditional)
     pendingPrediction(lane).phtState.init(1)
     pendingPrediction(lane).phtIndex.init(0)
     pendingPrediction(lane).target.init(0)
     translatedPrediction(lane).hit.init(False)
     translatedPrediction(lane).phtValid.init(False)
-    translatedPrediction(lane).branchType.init(OooPredictedBranchType.conditional)
+    translatedPrediction(lane).branchType.init(PredictedBranchType.conditional)
     translatedPrediction(lane).phtState.init(1)
     translatedPrediction(lane).phtIndex.init(0)
     translatedPrediction(lane).target.init(0)
     cachePrediction(lane).hit.init(False)
     cachePrediction(lane).phtValid.init(False)
-    cachePrediction(lane).branchType.init(OooPredictedBranchType.conditional)
+    cachePrediction(lane).branchType.init(PredictedBranchType.conditional)
     cachePrediction(lane).phtState.init(1)
     cachePrediction(lane).phtIndex.init(0)
     cachePrediction(lane).target.init(0)
     pendingResponsePrediction(lane).hit.init(False)
     pendingResponsePrediction(lane).phtValid.init(False)
-    pendingResponsePrediction(lane).branchType.init(OooPredictedBranchType.conditional)
+    pendingResponsePrediction(lane).branchType.init(PredictedBranchType.conditional)
     pendingResponsePrediction(lane).phtState.init(1)
     pendingResponsePrediction(lane).phtIndex.init(0)
     pendingResponsePrediction(lane).target.init(0)
@@ -163,17 +163,17 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   io.predictorDebugType := cachePrediction(0).branchType
   io.predictorDebugPhtState := cachePrediction(0).phtState
 
-  val targetPredictor = new OooBankedFetchPredictor(config)
+  val targetPredictor = new BankedFetchPredictor(config)
   val targetPredictorLookupPc = UInt(config.xlen bits)
   targetPredictor.io.lookupPc := targetPredictorLookupPc
 
-  val predictionForTranslation = Vec(OooBankedFetchPrediction(config), config.fetchWidth)
+  val predictionForTranslation = Vec(BankedFetchPrediction(config), config.fetchWidth)
   for (lane <- 0 until config.fetchWidth) {
     predictionForTranslation(lane) := pendingPrediction(lane)
     when(!predictionPendingValid) {
       predictionForTranslation(lane).hit := False
       predictionForTranslation(lane).phtValid := False
-      predictionForTranslation(lane).branchType := OooPredictedBranchType.conditional
+      predictionForTranslation(lane).branchType := PredictedBranchType.conditional
       predictionForTranslation(lane).phtState := 1
       predictionForTranslation(lane).phtIndex := 0
       predictionForTranslation(lane).target := 0
@@ -203,7 +203,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     io.translationResponse.virtualAddress,
     Mux(translatedRequestValid, translatedPc, translationPc)
   )
-  val requestPrediction = Vec(OooBankedFetchPrediction(config), config.fetchWidth)
+  val requestPrediction = Vec(BankedFetchPrediction(config), config.fetchWidth)
   for (lane <- 0 until config.fetchWidth) {
     requestPrediction(lane) := translatedPrediction(lane)
     when(translationResponseBypassValid) {
@@ -220,13 +220,13 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   earlierTranslatedPredictionTaken(0) := False
   for (lane <- 0 until config.fetchWidth) {
     val laneTaken = requestPrediction(lane).branchType =/=
-      OooPredictedBranchType.conditional || requestPrediction(lane).phtState(1)
+      PredictedBranchType.conditional || requestPrediction(lane).phtState(1)
     translatedPredictionTaken(lane) := requestPrediction(lane).hit &&
       laneTaken &&
       U(lane, config.fetchSlotWidth bits) >= translatedFirstSlot &&
       !earlierTranslatedPredictionTaken(lane)
     translatedConditionalSeen(lane) := requestPrediction(lane).hit &&
-      requestPrediction(lane).branchType === OooPredictedBranchType.conditional &&
+      requestPrediction(lane).branchType === PredictedBranchType.conditional &&
       U(lane, config.fetchSlotWidth bits) >= translatedFirstSlot &&
       !earlierTranslatedPredictionTaken(lane)
     earlierTranslatedPredictionTaken(lane + 1) :=
@@ -235,10 +235,10 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val requestPredictedTaken = earlierTranslatedPredictionTaken(config.fetchWidth)
   val requestPredictedPc = UInt(config.xlen bits)
   val requestPredictedTarget = UInt(config.xlen bits)
-  val requestPredictedType = UInt(OooPredictedBranchType.Width bits)
+  val requestPredictedType = UInt(PredictedBranchType.Width bits)
   requestPredictedPc := translatedGroupBase
   requestPredictedTarget := translatedGroupBase + fetchGroupBytes
-  requestPredictedType := OooPredictedBranchType.conditional
+  requestPredictedType := PredictedBranchType.conditional
   for (lane <- (0 until config.fetchWidth).reverse) {
     when(translatedPredictionTaken(lane)) {
       requestPredictedPc := translatedGroupBase + lane * 4
@@ -262,8 +262,8 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       translationResponseBypassValid
     } else {
       translationResponseBypassValid && !requestHistoryValid &&
-        requestPredictedType =/= OooPredictedBranchType.call &&
-        requestPredictedType =/= OooPredictedBranchType.ret
+        requestPredictedType =/= PredictedBranchType.call &&
+        requestPredictedType =/= PredictedBranchType.ret
     }
   } else {
     False
@@ -369,11 +369,11 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     predictorSpeculativeUpdateValid := requestFire
     predictorSpeculativeHistoryValid := requestHistoryValid
     predictorSpeculativeHistoryTaken := requestPredictedTaken &&
-      requestPredictedType === OooPredictedBranchType.conditional
+      requestPredictedType === PredictedBranchType.conditional
     predictorSpeculativeRasPush := requestPredictedTaken &&
-      requestPredictedType === OooPredictedBranchType.call
+      requestPredictedType === PredictedBranchType.call
     predictorSpeculativeRasPop := requestPredictedTaken &&
-      requestPredictedType === OooPredictedBranchType.ret
+      requestPredictedType === PredictedBranchType.ret
     predictorSpeculativeReturnAddress := requestPredictedPc + 4
   } else {
     val delayedUpdateValid = RegNext(requestFire) init (False)
@@ -386,11 +386,11 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     when(requestFire) {
       delayedHistoryValid := requestHistoryValid
       delayedHistoryTaken := requestPredictedTaken &&
-        requestPredictedType === OooPredictedBranchType.conditional
+        requestPredictedType === PredictedBranchType.conditional
       delayedRasPush := requestPredictedTaken &&
-        requestPredictedType === OooPredictedBranchType.call
+        requestPredictedType === PredictedBranchType.call
       delayedRasPop := requestPredictedTaken &&
-        requestPredictedType === OooPredictedBranchType.ret
+        requestPredictedType === PredictedBranchType.ret
       delayedReturnAddress := requestPredictedPc + 4
     }
     predictorSpeculativeUpdateValid := delayedUpdateValid
@@ -419,7 +419,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     pendingResponsePc,
     cachePc
   )
-  val responseContextPrediction = Vec(OooBankedFetchPrediction(config), config.fetchWidth)
+  val responseContextPrediction = Vec(BankedFetchPrediction(config), config.fetchWidth)
   for (lane <- 0 until config.fetchWidth) {
     responseContextPrediction(lane) := cachePrediction(lane)
     when(responseSelectsPendingContext) {
@@ -449,7 +449,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val responsePredictionTaken = Vec(Bool(), config.fetchWidth)
   val responseDynamicPredictionHit = Vec(Bool(), config.fetchWidth)
   val responseControlTransfer = Vec(Bool(), config.fetchWidth)
-  val responseActualType = Vec(UInt(OooPredictedBranchType.Width bits), config.fetchWidth)
+  val responseActualType = Vec(UInt(PredictedBranchType.Width bits), config.fetchWidth)
   val responseActualTarget = Vec(UInt(config.xlen bits), config.fetchWidth)
   val responsePredictorMetadata = Vec(Bits(16 bits), config.fetchWidth)
   val earlierResponsePredictionTaken = Vec(Bool(), config.fetchWidth + 1)
@@ -470,7 +470,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     // A cold BTB miss does not identify a stable branch location yet. Preserve BTFNT for that
     // first encounter; the carried PHT state is trained at commit and becomes active with the BTB.
     val fallbackTaken = predecode.staticTaken
-    val dynamicTaken = predecode.branchType =/= OooPredictedBranchType.conditional || Mux(
+    val dynamicTaken = predecode.branchType =/= PredictedBranchType.conditional || Mux(
       responseContextPrediction(lane).phtValid,
       responseContextPrediction(lane).phtState(1),
       fallbackTaken
@@ -549,10 +549,10 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   }
   val responseLearnPc = UInt(config.xlen bits)
   val responseLearnTarget = UInt(config.xlen bits)
-  val responseLearnType = UInt(OooPredictedBranchType.Width bits)
+  val responseLearnType = UInt(PredictedBranchType.Width bits)
   responseLearnPc := groupBase
   responseLearnTarget := groupBase + fetchGroupBytes
-  responseLearnType := OooPredictedBranchType.direct
+  responseLearnType := PredictedBranchType.direct
   for (lane <- (0 until config.fetchWidth).reverse) {
     when(responseLearnMask(lane)) {
       responseLearnPc := groupBase + lane * 4
@@ -564,7 +564,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val responseLearnPcReg = RegNextWhen(responseLearnPc, responseFire) init (0)
   val responseLearnTargetReg = RegNextWhen(responseLearnTarget, responseFire) init (0)
   val responseLearnTypeReg = RegNextWhen(responseLearnType, responseFire) init (
-    OooPredictedBranchType.direct
+    PredictedBranchType.direct
   )
   io.predictorUpdateReady := targetPredictor.io.tableUpdateReady
   val preciseUpdate = io.predictorUpdateValid && io.predictorUpdateReady
@@ -581,7 +581,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     targetPredictor.io.btbUpdateDirectionTrained := True
   }
   targetPredictor.io.phtUpdateValid := preciseUpdate &&
-    io.predictorUpdateType === OooPredictedBranchType.conditional
+    io.predictorUpdateType === PredictedBranchType.conditional
   targetPredictor.io.phtUpdatePc := io.predictorUpdatePc
   targetPredictor.io.phtUpdateIndex := io.predictorUpdateMetadata(9 downto 0).asUInt
   targetPredictor.io.phtUpdateOldState := io.predictorUpdateMetadata(11 downto 10).asUInt
@@ -592,7 +592,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   targetPredictor.io.commitReturnAddress := io.predictorUpdatePc + 4
   for (lane <- 0 until config.commitWidth) {
     targetPredictor.io.architecturalHistoryValid(lane) := io.predictorRetireValid(lane) &&
-      io.predictorRetireType(lane) === OooPredictedBranchType.conditional
+      io.predictorRetireType(lane) === PredictedBranchType.conditional
     targetPredictor.io.architecturalHistoryTaken(lane) := io.predictorRetireTaken(lane)
     targetPredictor.io.architecturalRasPush(lane) := io.predictorRetireValid(lane) &&
       io.predictorRetireIsCall(lane)
@@ -604,7 +604,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val decodeInputValid = Bits(config.fetchWidth bits)
   val decodePc = Vec(UInt(config.xlen bits), config.fetchWidth)
   val decodeInstruction = Vec(Bits(32 bits), config.fetchWidth)
-  val decodeException = Vec(OooExceptionMeta(), config.fetchWidth)
+  val decodeException = Vec(ExceptionMetadata(), config.fetchWidth)
   for (lane <- 0 until config.fetchWidth) {
     if (lane < config.decodeWidth) {
       val source = (head + U(lane, pointerWidth bits)).resized
@@ -625,7 +625,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     }
   }
 
-  val wideDecode = new OooWideDecode(config)
+  val wideDecode = new WideDecode(config)
   wideDecode.io.inputValid := decodeInputValid
   wideDecode.io.pc := decodePc
   wideDecode.io.instruction := decodeInstruction

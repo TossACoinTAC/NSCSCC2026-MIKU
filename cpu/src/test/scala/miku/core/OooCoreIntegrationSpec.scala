@@ -131,13 +131,13 @@ class OooCoreIntegrationSpec extends AnyFunSuite {
     sample(dut)
     dut.io.memoryReadReady #= false
 
-    for (beat <- 0 until OooCacheContract.BeatsPerLine) {
+    for (beat <- 0 until CacheContract.BeatsPerLine) {
       val data = instructions(beat * 2) | (instructions(beat * 2 + 1) << 32)
       dut.io.memoryReadBeatValid #= true
       dut.io.memoryReadBeat.mshrId #= 0
       dut.io.memoryReadBeat.beat #= beat
       dut.io.memoryReadBeat.data #= data
-      dut.io.memoryReadBeat.last #= beat == OooCacheContract.BeatsPerLine - 1
+      dut.io.memoryReadBeat.last #= beat == CacheContract.BeatsPerLine - 1
       dut.io.memoryReadBeat.error #= false
       sleep(1)
       assert(dut.io.memoryReadBeatReady.toBoolean)

@@ -46,10 +46,10 @@ final class OooCoreSystem(
     val core = new OooCore(config)
     // Keep the CSR diff views in the generated design.  The view is wrapped by a conditional
     // chiplab DPI shell, so it is inert in synthesis and available to the official simulator.
-    val csr = new OpenLa500Csr(config = config, diffTestEnabled = true, tlbNum = 32)
-    val addressTranslation = new OooAddressTranslationUnit(config)
-    val axiBridge = new OooAxiLineBridge(config)
-    val idleController = new OooIdleController(config)
+    val csr = new CsrFile(config = config, diffTestEnabled = true, tlbNum = 32)
+    val addressTranslation = new AddressTranslationUnit(config)
+    val axiBridge = new AxiLineBridge(config)
+    val idleController = new IdleController(config)
 
     // Serializing commits already generate a registered redirect in the core.
     // Keep that redirect timing, but register the state-changing payloads at
@@ -303,11 +303,11 @@ final class OooCoreSystem(
       event.pc := record.pc
       event.instruction := record.instruction
       event.retired := record.retired
-      event.ertn := record.retired && record.systemOperation === OooSystemOp.ertn
-      event.isCounterInstruction := record.systemOperation === OooSystemOp.counterId ||
-        record.systemOperation === OooSystemOp.counterLow ||
-        record.systemOperation === OooSystemOp.counterHigh
-      event.csrRstat := record.systemOperation === OooSystemOp.csrRead &&
+      event.ertn := record.retired && record.systemOperation === SystemOperation.ertn
+      event.isCounterInstruction := record.systemOperation === SystemOperation.counterId ||
+        record.systemOperation === SystemOperation.counterLow ||
+        record.systemOperation === SystemOperation.counterHigh
+      event.csrRstat := record.systemOperation === SystemOperation.csrRead &&
         record.csrAddress === U(5, 14 bits)
       event.csrReadData := record.result
       event.gprWrite.valid := record.retired && record.writesGpr && record.rd =/= 0
@@ -329,10 +329,10 @@ final class OooCoreSystem(
       // executing RDCNT*. An OoO counter read may have sampled earlier than its
       // retirement, so forward the value actually stored in the ROB for the
       // half selected by the instruction.
-      when(record.systemOperation === OooSystemOp.counterLow) {
+      when(record.systemOperation === SystemOperation.counterLow) {
         event.timer(31 downto 0) := record.result.asUInt
       }
-      when(record.systemOperation === OooSystemOp.counterHigh) {
+      when(record.systemOperation === SystemOperation.counterHigh) {
         event.timer(63 downto 32) := record.result.asUInt
       }
       event.load.instructionMask := memory.loadInstructionMask
@@ -343,7 +343,7 @@ final class OooCoreSystem(
       event.store.vAddr := memory.virtualAddress
       event.store.data := memory.storeData
       event.store.byteMask := memory.storeByteMask
-      event.tlbFill.valid := record.retired && record.systemOperation === OooSystemOp.tlbFill
+      event.tlbFill.valid := record.retired && record.systemOperation === SystemOperation.tlbFill
       event.tlbFill.index := csr.io.rand_index.asUInt
     }
 

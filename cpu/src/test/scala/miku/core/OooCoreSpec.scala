@@ -60,7 +60,7 @@ class OooCoreSpec extends AnyFunSuite {
       () => OooCoreConfig(robEntries = 8),
       () => OooCoreConfig(instructionBufferEntries = 4),
       () => OooCoreConfig(dispatchQueueEntries = 4),
-      () => OooCoreConfig(instructionCache = OooCacheGeometry(2, 64, 32)),
+      () => OooCoreConfig(instructionCache = CoreCacheGeometry(2, 64, 32)),
       () => OooCoreConfig(executionPorts = OooCoreConfig.DefaultExecutionPorts.dropRight(1))
     )
     invalid.foreach(make => intercept[IllegalArgumentException](make()))
@@ -73,15 +73,15 @@ class OooCoreSpec extends AnyFunSuite {
       backend
     }
     assert(rtl.contains("module ooo_backend"))
-    assert(rtl.contains("module OooRob"))
-    assert(rtl.contains("module OooRegisterMap"))
-    assert(rtl.contains("module OooFreeList"))
-    assert(rtl.contains("module OooIssueQueue"))
+    assert(rtl.contains("module ReorderBuffer"))
+    assert(rtl.contains("module RenameMap"))
+    assert(rtl.contains("module PhysicalRegisterFreeList"))
+    assert(rtl.contains("module IssueQueue"))
   }
 
   test("the pure LA32R decoder elaborates independently of the legacy pipeline state") {
     val rtl = elaborate("ooo_la32r_decoder") {
-      val decoder = new OooLa32rDecoder(OooCoreConfig.FourIssueThreeCommit)
+      val decoder = new La32rDecoder(OooCoreConfig.FourIssueThreeCommit)
       decoder.setDefinitionName("ooo_la32r_decoder")
       decoder
     }
@@ -92,7 +92,7 @@ class OooCoreSpec extends AnyFunSuite {
 
   test("the fetch/decode width adapter keeps the four-slot to three-uop boundary explicit") {
     val rtl = elaborate("ooo_wide_decode") {
-      val decode = new OooWideDecode(OooCoreConfig.FourIssueThreeCommit)
+      val decode = new WideDecode(OooCoreConfig.FourIssueThreeCommit)
       decode.setDefinitionName("ooo_wide_decode")
       decode
     }
@@ -107,7 +107,7 @@ class OooCoreSpec extends AnyFunSuite {
       frontend
     }
     assert(rtl.contains("module ooo_frontend"))
-    assert(rtl.contains("module OooWideDecode"))
+    assert(rtl.contains("module WideDecode"))
     assert(rtl.contains("cacheKill"))
     assert(rtl.contains("decodeReady"))
   }
@@ -120,9 +120,9 @@ class OooCoreSpec extends AnyFunSuite {
     }
     assert(rtl.contains("module ooo_core"))
     assert(rtl.contains("module OooFrontend"))
-    assert(rtl.contains("module OooDecodeRenameBuffer"))
+    assert(rtl.contains("module DecodeRenameBuffer"))
     assert(rtl.contains("module OooBackendWithDataCache"))
-    assert(rtl.contains("module OooSharedCacheHierarchy"))
+    assert(rtl.contains("module SharedCacheHierarchy"))
     assert(rtl.contains("externalRedirectValid"))
     assert(rtl.contains("frontendOccupancy"))
   }
@@ -135,9 +135,9 @@ class OooCoreSpec extends AnyFunSuite {
     }
     assert(rtl.contains("module ooo_core_system"))
     assert(rtl.contains("module OooCore"))
-    assert(rtl.contains("module OpenLa500Csr"))
-    assert(rtl.contains("module OooHierarchicalTlb"))
-    assert(rtl.contains("module OooAxiLineBridge"))
+    assert(rtl.contains("module CsrFile"))
+    assert(rtl.contains("module HierarchicalTlb"))
+    assert(rtl.contains("module AxiLineBridge"))
     assert(rtl.contains("axi_ar_payload_len"))
   }
 
@@ -148,8 +148,8 @@ class OooCoreSpec extends AnyFunSuite {
       execution
     }
     assert(rtl.contains("module ooo_execution_cluster"))
-    assert(rtl.contains("module OooDivideUnit"))
-    assert(rtl.contains("module OooMultiplyPipe"))
+    assert(rtl.contains("module DivideUnit"))
+    assert(rtl.contains("module MultiplyPipeline"))
     assert(rtl.contains("aguValid"))
   }
 
@@ -160,7 +160,7 @@ class OooCoreSpec extends AnyFunSuite {
       backend
     }
     assert(rtl.contains("module ooo_backend_with_execution"))
-    assert(rtl.contains("module OooLoadStoreQueue"))
+    assert(rtl.contains("module LoadStoreQueue"))
     assert(rtl.contains("dataRequestValid"))
     assert(rtl.contains("recoveryValid"))
   }
@@ -177,11 +177,11 @@ class OooCoreSpec extends AnyFunSuite {
   }
 
   test("the 64-byte cache contract and four-entry MSHR table elaborate") {
-    assert(OooCacheContract.LineBytes == 64)
-    assert(OooCacheContract.LineBits == 512)
-    assert(OooCacheContract.BeatsPerLine == 8)
+    assert(CacheContract.LineBytes == 64)
+    assert(CacheContract.LineBits == 512)
+    assert(CacheContract.BeatsPerLine == 8)
     val rtl = elaborate("ooo_mshr_table") {
-      val mshr = new OooMshrTable(OooCoreConfig.FourIssueThreeCommit)
+      val mshr = new MshrTable(OooCoreConfig.FourIssueThreeCommit)
       mshr.setDefinitionName("ooo_mshr_table")
       mshr
     }
@@ -191,7 +191,7 @@ class OooCoreSpec extends AnyFunSuite {
 
   test("L1 and L2 cache arrays retain BRAM-friendly 512-bit line storage") {
     val rtl = elaborate("ooo_l2_cache_array") {
-      val l2 = new OooCacheArray(OooCoreConfig.FourIssueThreeCommit.level2Cache)
+      val l2 = new CacheArray(OooCoreConfig.FourIssueThreeCommit.level2Cache)
       l2.setDefinitionName("ooo_l2_cache_array")
       l2
     }
@@ -202,15 +202,15 @@ class OooCoreSpec extends AnyFunSuite {
 
   test("four-slot L1I and L1D share one 64-byte L2 transaction boundary") {
     val rtl = elaborate("ooo_shared_cache_hierarchy") {
-      val hierarchy = new OooSharedCacheHierarchy(OooCoreConfig.FourIssueThreeCommit)
+      val hierarchy = new SharedCacheHierarchy(OooCoreConfig.FourIssueThreeCommit)
       hierarchy.setDefinitionName("ooo_shared_cache_hierarchy")
       hierarchy
     }
     assert(rtl.contains("module ooo_shared_cache_hierarchy"))
-    assert(rtl.contains("module OooL1InstructionCache"))
-    assert(rtl.contains("module OooL1DataCache"))
-    assert(rtl.contains("module OooSharedReadMshrRouter"))
-    assert(rtl.contains("module OooL2Cache"))
+    assert(rtl.contains("module L1InstructionCache"))
+    assert(rtl.contains("module L1DataCache"))
+    assert(rtl.contains("module SharedReadMshrRouter"))
+    assert(rtl.contains("module L2Cache"))
     assert(rtl.contains("instructionKill"))
   }
 }

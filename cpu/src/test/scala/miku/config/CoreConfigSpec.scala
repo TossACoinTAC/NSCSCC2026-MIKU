@@ -1,38 +1,38 @@
 package miku.config
 
 import miku.compat.CoreTopCompatConfig
-import miku.core.{OooCacheGeometry, OooCoreConfig, OooCpuConfig}
+import miku.core.{CoreCacheGeometry, OooCoreConfig, CpuConfigEncoding}
 import org.scalatest.funsuite.AnyFunSuite
 
 class CoreConfigSpec extends AnyFunSuite {
   test("OoO CPUCFG values are derived from each cache geometry") {
     val default = OooCoreConfig.FourIssueThreeCommit
-    assert(OooCpuConfig.value(default, 1) == BigInt("0001f1f5", 16))
-    assert(OooCpuConfig.value(default, 2) == 0)
-    assert(OooCpuConfig.value(default, 16) == BigInt("0000001d", 16))
-    assert(OooCpuConfig.value(default, 17) == BigInt("06070001", 16))
-    assert(OooCpuConfig.value(default, 18) == BigInt("06070001", 16))
-    assert(OooCpuConfig.value(default, 19) == BigInt("06090001", 16))
+    assert(CpuConfigEncoding.value(default, 1) == BigInt("0001f1f5", 16))
+    assert(CpuConfigEncoding.value(default, 2) == 0)
+    assert(CpuConfigEncoding.value(default, 16) == BigInt("0000001d", 16))
+    assert(CpuConfigEncoding.value(default, 17) == BigInt("06070001", 16))
+    assert(CpuConfigEncoding.value(default, 18) == BigInt("06070001", 16))
+    assert(CpuConfigEncoding.value(default, 19) == BigInt("06090001", 16))
 
     val fourWay = default.copy(
-      instructionCache = OooCacheGeometry(ways = 4, sets = 32, lineBytes = 64),
-      dataCache = OooCacheGeometry(ways = 4, sets = 128, lineBytes = 64),
-      level2Cache = OooCacheGeometry(ways = 4, sets = 256, lineBytes = 64)
+      instructionCache = CoreCacheGeometry(ways = 4, sets = 32, lineBytes = 64),
+      dataCache = CoreCacheGeometry(ways = 4, sets = 128, lineBytes = 64),
+      level2Cache = CoreCacheGeometry(ways = 4, sets = 256, lineBytes = 64)
     )
-    assert(OooCpuConfig.value(fourWay, 17) == BigInt("06050003", 16))
-    assert(OooCpuConfig.value(fourWay, 18) == BigInt("06070003", 16))
-    assert(OooCpuConfig.value(fourWay, 19) == BigInt("06080003", 16))
+    assert(CpuConfigEncoding.value(fourWay, 17) == BigInt("06050003", 16))
+    assert(CpuConfigEncoding.value(fourWay, 18) == BigInt("06070003", 16))
+    assert(CpuConfigEncoding.value(fourWay, 19) == BigInt("06080003", 16))
 
     val directMapped = default.copy(
-      instructionCache = OooCacheGeometry(ways = 1, sets = 128, lineBytes = 64),
-      dataCache = OooCacheGeometry(ways = 1, sets = 128, lineBytes = 64),
-      level2Cache = OooCacheGeometry(ways = 1, sets = 1024, lineBytes = 64)
+      instructionCache = CoreCacheGeometry(ways = 1, sets = 128, lineBytes = 64),
+      dataCache = CoreCacheGeometry(ways = 1, sets = 128, lineBytes = 64),
+      level2Cache = CoreCacheGeometry(ways = 1, sets = 1024, lineBytes = 64)
     )
-    assert(OooCpuConfig.value(directMapped, 17) == BigInt("06070000", 16))
-    assert(OooCpuConfig.value(directMapped, 19) == BigInt("060a0000", 16))
-    assert(OooCpuConfig.value(default, 3) == 0)
-    assert(OooCpuConfig.value(default, 20) == 0)
-    assert(OooCpuConfig.value(default, 0x40000000) == 0)
+    assert(CpuConfigEncoding.value(directMapped, 17) == BigInt("06070000", 16))
+    assert(CpuConfigEncoding.value(directMapped, 19) == BigInt("060a0000", 16))
+    assert(CpuConfigEncoding.value(default, 3) == 0)
+    assert(CpuConfigEncoding.value(default, 20) == 0)
+    assert(CpuConfigEncoding.value(default, 0x40000000) == 0)
   }
 
   test("locked configurations match the active golden core") {

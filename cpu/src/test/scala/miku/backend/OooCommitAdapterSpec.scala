@@ -10,7 +10,7 @@ private final class OooCommitAdapterProbe(config: OooCoreConfig) extends Compone
     val commitValid = in Bits (config.commitWidth bits)
     val retired = in Bits (config.commitWidth bits)
     val serializing = in Bits (config.commitWidth bits)
-    val systemOperation = in Vec (UInt(OooSystemOp.Width bits), config.commitWidth)
+    val systemOperation = in Vec (UInt(SystemOperation.Width bits), config.commitWidth)
     val sideEffectData = in Vec (Bits(config.xlen bits), config.commitWidth)
     val instruction = in Vec (Bits(32 bits), config.commitWidth)
     val pc = in Vec (UInt(config.xlen bits), config.commitWidth)
@@ -37,7 +37,7 @@ private final class OooCommitAdapterProbe(config: OooCoreConfig) extends Compone
   adapter.io.commitValid := io.commitValid
   adapter.io.flush := False
   for (lane <- 0 until config.commitWidth) {
-    val commit = OooCommitRecord(config)
+    val commit = CommitRecord(config)
     commit.pc := io.pc(lane)
     commit.instruction := io.instruction(lane)
     commit.robPointer := 0

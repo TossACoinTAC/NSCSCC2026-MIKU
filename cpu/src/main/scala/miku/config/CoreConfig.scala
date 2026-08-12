@@ -1,6 +1,6 @@
 package miku.config
 
-/** Immutable configuration for the locked openLA500 contest implementation.
+/** Immutable configuration for the locked MIKU contest implementation.
   *
   * This contract deliberately fails closed. The active feature set is fixed; only the observed LACC
   * compatibility mode and the observation-only DiffTest interface vary in the supported elaboration

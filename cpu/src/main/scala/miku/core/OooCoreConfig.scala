@@ -2,28 +2,28 @@ package miku.core
 
 import spinal.core.log2Up
 
-sealed trait OooFuKind
+sealed trait ExecutionUnitKind
 
-object OooFuKind {
-  case object Alu extends OooFuKind
-  case object Branch extends OooFuKind
-  case object Multiply extends OooFuKind
-  case object Divide extends OooFuKind
-  case object Csr extends OooFuKind
-  case object Serial extends OooFuKind
-  case object LoadStore extends OooFuKind
+object ExecutionUnitKind {
+  case object Alu extends ExecutionUnitKind
+  case object Branch extends ExecutionUnitKind
+  case object Multiply extends ExecutionUnitKind
+  case object Divide extends ExecutionUnitKind
+  case object Csr extends ExecutionUnitKind
+  case object Serial extends ExecutionUnitKind
+  case object LoadStore extends ExecutionUnitKind
 }
 
-final case class OooExecPortConfig(
+final case class ExecutionPortConfig(
     name: String,
-    capabilities: Set[OooFuKind],
+    capabilities: Set[ExecutionUnitKind],
     registeredIssueOutput: Boolean = false
 ) {
   require(name.nonEmpty, "an execution port must have a name")
   require(capabilities.nonEmpty, s"execution port '$name' must accept at least one FU kind")
 }
 
-final case class OooCacheGeometry(ways: Int, sets: Int, lineBytes: Int) {
+final case class CoreCacheGeometry(ways: Int, sets: Int, lineBytes: Int) {
   private def isPowerOfTwo(value: Int): Boolean = value > 0 && (value & (value - 1)) == 0
 
   require(isPowerOfTwo(ways), "cache ways must be a positive power of two")
@@ -41,8 +41,8 @@ final case class OooCacheGeometry(ways: Int, sets: Int, lineBytes: Int) {
 }
 
 /** LoongArch CPUCFG values implemented by this configured core. */
-object OooCpuConfig {
-  private def cacheGeometry(geometry: OooCacheGeometry): BigInt =
+object CpuConfigEncoding {
+  private def cacheGeometry(geometry: CoreCacheGeometry): BigInt =
     BigInt(geometry.ways - 1) |
       (BigInt(log2Up(geometry.sets)) << 16) |
       (BigInt(log2Up(geometry.lineBytes)) << 24)
@@ -100,10 +100,10 @@ final case class OooCoreConfig(
     enableRecoveryBranchTrainingPriority: Boolean = true,
     enableL2WriteBack: Boolean = true,
     resetVector: BigInt = BigInt("1c000000", 16),
-    instructionCache: OooCacheGeometry = OooCacheGeometry(ways = 2, sets = 128, lineBytes = 64),
-    dataCache: OooCacheGeometry = OooCacheGeometry(ways = 2, sets = 128, lineBytes = 64),
-    level2Cache: OooCacheGeometry = OooCacheGeometry(ways = 2, sets = 512, lineBytes = 64),
-    executionPorts: Vector[OooExecPortConfig] = OooCoreConfig.DefaultExecutionPorts
+    instructionCache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 128, lineBytes = 64),
+    dataCache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 128, lineBytes = 64),
+    level2Cache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 512, lineBytes = 64),
+    executionPorts: Vector[ExecutionPortConfig] = OooCoreConfig.DefaultExecutionPorts
 ) {
   private def isPowerOfTwo(value: Int): Boolean = value > 0 && (value & (value - 1)) == 0
 
@@ -147,11 +147,11 @@ final case class OooCoreConfig(
   require(dataCache.lineBytes == 64, "the OoO data cache uses 64-byte lines")
   require(level2Cache.lineBytes == 64, "the OoO L2 cache uses 64-byte lines")
   require(
-    executionPorts.count(_.capabilities.contains(OooFuKind.LoadStore)) == 1,
+    executionPorts.count(_.capabilities.contains(ExecutionUnitKind.LoadStore)) == 1,
     "the initial backend requires exactly one LSU port"
   )
   require(
-    executionPorts.exists(_.capabilities.contains(OooFuKind.Branch)),
+    executionPorts.exists(_.capabilities.contains(ExecutionUnitKind.Branch)),
     "at least one execution port must resolve branches"
   )
 
@@ -174,13 +174,13 @@ final case class OooCoreConfig(
 }
 
 object OooCoreConfig {
-  import OooFuKind._
+  import ExecutionUnitKind._
 
-  val DefaultExecutionPorts: Vector[OooExecPortConfig] = Vector(
-    OooExecPortConfig("alu-csr", Set(Alu, Csr, Serial)),
-    OooExecPortConfig("alu-div", Set(Alu, Divide)),
-    OooExecPortConfig("alu-branch-mul", Set(Alu, Branch, Multiply)),
-    OooExecPortConfig("load-store", Set(LoadStore), registeredIssueOutput = true)
+  val DefaultExecutionPorts: Vector[ExecutionPortConfig] = Vector(
+    ExecutionPortConfig("alu-csr", Set(Alu, Csr, Serial)),
+    ExecutionPortConfig("alu-div", Set(Alu, Divide)),
+    ExecutionPortConfig("alu-branch-mul", Set(Alu, Branch, Multiply)),
+    ExecutionPortConfig("load-store", Set(LoadStore), registeredIssueOutput = true)
   )
 
   val FourIssueThreeCommit: OooCoreConfig = OooCoreConfig()

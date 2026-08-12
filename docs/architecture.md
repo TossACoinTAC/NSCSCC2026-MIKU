@@ -8,6 +8,12 @@
 `Makefile`、`cpu/tests/manifest.yml` 与 `cpu/reference/manifest.lock`。历史验证状态已原样
 保存在 `docs/archive/nscscc-cpu-final-docs/refactor/status.yml`，仅用于解释旧候选。
 
+当前源码采用以下命名边界：`Ooo*` 只用于 `OooCore`、`OooFrontend`、
+`OooBackend`、`OooExecutionCluster` 和提交适配器等乱序架构边界；ROB、IQ、LSQ、
+cache、TLB、预测器及执行单元按实际职责命名。仍维持旧周期接口的局部兼容模块统一
+使用 `Legacy*`，不再沿用来源项目名称。公开的 `core_top`、AXI、debug/commit 和
+reset 接口名称不受这次内部命名规范化影响。
+
 本轮讨论最初采用以下教学假设；本次 2nd pass 再用实际提交历史校正：
 
 - 假设 `docs/archive/nscscc-cpu-final-docs/linux-system-gap-audit.md` 中列出的功能缺口均已正确实现；
@@ -204,7 +210,7 @@ B response，并不能证明一个更年轻的访存在它确定为 SUC 之前�
 | ID | 方向 | 价值机制 | 主要代价或风险 | 决策所需指标 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | C01 | P0 accept-before-wakeup 正确性审计 | P0 在 barrier state 非 idle 时可对 operand slot 施加 backpressure；当前 direct-wakeup predicate 显式使用 `issueValid`，未合入该端口的 `issueReady`。若未接受的 producer 提前唤醒跨端口 consumer，后者可能读取旧 PRF 数据 | 这是潜在功能错误，不允许用性能收益或低事件率接受；测试需覆盖长 barrier、跨端口依赖、flush/exception 交叠及 source-data 检查 | 定向 Verilator 时序、consumer 实际 operand、producer accept 周期、所有现有 DiffTest/系统回归 | **最高优先级：待定向测试** |
-| C02 | 活动 OoO DIV 算术与中止协议证明 | 当前 `OooExecutionClusterSpec` 覆盖 DIV-return/ALU completion 仲裁，但未找到直接针对活动 `OooDivideUnit` 的四种 DIV/MOD signed/unsigned 随机算术、除零、overflow、逐周期 flush 和 exactly-once completion 测试；历史旧 divider differential harness 不是该单元的当前证明 | 这是验证缺口，不等价于已发现算术 bug；但 E01/E03 会改变最敏感的迭代和接受协议，不能在未锁定当前行为前优化 | 独立数学模型 differential、边界/随机 operand、每个迭代点 flush、completion pulse/ROB/epoch/pdst、重启及现有 DiffTest | **最高优先级：待补证明** |
+| C02 | 活动 OoO DIV 算术与中止协议证明 | 当前 `OooExecutionClusterSpec` 覆盖 DIV-return/ALU completion 仲裁，但未找到直接针对活动 `DivideUnit` 的四种 DIV/MOD signed/unsigned 随机算术、除零、overflow、逐周期 flush 和 exactly-once completion 测试；历史旧 divider differential harness 不是该单元的当前证明 | 这是验证缺口，不等价于已发现算术 bug；但 E01/E03 会改变最敏感的迭代和接受协议，不能在未锁定当前行为前优化 | 独立数学模型 differential、边界/随机 operand、每个迭代点 flush、completion pulse/ROB/epoch/pdst、重启及现有 DiffTest | **最高优先级：待补证明** |
 | C03 | ROB entry-complete 的 epoch/wraparound 审计 | wakeup 使用已注册的 current-epoch 资格，但 `stagedCompletionMatches` 只比较 valid、ROB index、entry valid/incomplete 和 pointer generation，未合入 `stagedCompletionCurrent`；若旧 completion 在 flush 后延迟到 6-bit ROB pointer 完整绕回，理论上可能命中新 entry | 正常 DIV/LSQ/barrier 都应在源头 drop 旧事务，因此这不是已确认的系统 bug；但 recovery epoch 已存在却未参与最终 complete，需证明端到端延迟上界或直接加门控 | ROB 定向测试：flush、分配跨 64 pointer、注入旧 epoch/同 pointer completion；并覆盖 wakeup、entry.complete、commit 和所有实际 completion source | **最高优先级：待定向测试** |
 | C04 | LSQ 虚拟别名顺序审计 | 当前 older-store overlap/forwarding 使用虚拟地址比较，而 L1D 按物理地址访问；Load 发出前没有对所有更老 Store 做物理地址别名检查，也未找到事后 memory-order violation replay。不同 VA 映射同一 PA 时，年轻 Load 可能绕过未提交老 Store并读到旧值 | Linux 可建立同一物理页的多个虚拟映射，因此不能把“无 synonym”当成默认软件合同；修复若等待所有老 Store 翻译会降低 MLP，若做物理 CAM/replay 会增加 LSQ 路径与恢复复杂度 | 两 VA 同 PA 的 store->load 定向测试，覆盖 byte mask、页内 offset、TLB/DMW、未知地址/翻译、cache hit/miss、flush；同时审计物理 compare 或 replay 证明 | **最高优先级：待定向测试** |
 | C05 | Cache refill/writeback error containment | L1I/L1D/L2 会累计 line-read error，却仍在 refill 完成后把 line 安装为 valid；之后的 cache hit 不再携带该错误。cached line write 的 AXI B error 仅有仿真 assertion，综合硬件没有保留 dirty line、重试或上报路径 | 官方 DDR 正常运行可能从不返回 error，因此这先是总线合同与故障语义审计；若 error 可达，缓存 poisoned line 或丢失 dirty victim 都是高破坏性功能问题 | 各 beat 注入 RRESP error 后首次/后续访问、line valid/dirty、跨 L1/L2 refill；cached writeback BRESP error、backpressure、maintenance 与恢复；确认平台 error 合同 | **最高优先级：待合同与定向测试** |
@@ -255,7 +261,7 @@ B response，并不能证明一个更年轻的访存在它确定为 SUC 之前�
 | A01 | Rename 整组阻塞改为可接受最老 prefix | 当前 lane 2 因 LQ/STQ 等资源不足时，资源充足的 lane 0/1 也无法分配；接受最老 prefix 可减少队头阻塞 | Decode/Rename buffer 必须压缩并保留余项，同拍 RAT bypass、FreeList/ROB/LSQ 计数和异常边界都要按 accepted prefix 重证 | 各资源导致的 group stall、可接受 prefix 长度、被无关 younger lane 浪费的 uop-slot、LUT/WNS、随机握手测试 | 待测量 |
 | D01 | Load dispatch 与 SDQ fullness 解耦 | 当前 P3 `portReady` 同时要求 IQ 和 SDQ ready，因此 SDQ 满会阻止不需要 SDQ 的 load 进入 LSU IQ | Router 需要按输入 uop 类型判断 P3 credit，同时继续保证 store 对 IQ+SDQ 的双写原子性；不能形成 ready 组合环 | `P3 IQ ready && !SDQ ready && head is load` 周期、load dispatch stall、SDQ occupancy、perf20 cycles、router path WNS | 待测量 |
 | D02 | Capability-aware maximum-prefix dispatch matching | 当前三路 router 按 lane 贪心选择最低编号可用端口；flexible ALU 可能占用 younger CSR/DIV/branch/multiply 的唯一端口，使可行的三路匹配退化成两路 | 3x4 matching、occupancy-aware tie-break 会增加 router 控制深度和跨 IQ ready 路由，可能重新制造已切断的 dispatch 关键路径 | greedy prefix 与最大可行 prefix 差异次数、各 IQ occupancy/空闲 issue、opcode 组合、LUT/WNS、perf20 cycles | 待测量 |
-| Q01 | 缩窄 dispatch/IQ scheduling uop | Queue/Window/IQ 当前保存完整 `OooRenamedUop`，包含许多只在 ROB commit 或特定 FU 使用的冷字段；按调度/端口保留必要字段可减少约 11k-LUT 调度存储与 compaction 布线 | 多种 payload 或 side table 增加接口和对齐验证；branch/CSR/LSU 所需字段不能遗漏，可能增加取回 mux | 各 bundle bit width、hierarchical LUT/FF、dispatch/IQ 路径、cycle count、完整 SoC WNS、所有 FU 定向测试 | 讨论 |
+| Q01 | 缩窄 dispatch/IQ scheduling uop | Queue/Window/IQ 当前保存完整 `RenamedMicroOp`，包含许多只在 ROB commit 或特定 FU 使用的冷字段；按调度/端口保留必要字段可减少约 11k-LUT 调度存储与 compaction 布线 | 多种 payload 或 side table 增加接口和对齐验证；branch/CSR/LSU 所需字段不能遗漏，可能增加取回 mux | 各 bundle bit width、hierarchical LUT/FF、dispatch/IQ 路径、cycle count、完整 SoC WNS、所有 FU 定向测试 | 讨论 |
 | F02 | 切断 L2 refill 到 L1I response predecode 的组合/布线路径 | 同平台上一候选的最差路径位于此处，数据路径 10.328 ns、route 占 76.8%；当前 top-N 已不由它主导 | 增加 response 级可能改变 miss/critical-group 延迟；复制 predecode 会增加面积和拥塞 | 新候选 top-N 是否重新出现该族、I-miss hit/critical-group latency、perf20 分项 | **历史路径：条件触发** |
 | F03 | 缩短 L1I response 到 frontend buffer enqueue 的控制锥 | 当前 `60fba481 + c398` 100 MHz routed WNS 路径由已注册的 L1I `responseValid` 经 response/prediction/prefix/tail 逻辑到 8-entry frontend buffer 的动态写 CE；9/10 条最差 CPU setup path 属于该族，最差 route 占 77.3% | 单纯增加 response register 会增加前端延迟；banked/rotating buffer、局部 valid 复制或拆分 correction/learn 与 enqueue 时，必须保持四槽压缩、PC/prediction 配对、组内 taken 截断及 redirect kill | frontend top-10 setup、response-valid fanout、各段组合级数、buffer enqueue/empty 周期、branch correction、IPC、LUT/FF、完整 SoC WNS | **高优先级：当前 WNS 路径** |
 | P02 | Vivado strategy/seed 与物理优化 A/B | `Explore`、phys_opt、LUT combining、局部寄存器复制和不同实现 seed 可能在同一 RTL 上改变 route-dominated WNS；适合先判断结果是否受物理随机性主导 | strategy/seed 不能替代 RTL 时序修复，跨 seed 选择最好的单次结果会造成过拟合；必须保留完整报告、实现选项、DRC 和 bitstream hash | 同一 RTL/软件下多个 seed 的 WNS/TNS、top-path 族、congestion、runtime、资源、cycle/frequency 产品；禁止跨 RTL 借用 slack | 待实验 |
@@ -447,7 +453,7 @@ response 到 frontend buffer enqueue，F03 的优先级高于初稿中的 F02。
 
 ### 2026-08-03：BTB/PHT/GHR/RAS 细化
 
-当前实际使用 `OooBankedFetchPredictor`。16-byte fetch group 的四个指令槽各有一组
+当前实际使用 `BankedFetchPredictor`。16-byte fetch group 的四个指令槽各有一组
 BTB/PHT bank：BTB 每 bank 128 项，PHT 每 bank 1024 个 2-bit counter；总计 512 个
 BTB 槽位和 4096 个 PHT counter。预测查询为同步读，四个 lane 并行返回。
 
@@ -527,16 +533,16 @@ per-benchmark cycle count。表项覆盖率低但方向准确时无需追求更�
 
 ```text
 Instruction Buffer（每个 fetch group 含四个 slot）
-  -> 三个并行 OooLa32rDecoder
+  -> 三个并行 La32rDecoder
   -> 一项、三路宽的 Decode/Rename elastic buffer
   -> RAT 查询 + FreeList/ROB/LSQ/dispatch 资源预分配
-  -> OooRenamedUop
+  -> RenamedMicroOp
 ```
 
 #### Decode 具体产生什么
 
-`OooWideDecode` 每拍最多解码前三条，fetch group 的第 4 条继续留在前端 IBUF，下一拍
-再成为最老的待解码指令。每个 LA32R 指令当前产生一个 `OooDecodedUop`，没有把复杂
+`WideDecode` 每拍最多解码前三条，fetch group 的第 4 条继续留在前端 IBUF，下一拍
+再成为最老的待解码指令。每个 LA32R 指令当前产生一个 `DecodedMicroOp`，没有把复杂
 指令拆成多个 micro-op。uop 至少携带四类信息：
 
 1. 身份与恢复信息：PC、原始 instruction、fetch slot、预测方向/目标和 predictor
@@ -565,7 +571,7 @@ decode 当场改变架构状态。
 `6bbca9b...` 对 decoder 的关键变化是把有效 CACOP 从 `loadStore/P3` 改路由为
 `barrier/P0`。地址翻译和 cache maintenance 现在由 P0 的 ROB-head barrier 状态机统一
 实施，不再把 CACOP 当普通 LSU request。CPUCFG 的 decode 类别没有变，变化在 execute
-读取参数化 `OooCpuConfig`。这两项都没有消费 `source1Used/source2Used`，所以 R01 的
+读取参数化 `CpuConfigEncoding`。这两项都没有消费 `source1Used/source2Used`，所以 R01 的
 静态假依赖结论不变。
 
 #### Decode/Rename buffer 的作用
@@ -576,7 +582,7 @@ decode 当场改变架构状态。
 `inputReady` 同时拉低。flush 会清除整项。
 
 旧 standalone 层次报告中该 buffer 约为 2,771 LUT、727 FF。成本较大，因为每个
-`OooDecodedUop` 很宽，三份 payload 都用寄存器保存；若未来该路径或拥塞成为证据充分
+`DecodedMicroOp` 很宽，三份 payload 都用寄存器保存；若未来该路径或拥塞成为证据充分
 的热点，可研究 hot/cold 字段拆分。在当前固定 c398 报告中，它并非已知最差路径。
 
 #### Rename 要解决的三个名字相关
@@ -916,7 +922,7 @@ allocate/commit 落在不同 bank，因此每 bank 只需一个写口和一个�
 depth 仅变为 16，按 RAMB36 宽度/深度推断大概率仍为 12 个，必须由 Vivado 确认。
 这说明 ROB 扩深甚至可能不增加 BRAM，因为现有 block 的深度远未用满。
 
-主要成本来自 `OooRobState`。它以 32 份 FF/逻辑保存 valid、complete、pointer、result、
+主要成本来自 `ReorderBufferState`。它以 32 份 FF/逻辑保存 valid、complete、pointer、result、
 side-effect data、completion exception 和 branch resolution；5 路 completion 又与每个
 entry 做 generation/pointer match。旧 standalone 报告中整个 ROB 已占 28,083 LUT、
 5,723 FF 和 12 RAMB36。若结构不变，64-entry 的 entry state 和 `64 x 5` completion
@@ -1045,9 +1051,9 @@ DBAR/IBAR/CACOP。
 
 #### Dispatch queue 与三项 window
 
-8-entry `OooDispatchQueue` 将 rename allocation 与端口 IQ 的短期背压解耦。它是顺序
+8-entry `DispatchQueue` 将 rename allocation 与端口 IQ 的短期背压解耦。它是顺序
 循环队列，可以每拍写入最多三条并送出最多三条。其后还有 3-entry
-`OooDispatchWindow`：
+`DispatchWindow`：
 
 ```text
 8-entry circular dispatch queue
@@ -1129,7 +1135,7 @@ wakeup 广播。四个 IQ 的旧参考合计约 6,097 LUT、7,342 FF。P3 IQ 之
 因为更深队列不能增加端口数量。
 
 Q01 的理论依据也来自这里：dispatch queue、window 和 IQ 保存完整
-`OooRenamedUop`，其中 PC、原始 instruction、predictor、exception、CSR、memory 等
+`RenamedMicroOp`，其中 PC、原始 instruction、predictor、exception、CSR、memory 等
 字段并非每个端口都需要，许多 commit 信息已在 ROB 留存。建立 compact scheduling uop
 或 port-specific payload 可能降低约 11k-LUT 调度结构的 FF、shift mux 和布线；必须逐
 FU 列出 execution/completion 真正需要的字段，不能凭字段名称删除。
@@ -1354,7 +1360,7 @@ ROB stagedPdst
   -> P3 IQ psrc match 与 readyMap
   -> oldest-ready select / queueDequeue
   -> count/compaction control（fanout 约 200）
-  -> 宽 OooRenamedUop payload 的 CE（局部 fanout 约 221）
+  -> 宽 RenamedMicroOp payload 的 CE（局部 fanout 约 221）
 ```
 
 所以这里的主要矛盾是 route-dominated 的 wakeup-select-compaction feedback，而非 ALU
@@ -1466,7 +1472,7 @@ completion 接口没有 `ready`，所以“优先级 mux 覆盖另一个 valid�
 
 #### 单周期 ALU、branch 和系统读取
 
-`OpenLa500Alu` 是纯组合单元，没有内部寄存器或 ready/valid 状态。它覆盖 add/sub、
+`Alu` 是纯组合单元，没有内部寄存器或 ready/valid 状态。它覆盖 add/sub、
 signed/unsigned compare、AND/NOR/OR/XOR、ANDN/ORN、LUI 和三类 shift：
 
 - add、sub、SLT、SLTU 共享一个 33-bit adder。减法通过 `a + ~b + 1` 完成，signed
@@ -1476,7 +1482,7 @@ signed/unsigned compare、AND/NOR/OR/XOR、ANDN/ORN、LUI 和三类 shift：
   保留 masked-OR 形式也使该单元与原参考 ALU 的边界一致。
 
 端口在 `issueValid && issueReady` 时真正接受 uop。普通 direct 操作在这一拍组合生成
-`OooCompletion`。源可以来自 PRF，也可以由 decoded control 改选 PC、立即数或常数 4。
+`Completion`。源可以来自 PRF，也可以由 decoded control 改选 PC、立即数或常数 4。
 branch 在 P2 同拍比较两个源，计算 taken/not-taken、实际 target，并把它与预测方向和
 预测 target 比较；`branchResolved`、`branchMispredict`、`branchTarget` 随 completion
 写进 ROB。当前 redirect 仍发生在 branch 到达 commit 时，所以执行时已经知道预测错，
@@ -1582,7 +1588,7 @@ wakeup/epoch/ROB 协议。进入 E01 实现前先完成 C02，锁定四种 DIV/M
 
 2nd pass 重新检查了 `6bbca9b...` 新增的 448 行 execution-cluster 测试：新增覆盖集中在
 DBAR/IBAR/CACOP、CPUCFG 和系统 completion；DIV 相关仍只有“divider return 对同 lane
-direct ALU 施加 backpressure”的仲裁测试，没有活动 `OooDivideUnit` 的数学 differential
+direct ALU 施加 backpressure”的仲裁测试，没有活动 `DivideUnit` 的数学 differential
 与逐迭代 flush。因此 C02 的表述和 E01 的前置 gate 保持不变。
 
 #### 执行端口分配与执行单元数量是否值得改变
@@ -1667,7 +1673,7 @@ serializing 并不等于“decode 后立即全核停住”，它仍是一条进�
 
 #### Completion 包怎样通过 ROB 身份检查
 
-五条 lane 上的 `OooCompletion` 至少携带以下信息：
+五条 lane 上的 `Completion` 至少携带以下信息：
 
 - `robPointer`：ROB index 加 generation 身份，用于区分环形队列同一物理槽的不同生命期；
 - `recoveryEpoch`：区分 flush 前后的推测世界；
@@ -2079,7 +2085,7 @@ LDQ entry 在 ROB commit 前一直占用。scheduler 从 `loadBase` 开始，用
 pending = valid && !requestSent && !completed
 ```
 
-选中的 index 和宽 payload 会先寄存为 `OooScheduledLoad`。这个 timing cut 让后续 8 个
+选中的 index 和宽 payload 会先寄存为 `ScheduledLoad`。这个 timing cut 让后续 8 个
 STQ 的年龄/地址比较不再直接读取一个大范围动态 mux；AGU 与 scheduler 同拍命中新 entry
 时有专门旁路，所以常见的 address-to-translation 路径没有额外再停一拍。
 
@@ -2274,7 +2280,7 @@ uncached normal memory / alias possible -> 保留 writeback-invalidate
 ```
 
 这是最可能同时降低单次延迟和 hierarchy 全局停顿的方向。但当前
-`OooSharedCacheHierarchySpec` 已把“uncached Store 必须写回并失效 cached alias”固定成测试，
+`SharedCacheHierarchySpec` 已把“uncached Store 必须写回并失效 cached alias”固定成测试，
 所以只能添加经过证明的设备范围快路径，不能全局删除维护。
 
 ##### U02：posted retirement 能隐藏什么
@@ -2301,7 +2307,7 @@ MMIO store queue 不会提高合法的连续 Store 发射率。典型轮询代�
 
 ##### U03：缩短到达 AXI 的排队时间
 
-`OooAxiLineBridge` 只在 `busIdle` 时更新 `uncachedWait`。如果 SUC 请求在四个 cached read ID
+`AxiLineBridge` 只在 `busIdle` 时更新 `uncachedWait`。如果 SUC 请求在四个 cached read ID
 仍活跃时出现，新的 cached refill 仍可能继续被接受并延长排空。可以在看到 pending SUC 时
 立即锁存 drain 请求，停止接受新的 demand refill，允许既有事务和该 Store 的 dirty-alias
 writeback 完成，然后把第一个空闲时隙交给 SUC。
@@ -2611,7 +2617,7 @@ Store/refill 同拍，说明这里的 byte-level contract 是功能路径，不�
 
 #### 四个 local MSHR 不等于四个纯 Data miss credit
 
-L1I 与 L1D 先经过 `OooSharedReadMshrRouter`。它维护四个 hierarchy-global ID，记录 owner
+L1I 与 L1D 先经过 `SharedReadMshrRouter`。它维护四个 hierarchy-global ID，记录 owner
 是 instruction 还是 data，以及原 local ID。I/D 同拍请求按轮转公平选择，前面还有两项
 注册 request queue，用来切断 L1-ready 到 L2-ready 的组合路径。
 
@@ -3084,9 +3090,9 @@ TLBSRCH 是另一条管理路径。它在提交边界组合比较全部 32 项�
 
 `d9bab16ef46540eb3348b0781afc4d0949f28adc` 已经采用上述完整层次：32 项 banked main
 TLB、I/D 各 4 项 micro-TLB、两项 negative cache 和单个 4-entry/cycle walker。当前
-`OooAddressTranslationUnit.scala` 相对该提交无 diff。
+`AddressTranslationUnit.scala` 相对该提交无 diff。
 
-之后只有 `7d35545` 直接改过 `OooHierarchicalTlb.scala`。旧实现先把 4-bit match 编码成
+之后只有 `7d35545` 直接改过 `HierarchicalTlb.scala`。旧实现先把 4-bit match 编码成
 micro index，再用动态 index 选择一整条宽 entry；当前实现让四个 entry 的 PPN、PLV、
 MAT、V/D 等字段分别被 match mask 门控后 OR 合并，再在 micro-result 与 registered
 walk-result 之间选择。它减少了动态宽 mux 的组合深度，`+73/-25` 行，容量、替换、walker、
@@ -3833,13 +3839,13 @@ SoC routed report 为准，与仿真 cycle 通过 `cycles/frequency` 合并决�
   docs-only HEAD 替代 source identity 或扩大审计终点
 - 指令融合的 ISA 语义：`docs/References/2025032109211238668.龙架构32位精简版参考手册_r1p04.pdf`
   第 2.1.4、2.2.1.2--2.2.1.8、2.2.3、2.2.4、6.1 和 6.2.3 节；FUS01 结构判断另核对
-  `OooUops.scala`、`OooRob.scala`、`OooBackend.scala` 与 `OooCommitAdapter.scala`。CPU 侧
+  `OooUops.scala`、`ReorderBuffer.scala`、`OooBackend.scala` 与 `OooCommitAdapter.scala`。CPU 侧
   正在并行开发，本项只记录结构合同，不把读取时的 HEAD 或旧 timing 数字当作稳定基线
 - 当前参数：`cpu/src/main/scala/miku/core/OooCoreConfig.scala`
 - perf20 地址模式：`chiplab/software/examples/nscscc_perf/start.S` 与
   `chiplab/software/bsp/env/separate.lds`；direct/DMW 快路径结构核对
-  `cpu/src/main/scala/miku/privileged/OooAddressTranslationUnit.scala`、
-  `cpu/src/main/scala/miku/backend/OooLoadStoreQueue.scala` 和
+  `cpu/src/main/scala/miku/privileged/AddressTranslationUnit.scala`、
+  `cpu/src/main/scala/miku/backend/LoadStoreQueue.scala` 和
   `cpu/src/main/scala/miku/backend/OooBackend.scala`
 - 顶层数据流：`cpu/src/main/scala/miku/core/OooCore.scala`
 - 历史验证状态：`docs/archive/nscscc-cpu-final-docs/refactor/status.yml`；当前结果以候选清单为准。
@@ -3849,46 +3855,46 @@ SoC routed report 为准，与仿真 cycle 通过 `cycles/frequency` 合并决�
 - 当前稳定归档目录：`Stable_Backup/`（其中的具体候选以各自 `manifest.txt` 为准）。
 - Standalone 层次资源属于可再生输出，保存于 `build/vivado/`，不作为当前设计的固定证据。
 - 微架构框图：`docs/architecture.md`
-- Decode：`cpu/src/main/scala/miku/frontend/OooWideDecode.scala`、
-  `cpu/src/main/scala/miku/frontend/OooLa32rDecoder.scala`
-- Rename 边界与 uop：`cpu/src/main/scala/miku/backend/OooDecodeRenameBuffer.scala`、
+- Decode：`cpu/src/main/scala/miku/frontend/WideDecode.scala`、
+  `cpu/src/main/scala/miku/frontend/La32rDecoder.scala`
+- Rename 边界与 uop：`cpu/src/main/scala/miku/backend/DecodeRenameBuffer.scala`、
   `cpu/src/main/scala/miku/backend/OooUops.scala`
-- RAT/PRF/FreeList：`cpu/src/main/scala/miku/backend/OooRegisterStructures.scala`
+- RAT/PRF/FreeList：`cpu/src/main/scala/miku/backend/RegisterStructures.scala`
 - 后端整组分配：`cpu/src/main/scala/miku/backend/OooBackend.scala`
-- ROB hot/cold payload：`cpu/src/main/scala/miku/backend/OooRob.scala`
-- Dispatch/IQ/LSQ 容量：`cpu/src/main/scala/miku/backend/OooDispatchQueue.scala`、
-  `cpu/src/main/scala/miku/backend/OooIssueQueue.scala`、
-  `cpu/src/main/scala/miku/backend/OooLsqAllocator.scala`、
-  `cpu/src/main/scala/miku/backend/OooLoadStoreQueue.scala`、
-  `cpu/src/main/scala/miku/backend/OooStoreDataQueue.scala`
+- ROB hot/cold payload：`cpu/src/main/scala/miku/backend/ReorderBuffer.scala`
+- Dispatch/IQ/LSQ 容量：`cpu/src/main/scala/miku/backend/DispatchQueue.scala`、
+  `cpu/src/main/scala/miku/backend/IssueQueue.scala`、
+  `cpu/src/main/scala/miku/backend/LoadStoreQueueAllocator.scala`、
+  `cpu/src/main/scala/miku/backend/LoadStoreQueue.scala`、
+  `cpu/src/main/scala/miku/backend/StoreDataQueue.scala`
 - Dispatch timing cut 记录：`docs/archive/refactor/20260728-dispatch-window-timing/iteration.md`
 - Compact IQ 记录：`docs/archive/refactor/20260727-compact-issue-queue/iteration.md`
 - Wakeup/PRF/执行路径：`cpu/src/main/scala/miku/backend/OooBackend.scala`、
-  `cpu/src/main/scala/miku/backend/OooRegisterStructures.scala`、
+  `cpu/src/main/scala/miku/backend/RegisterStructures.scala`、
   `cpu/src/main/scala/miku/execute/OooExecutionCluster.scala`
-- ALU 操作与组合边界：`cpu/src/main/scala/miku/execute/OpenLa500Alu.scala`
+- ALU 操作与组合边界：`cpu/src/main/scala/miku/execute/Alu.scala`
 - Completion/ROB complete/commit 边界：
   `cpu/src/main/scala/miku/backend/OooUops.scala`、
-  `cpu/src/main/scala/miku/backend/OooRob.scala`
+  `cpu/src/main/scala/miku/backend/ReorderBuffer.scala`
 - Commit、恢复与系统副作用：
   `cpu/src/main/scala/miku/backend/OooBackend.scala`、
   `cpu/src/main/scala/miku/backend/OooCommitAdapter.scala`、
   `cpu/src/main/scala/miku/core/OooCore.scala`、
   `cpu/src/main/scala/miku/core/OooCoreSystem.scala`
 - Commit/恢复定向测试：
-  `cpu/src/test/scala/miku/backend/OooRobSpec.scala`、
+  `cpu/src/test/scala/miku/backend/ReorderBufferSpec.scala`、
   `cpu/src/test/scala/miku/backend/OooCommitAdapterSpec.scala`、
-  `cpu/src/test/scala/miku/backend/OooLoadStoreQueueSpec.scala`、
+  `cpu/src/test/scala/miku/backend/LoadStoreQueueSpec.scala`、
   `cpu/src/test/scala/miku/core/OooCoreSpec.scala`
 - Retirement 状态时序切分记录：
   `docs/archive/refactor/20260727-1735-retirement-state-timing/iteration.md`
 - Store data 解耦与 LSQ：
-  `cpu/src/main/scala/miku/backend/OooStoreDataQueue.scala`、
-  `cpu/src/main/scala/miku/backend/OooLoadStoreQueue.scala`、
-  `cpu/src/main/scala/miku/backend/OooLsqAllocator.scala`
+  `cpu/src/main/scala/miku/backend/StoreDataQueue.scala`、
+  `cpu/src/main/scala/miku/backend/LoadStoreQueue.scala`、
+  `cpu/src/main/scala/miku/backend/LoadStoreQueueAllocator.scala`
 - LSQ/SDQ 定向测试：
-  `cpu/src/test/scala/miku/backend/OooLoadStoreQueueSpec.scala`、
-  `cpu/src/test/scala/miku/backend/OooStoreDataQueueSpec.scala`
+  `cpu/src/test/scala/miku/backend/LoadStoreQueueSpec.scala`、
+  `cpu/src/test/scala/miku/backend/StoreDataQueueSpec.scala`
 - Nonblocking MSHR、response epoch 与 LSQ 时序记录：
   `docs/archive/refactor/20260725-nonblocking-mshr/iteration.md`、
   `docs/archive/refactor/20260728-cache-response-epoch/iteration.md`、
@@ -3901,32 +3907,32 @@ SoC routed report 为准，与仿真 cycle 通过 `cycles/frequency` 合并决�
 - 固定 nscscc-team 通用 DMA 接线：
   `chiplab/chip/soc_demo/nscscc-team/soc_top.v`、`chiplab/IP/DMA/dma.v`
 - Cache array 与三级 controller：
-  `cpu/src/main/scala/miku/memory/OooCacheArray.scala`、
-  `cpu/src/main/scala/miku/memory/OooL1InstructionCache.scala`、
-  `cpu/src/main/scala/miku/memory/OooL1DataCache.scala`、
-  `cpu/src/main/scala/miku/memory/OooL2Cache.scala`
+  `cpu/src/main/scala/miku/memory/CacheArray.scala`、
+  `cpu/src/main/scala/miku/memory/L1InstructionCache.scala`、
+  `cpu/src/main/scala/miku/memory/L1DataCache.scala`、
+  `cpu/src/main/scala/miku/memory/L2Cache.scala`
 - Shared MSHR 与 AXI bridge：
-  `cpu/src/main/scala/miku/memory/OooSharedReadMshrRouter.scala`、
-  `cpu/src/main/scala/miku/memory/OooSharedCacheHierarchy.scala`、
-  `cpu/src/main/scala/miku/memory/OooAxiLineBridge.scala`
+  `cpu/src/main/scala/miku/memory/SharedReadMshrRouter.scala`、
+  `cpu/src/main/scala/miku/memory/SharedCacheHierarchy.scala`、
+  `cpu/src/main/scala/miku/memory/AxiLineBridge.scala`
 - Cache/AXI 定向测试：
-  `cpu/src/test/scala/miku/memory/OooL1InstructionCacheSpec.scala`、
-  `cpu/src/test/scala/miku/memory/OooL1DataCacheSpec.scala`、
-  `cpu/src/test/scala/miku/memory/OooL2CacheSpec.scala`、
-  `cpu/src/test/scala/miku/memory/OooSharedCacheHierarchySpec.scala`、
-  `cpu/src/test/scala/miku/memory/OooAxiLineBridgeSpec.scala`
+  `cpu/src/test/scala/miku/memory/L1InstructionCacheSpec.scala`、
+  `cpu/src/test/scala/miku/memory/L1DataCacheSpec.scala`、
+  `cpu/src/test/scala/miku/memory/L2CacheSpec.scala`、
+  `cpu/src/test/scala/miku/memory/SharedCacheHierarchySpec.scala`、
+  `cpu/src/test/scala/miku/memory/AxiLineBridgeSpec.scala`
 - MMU/TLB/CSR 实现：
-  `cpu/src/main/scala/miku/privileged/OooAddressTranslationUnit.scala`、
-  `cpu/src/main/scala/miku/privileged/OooHierarchicalTlb.scala`、
-  `cpu/src/main/scala/miku/privileged/OpenLa500Csr.scala`、
+  `cpu/src/main/scala/miku/privileged/AddressTranslationUnit.scala`、
+  `cpu/src/main/scala/miku/privileged/HierarchicalTlb.scala`、
+  `cpu/src/main/scala/miku/privileged/CsrFile.scala`、
   `cpu/src/main/scala/miku/core/OooCoreSystem.scala`
 - 翻译 owner 与 flush/drain 协议：
   `cpu/src/main/scala/miku/frontend/OooFrontend.scala`、
   `cpu/src/main/scala/miku/backend/OooBackendWithExecution.scala`、
-  `cpu/src/main/scala/miku/backend/OooLoadStoreQueue.scala`
+  `cpu/src/main/scala/miku/backend/LoadStoreQueue.scala`
 - TLB/CSR/异常定向测试：
-  `cpu/src/test/scala/miku/privileged/OooAddressTranslationUnitSpec.scala`、
-  `cpu/src/test/scala/miku/privileged/OpenLa500CsrSpec.scala`、
+  `cpu/src/test/scala/miku/privileged/AddressTranslationUnitSpec.scala`、
+  `cpu/src/test/scala/miku/privileged/CsrFileSpec.scala`、
   `cpu/src/test/scala/miku/core/OooCoreIntegrationSpec.scala`
 - Hierarchical TLB 历史设计与时序记录：
   `docs/archive/refactor/20260725-ooo-hierarchical-tlb/iteration.md`、

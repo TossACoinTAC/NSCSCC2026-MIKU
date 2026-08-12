@@ -62,7 +62,7 @@ final case class MemoryStatus() extends Bundle with IMasterSlave {
   }
 }
 
-/** Locked request-type encodings used by the active openLA500 cache/AXI bridge. */
+/** Locked request-type encodings used by the active MIKU cache/AXI bridge. */
 object LineRequestType {
   val Byte: Int = 0
   val HalfWord: Int = 1

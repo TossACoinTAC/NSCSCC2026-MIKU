@@ -21,7 +21,7 @@ from typing import Any
 
 TARGET = "core-top-compat"
 TOP_MODULE = "core_top"
-FORBIDDEN_LEGACY_MARKER = "openla500_legacy_core"
+FORBIDDEN_LEGACY_MARKER = "legacy_inorder_core"
 EXPECTED_PORT_COUNT = 49
 EXPECTED_INPUT_COUNT = 17
 EXPECTED_OUTPUT_COUNT = 32
@@ -43,39 +43,39 @@ COMPAT_UNUSED_SIGNALS = (
     ("SpinalCoreBackend", "decode_io_btb_deleteEntry"),
     ("SpinalCoreBackend", "decode_io_registers_0"),
     ("SpinalCoreBackend", "addressTranslation_inst_tlb_d"),
-    ("OpenLa500DCache", "preld_hint"),
-    ("OpenLa500ICache", "op"),
-    ("OpenLa500ICache", "wstrb"),
-    ("OpenLa500ICache", "wdata"),
-    ("OpenLa500ICache", "wr_rdy"),
-    ("OpenLa500AddrTrans", "tlbehi_in"),
-    ("OpenLa500AddrTrans", "tlbelo0_in"),
-    ("OpenLa500AddrTrans", "tlbelo1_in"),
-    ("OpenLa500AddrTrans", "tlbidx_in"),
-    ("OpenLa500AddrTrans", "csr_dmw0"),
-    ("OpenLa500AddrTrans", "csr_dmw1"),
-    ("OpenLa500AddrTrans", "instPhysical"),
-    ("OpenLa500AddrTrans", "dataPhysical"),
-    ("OpenLa500Csr", "tlbehi_in"),
-    ("OpenLa500Csr", "tlbelo0_in"),
-    ("OpenLa500Csr", "tlbelo1_in"),
-    ("OpenLa500Csr", "tlbidx_in"),
-    ("OpenLa500Csr", "logic_brk"),
-    ("OpenLa500Csr", "logic_disableCache"),
+    ("LegacyDataCache", "preld_hint"),
+    ("LegacyInstructionCache", "op"),
+    ("LegacyInstructionCache", "wstrb"),
+    ("LegacyInstructionCache", "wdata"),
+    ("LegacyInstructionCache", "wr_rdy"),
+    ("LegacyAddressTranslator", "tlbehi_in"),
+    ("LegacyAddressTranslator", "tlbelo0_in"),
+    ("LegacyAddressTranslator", "tlbelo1_in"),
+    ("LegacyAddressTranslator", "tlbidx_in"),
+    ("LegacyAddressTranslator", "csr_dmw0"),
+    ("LegacyAddressTranslator", "csr_dmw1"),
+    ("LegacyAddressTranslator", "instPhysical"),
+    ("LegacyAddressTranslator", "dataPhysical"),
+    ("CsrFile", "tlbehi_in"),
+    ("CsrFile", "tlbelo0_in"),
+    ("CsrFile", "tlbelo1_in"),
+    ("CsrFile", "tlbidx_in"),
+    ("CsrFile", "logic_brk"),
+    ("CsrFile", "logic_disableCache"),
     ("WritebackStage", "payload_exceptionCode"),
     ("WritebackStage", "payload_physicalAddress"),
     ("MemoryStage", "payload_preload"),
     ("FetchStage", "io_dmw0"),
     ("FetchStage", "io_dmw1"),
-    ("OpenLa500AxiBridge", "rid"),
-    ("OpenLa500AxiBridge", "rresp"),
-    ("OpenLa500AxiBridge", "bid"),
-    ("OpenLa500AxiBridge", "bresp"),
-    ("OpenLa500AxiBridge", "inst_wr_req"),
-    ("OpenLa500AxiBridge", "inst_wr_type"),
-    ("OpenLa500AxiBridge", "inst_wr_addr"),
-    ("OpenLa500AxiBridge", "inst_wr_wstrb"),
-    ("OpenLa500AxiBridge", "inst_wr_data"),
+    ("LegacyAxiBridge", "rid"),
+    ("LegacyAxiBridge", "rresp"),
+    ("LegacyAxiBridge", "bid"),
+    ("LegacyAxiBridge", "bresp"),
+    ("LegacyAxiBridge", "inst_wr_req"),
+    ("LegacyAxiBridge", "inst_wr_type"),
+    ("LegacyAxiBridge", "inst_wr_addr"),
+    ("LegacyAxiBridge", "inst_wr_wstrb"),
+    ("LegacyAxiBridge", "inst_wr_data"),
 )
 
 
@@ -666,7 +666,7 @@ def verify_complete_rtl(text: str, contract: dict[str, Any]) -> dict[str, Any]:
     if module_declaration_count(text, TOP_MODULE) != 1:
         raise CoreTopGateError("complete Spinal RTL must define exactly one core_top")
     if FORBIDDEN_LEGACY_MARKER in text:
-        raise CoreTopGateError("complete Spinal RTL must not contain openla500_legacy_core")
+        raise CoreTopGateError("complete Spinal RTL must not contain legacy_inorder_core")
     header = extract_normalized_header(text.encode("utf-8"))
     ports, tlbnum = parse_header_contract(header)
     if ports != contract["ports"]:
@@ -1072,7 +1072,7 @@ def validate_top_contract(document: dict[str, Any], contract: dict[str, Any]) ->
     if top_tlbnum != 32:
         raise CoreTopGateError(f"core_top TLBNUM parameter mismatch: {top_tlbnum}")
     if FORBIDDEN_LEGACY_MARKER in modules:
-        raise CoreTopGateError("Yosys design still contains openla500_legacy_core")
+        raise CoreTopGateError("Yosys design still contains legacy_inorder_core")
     cells = _require_dict(top.get("cells", {}), "Yosys core_top cells")
     return {
         "actual_ports": actual_ports,

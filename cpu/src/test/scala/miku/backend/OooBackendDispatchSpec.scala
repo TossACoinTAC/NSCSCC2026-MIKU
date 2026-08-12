@@ -59,7 +59,7 @@ private final class OooBackendDispatchProbe(config: OooCoreConfig) extends Compo
     config.commitWidth,
     log2Up(config.commitWidth + 1) bits
   )
-  val decoders = Array.tabulate(config.renameWidth)(_ => new OooLa32rDecoder(config))
+  val decoders = Array.tabulate(config.renameWidth)(_ => new La32rDecoder(config))
 
   backend.io.renameValid := io.inputValid
   for (lane <- 0 until config.renameWidth) {
@@ -86,7 +86,7 @@ private final class OooBackendDispatchProbe(config: OooCoreConfig) extends Compo
   backend.io.directWakeupValid := 0
   backend.io.directWakeupValid(0) := io.directWakeupValid
   private val multiplyPort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.Multiply))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Multiply))
   backend.io.directWakeupValid(multiplyPort) := io.multiplyWakeupValid
   for (lane <- 0 until config.executionWidth) {
     if (lane == multiplyPort) {
@@ -112,7 +112,7 @@ private final class OooBackendDispatchProbe(config: OooCoreConfig) extends Compo
         B(0, backend.io.completion(lane).getBitsWidth bits)
       )
   }
-  val completionPayload = OooCompletion(config)
+  val completionPayload = Completion(config)
   completionPayload.robPointer := io.completionRobPointer
   completionPayload.recoveryEpoch := 0
   completionPayload.pdst := io.completionPdst
@@ -142,7 +142,7 @@ private final class OooBackendDispatchProbe(config: OooCoreConfig) extends Compo
   io.storeDataStoreQueueIndex := backend.io.storeDataStoreQueueIndex
   io.storeData := backend.io.storeData
   private val loadStorePort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.LoadStore))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
   io.loadStoreIssueOccupancy := backend.io.loadStoreIssueOccupancy
   io.storeDataOccupancy := backend.io.storeDataOccupancy
   io.memoryAllocateValid := backend.io.memoryAllocateValid
@@ -164,7 +164,7 @@ private final class OooBackendDispatchProbe(config: OooCoreConfig) extends Compo
 class OooBackendDispatchSpec extends AnyFunSuite {
   private val config = OooCoreConfig.FourIssueThreeCommit
   private val loadStorePort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.LoadStore))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
 
   private def clearControl(dut: OooBackendDispatchProbe): Unit = {
     dut.io.inputValid #= 0
@@ -538,7 +538,7 @@ class OooBackendDispatchSpec extends AnyFunSuite {
   test("Store dispatch remains atomic when the address IQ is full") {
     val asymmetricConfig = config.copy(loadQueueEntries = 16, storeQueueEntries = 16)
     val asymmetricLoadStorePort = asymmetricConfig.executionPorts
-      .indexWhere(_.capabilities.contains(OooFuKind.LoadStore))
+      .indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
       .compile(new OooBackendDispatchProbe(asymmetricConfig))

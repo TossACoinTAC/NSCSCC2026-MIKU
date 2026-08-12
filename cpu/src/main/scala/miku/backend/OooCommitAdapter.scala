@@ -7,11 +7,11 @@ final class OooCommitAdapter(config: OooCoreConfig = OooCoreConfig.FourIssueThre
     extends Component {
   val io = new Bundle {
     val commitValid = in Bits (config.commitWidth bits)
-    val commit = in Vec (OooCommitRecord(config), config.commitWidth)
+    val commit = in Vec (CommitRecord(config), config.commitWidth)
     val flush = in Bool ()
 
     val debugCommitValid = out Bool ()
-    val debugCommit = out(OooCommitRecord(config))
+    val debugCommit = out(CommitRecord(config))
     val csrWriteValid = out Bool ()
     val csrAddress = out UInt (14 bits)
     val csrWriteData = out Bits (config.xlen bits)
@@ -38,7 +38,7 @@ final class OooCommitAdapter(config: OooCoreConfig = OooCoreConfig.FourIssueThre
     val reservationLineAddress = out Bits (config.reservationAddressWidth bits)
     val exceptionValid = out Bool ()
     val exceptionPc = out UInt (config.xlen bits)
-    val exception = out(OooExceptionMeta())
+    val exception = out(ExceptionMetadata())
   }
 
   io.debugCommitValid := !io.flush && io.commitValid.orR
@@ -91,31 +91,31 @@ final class OooCommitAdapter(config: OooCoreConfig = OooCoreConfig.FourIssueThre
       io.csrWriteData := io.commit(lane).sideEffectData
       io.csrMask := io.commit(lane).csrMask
       io.csrWriteValid := io.commit(lane).csrWrite
-      when(io.commit(lane).systemOperation === OooSystemOp.ertn) {
+      when(io.commit(lane).systemOperation === SystemOperation.ertn) {
         io.ertnValid := True
       }
-      when(io.commit(lane).systemOperation === OooSystemOp.idle) {
+      when(io.commit(lane).systemOperation === SystemOperation.idle) {
         io.idleValid := True
       }
-      when(io.commit(lane).systemOperation === OooSystemOp.tlbSearch) {
+      when(io.commit(lane).systemOperation === SystemOperation.tlbSearch) {
         io.tlbSearchValid := True
       }
-      when(io.commit(lane).systemOperation === OooSystemOp.tlbRead) {
+      when(io.commit(lane).systemOperation === SystemOperation.tlbRead) {
         io.tlbReadValid := True
       }
-      when(io.commit(lane).systemOperation === OooSystemOp.tlbWrite) {
+      when(io.commit(lane).systemOperation === SystemOperation.tlbWrite) {
         io.tlbWriteValid := True
       }
-      when(io.commit(lane).systemOperation === OooSystemOp.tlbFill) {
+      when(io.commit(lane).systemOperation === SystemOperation.tlbFill) {
         io.tlbFillValid := True
       }
-      when(io.commit(lane).systemOperation === OooSystemOp.invalidateTlb) {
+      when(io.commit(lane).systemOperation === SystemOperation.invalidateTlb) {
         io.tlbInvalidateValid := True
         io.tlbInvalidateAsid := io.commit(lane).sideEffectData(9 downto 0)
         io.tlbInvalidateVpn := io.commit(lane).sideEffectData(31 downto 13)
         io.tlbInvalidateOperation := io.commit(lane).instruction(4 downto 0)
       }
-      when(io.commit(lane).systemOperation === OooSystemOp.loadLinked) {
+      when(io.commit(lane).systemOperation === SystemOperation.loadLinked) {
         io.reservationBitSet := True
         io.reservationBitValue := !io.commit(lane).sideEffectData(0)
         io.reservationAddressSet := !io.commit(lane).sideEffectData(0)
@@ -124,16 +124,16 @@ final class OooCommitAdapter(config: OooCoreConfig = OooCoreConfig.FourIssueThre
         )
         io.refetchValid := True
       }
-      when(io.commit(lane).systemOperation === OooSystemOp.storeConditional) {
+      when(io.commit(lane).systemOperation === SystemOperation.storeConditional) {
         io.reservationBitSet := True
         io.reservationBitValue := False
         io.refetchValid := True
       }
       when(
-        io.commit(lane).systemOperation === OooSystemOp.instructionBarrier ||
-          io.commit(lane).systemOperation === OooSystemOp.dataBarrier ||
-          io.commit(lane).systemOperation === OooSystemOp.cacheOperation ||
-          io.commit(lane).systemOperation === OooSystemOp.preload
+        io.commit(lane).systemOperation === SystemOperation.instructionBarrier ||
+          io.commit(lane).systemOperation === SystemOperation.dataBarrier ||
+          io.commit(lane).systemOperation === SystemOperation.cacheOperation ||
+          io.commit(lane).systemOperation === SystemOperation.preload
       ) {
         io.refetchValid := True
       }

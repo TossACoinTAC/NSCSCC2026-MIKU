@@ -93,7 +93,7 @@ def parse_core_top_header(text: str) -> tuple[list[dict[str, Any]], int]:
 
 
 def validate_rtl(text: str, contract: list[dict[str, Any]]) -> dict[str, Any]:
-    if "openla500_legacy_core" in text:
+    if "legacy_inorder_core" in text:
         raise ContractError("发布 RTL 仍包含已删除的旧后端")
     ports, tlbnum = parse_core_top_header(text)
     if tlbnum != 32 or ports != contract:

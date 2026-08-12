@@ -49,7 +49,7 @@ final case class StoreEvent() extends Bundle {
   def active: Bool = instructionMask.orR
 }
 
-/** TLB fill observation for the active 32-entry openLA500 configuration. */
+/** TLB fill observation for the active 32-entry MIKU configuration. */
 final case class TlbFillEvent() extends Bundle {
   val valid = Bool()
   val index = UInt(5 bits)

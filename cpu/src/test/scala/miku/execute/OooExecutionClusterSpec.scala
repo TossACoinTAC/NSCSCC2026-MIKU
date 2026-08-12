@@ -10,12 +10,12 @@ import spinal.core.sim._
 
 private final class OooExecutionClusterProbe(config: OooCoreConfig) extends Component {
   private val loadStorePort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.LoadStore))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
   private val csrPort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.Csr))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Csr))
   private val aluPort =
     config.executionPorts.indexWhere(port =>
-      port.capabilities.contains(OooFuKind.Alu) && !port.capabilities.contains(OooFuKind.Csr)
+      port.capabilities.contains(ExecutionUnitKind.Alu) && !port.capabilities.contains(ExecutionUnitKind.Csr)
     )
 
   val io = new Bundle {
@@ -26,13 +26,13 @@ private final class OooExecutionClusterProbe(config: OooCoreConfig) extends Comp
     val issueReady = out Bool ()
     val aguValid = out Bool ()
     val completionValid = out Bool ()
-    val systemOperation = out UInt (OooSystemOp.Width bits)
+    val systemOperation = out UInt (SystemOperation.Width bits)
     val isLoad = out Bool ()
     val isStore = out Bool ()
   }
   noIoPrefix()
 
-  val decoder = new OooLa32rDecoder(config)
+  val decoder = new La32rDecoder(config)
   decoder.io.pc := U(config.resetVector, config.xlen bits)
   decoder.io.instruction := io.instruction
   decoder.io.fetchSlot := 0
@@ -45,8 +45,8 @@ private final class OooExecutionClusterProbe(config: OooCoreConfig) extends Comp
 
   val execution = new OooExecutionCluster(config)
   execution.io.issueValid := 0
-  val decodedIsBarrier = OooFuType.isBarrier(decoder.io.decoded.fuType)
-  val decodedUsesLsu = decoder.io.decoded.fuType === OooFuType.loadStore
+  val decodedIsBarrier = ExecutionUnitType.isBarrier(decoder.io.decoded.fuType)
+  val decodedUsesLsu = decoder.io.decoded.fuType === ExecutionUnitType.loadStore
   execution.io.issueValid(loadStorePort) := io.issueValid && decodedUsesLsu
   execution.io.issueValid(aluPort) := io.issueValid && !decodedUsesLsu && !decodedIsBarrier
   execution.io.issueValid(csrPort) := io.issueValid && decodedIsBarrier
@@ -116,7 +116,7 @@ private final class OooExecutionClusterProbe(config: OooCoreConfig) extends Comp
 
 private final class OooDivideCompletionCollisionProbe(config: OooCoreConfig) extends Component {
   private val dividePort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.Divide))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Divide))
 
   val io = new Bundle {
     val instruction = in Bits (32 bits)
@@ -138,7 +138,7 @@ private final class OooDivideCompletionCollisionProbe(config: OooCoreConfig) ext
   }
   noIoPrefix()
 
-  val decoder = new OooLa32rDecoder(config)
+  val decoder = new La32rDecoder(config)
   decoder.io.pc := U(config.resetVector, config.xlen bits)
   decoder.io.instruction := io.instruction
   decoder.io.fetchSlot := 0
@@ -209,7 +209,7 @@ private final class OooDivideCompletionCollisionProbe(config: OooCoreConfig) ext
 
 private final class OooMultiplyWakeupProbe(config: OooCoreConfig) extends Component {
   private val multiplyPort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.Multiply))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Multiply))
 
   val io = new Bundle {
     val instruction = in Bits (32 bits)
@@ -225,7 +225,7 @@ private final class OooMultiplyWakeupProbe(config: OooCoreConfig) extends Compon
   }
   noIoPrefix()
 
-  val decoder = new OooLa32rDecoder(config)
+  val decoder = new La32rDecoder(config)
   decoder.io.pc := U(config.resetVector, config.xlen bits)
   decoder.io.instruction := io.instruction
   decoder.io.fetchSlot := 0
@@ -292,7 +292,7 @@ private final class OooMultiplyWakeupProbe(config: OooCoreConfig) extends Compon
 }
 
 private final class OooBarrierExecutionProbe(config: OooCoreConfig) extends Component {
-  private val csrPort = config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.Csr))
+  private val csrPort = config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Csr))
 
   val io = new Bundle {
     val instruction = in Bits (32 bits)
@@ -315,7 +315,7 @@ private final class OooBarrierExecutionProbe(config: OooCoreConfig) extends Comp
   }
   noIoPrefix()
 
-  val decoder = new OooLa32rDecoder(config)
+  val decoder = new La32rDecoder(config)
   decoder.io.pc := U(config.resetVector, config.xlen bits)
   decoder.io.instruction := io.instruction
   decoder.io.fetchSlot := 0
@@ -385,7 +385,7 @@ private final class OooBarrierExecutionProbe(config: OooCoreConfig) extends Comp
 
 private final class OooCacopExecutionProbe(config: OooCoreConfig) extends Component {
   private val csrPort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.Csr))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Csr))
 
   val io = new Bundle {
     val instruction = in Bits (32 bits)
@@ -400,22 +400,22 @@ private final class OooCacopExecutionProbe(config: OooCoreConfig) extends Compon
     val translationResponseValid = in Bool ()
     val translationCancelled = in Bool ()
     val translationPhysicalAddress = in UInt (config.xlen bits)
-    val translationException = in(OooExceptionMeta())
+    val translationException = in(ExceptionMetadata())
     val translationRequestValid = out Bool ()
     val translationVirtualAddress = out UInt (config.xlen bits)
     val maintenanceReady = in Bool ()
     val maintenanceValid = out Bool ()
-    val maintenanceRequest = out(OooCacheMaintenanceRequest(config))
+    val maintenanceRequest = out(CacheMaintenanceRequest(config))
     val maintenanceResponseValid = in Bool ()
     val maintenanceResponseRobPointer = in UInt (config.robPointerWidth bits)
     val maintenanceResponseRecoveryEpoch = in UInt (config.recoveryEpochWidth bits)
     val maintenanceResponseReady = out Bool ()
     val completionValid = out Bool ()
-    val completion = out(OooCompletion(config))
+    val completion = out(Completion(config))
   }
   noIoPrefix()
 
-  val decoder = new OooLa32rDecoder(config)
+  val decoder = new La32rDecoder(config)
   decoder.io.pc := U(config.resetVector, config.xlen bits)
   decoder.io.instruction := io.instruction
   decoder.io.fetchSlot := 0
@@ -491,7 +491,7 @@ private final class OooCacopExecutionProbe(config: OooCoreConfig) extends Compon
 
 private final class OooCpuCfgExecutionProbe(config: OooCoreConfig) extends Component {
   private val csrPort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.Csr))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Csr))
 
   val io = new Bundle {
     val instruction = in Bits (32 bits)
@@ -502,11 +502,11 @@ private final class OooCpuCfgExecutionProbe(config: OooCoreConfig) extends Compo
     val systemReadValid = out Bool ()
     val systemReadAddress = out UInt (14 bits)
     val completionValid = out Bool ()
-    val completion = out(OooCompletion(config))
+    val completion = out(Completion(config))
   }
   noIoPrefix()
 
-  val decoder = new OooLa32rDecoder(config)
+  val decoder = new La32rDecoder(config)
   decoder.io.pc := U(config.resetVector + 4, config.xlen bits)
   decoder.io.instruction := io.instruction
   decoder.io.fetchSlot := 1

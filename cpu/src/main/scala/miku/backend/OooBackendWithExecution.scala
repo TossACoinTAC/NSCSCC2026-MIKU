@@ -12,17 +12,17 @@ final class OooBackendWithExecution(
 ) extends Component {
   val io = new Bundle {
     val renameValid = in Bits (config.renameWidth bits)
-    val rename = in Vec (OooDecodedUop(config), config.renameWidth)
+    val rename = in Vec (DecodedMicroOp(config), config.renameWidth)
     val renameReady = out Bits (config.renameWidth bits)
     val dataRequestValid = out Bool ()
-    val dataRequest = out(OooCacheRequest(config))
+    val dataRequest = out(CacheRequest(config))
     val dataRequestReady = in Bool ()
     val dataResponseValid = in Bool ()
-    val dataResponse = in(OooCacheResponse(config))
-    val translationRequest = master(Stream(OooTranslationRequest(config)))
-    val translationResponse = slave(Stream(OooTranslationResponse(config)))
+    val dataResponse = in(CacheResponse(config))
+    val translationRequest = master(Stream(TranslationRequest(config)))
+    val translationResponse = slave(Stream(TranslationResponse(config)))
     val translationBypassAddress = out UInt (config.xlen bits)
-    val translationBypass = in(OooTranslationBypass(config))
+    val translationBypass = in(TranslationBypass(config))
     val reservationValid = in Bool ()
     val reservationLineAddress = in Bits (config.reservationAddressWidth bits)
     val systemReadValid = out Bool ()
@@ -33,13 +33,13 @@ final class OooBackendWithExecution(
     val debugReadAddress = in UInt (config.archRegIndexWidth bits)
     val debugReadData = out Bits (config.xlen bits)
     val commitValid = out Bits (config.commitWidth bits)
-    val commit = out Vec (OooCommitRecord(config), config.commitWidth)
-    val commitMemory = out Vec (OooMemoryCommitObservation(config), config.commitWidth)
+    val commit = out Vec (CommitRecord(config), config.commitWidth)
+    val commitMemory = out Vec (MemoryCommitObservation(config), config.commitWidth)
     val recoveryValid = out Bool ()
-    val recovery = out(OooRecoveryRequest(config))
+    val recovery = out(RecoveryRequest(config))
     val predictorUpdateCapacity = in UInt (log2Up(config.commitWidth + 1) bits)
     val debugCommitValid = out Bool ()
-    val debugCommit = out(OooCommitRecord(config))
+    val debugCommit = out(CommitRecord(config))
     val csrWriteValid = out Bool ()
     val csrWriteAddress = out UInt (14 bits)
     val csrWriteData = out Bits (config.xlen bits)
@@ -66,20 +66,20 @@ final class OooBackendWithExecution(
     val reservationLineAddressUpdate = out Bits (config.reservationAddressWidth bits)
     val exceptionValid = out Bool ()
     val exceptionPc = out UInt (config.xlen bits)
-    val exception = out(OooExceptionMeta())
+    val exception = out(ExceptionMetadata())
     val memorySubsystemIdle = in Bool ()
     val barrierActive = out Bool ()
     val instructionBarrierMaintenanceStart = out Bool ()
     val instructionBarrierMaintenanceReady = in Bool ()
     val instructionBarrierMaintenanceDone = in Bool ()
-    val cacheMaintenanceRequest = master(Stream(OooCacheMaintenanceRequest(config)))
-    val cacheMaintenanceResponse = slave(Stream(OooCacheMaintenanceResponse(config)))
+    val cacheMaintenanceRequest = master(Stream(CacheMaintenanceRequest(config)))
+    val cacheMaintenanceResponse = slave(Stream(CacheMaintenanceResponse(config)))
     val flush = in Bool ()
   }
 
   val backend = new OooBackend(config)
   val execution = new OooExecutionCluster(config)
-  val loadStoreQueue = new OooLoadStoreQueue(config)
+  val loadStoreQueue = new LoadStoreQueue(config)
   val commitAdapter = new OooCommitAdapter(config)
 
   val storeDrainBusy = loadStoreQueue.io.storeDrainBusy
@@ -118,7 +118,7 @@ final class OooBackendWithExecution(
   execution.io.source2 := backend.io.issueSource2
   backend.io.issueReady := execution.io.issueReady
   private val loadStorePort =
-    config.executionPorts.indexWhere(_.capabilities.contains(OooFuKind.LoadStore))
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
   loadStoreQueue.io.orderingRobPointer := Mux(
     execution.io.barrierActive,
     execution.io.barrierRobPointer,
