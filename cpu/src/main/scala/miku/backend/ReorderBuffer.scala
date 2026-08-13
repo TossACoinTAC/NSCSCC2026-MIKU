@@ -282,6 +282,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     }
   }
 
+  // Qualify and select an incoming completion against the head that will be
+  // presented after this edge.  Registering this narrow bypass context keeps
+  // the writeback-lane compare tree and result mux out of the commit prefix.
+  val stagedHeadCompletionBypassValid = Reg(Bool()) init (False)
+  val stagedHeadCompletionBypassResult = Reg(Bits(config.xlen bits)) init (0)
   val headCompletionBypass = Bool()
   val headCompletionBypassResult = Bits(config.xlen bits)
   val canCommit = Vec(Bool(), config.commitWidth)
@@ -441,6 +446,29 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     }
   }
 
+  if (config.enableHeadCompletionCommitBypass) {
+    val incomingHeadCompletionBypassMask = Bits(config.writebackWidth bits)
+    val incomingHeadCompletionBypassResult = Bits(config.xlen bits)
+    incomingHeadCompletionBypassResult := 0
+    for (lane <- 0 until config.writebackWidth) {
+      incomingHeadCompletionBypassMask(lane) := io.completionValid(lane) &&
+        io.completion(lane).recoveryEpoch === io.currentEpoch &&
+        io.completion(lane).robPointer === payloadReadPointer(0) &&
+        !io.completion(lane).exception.valid && !io.completion(lane).branchResolved
+      when(incomingHeadCompletionBypassMask(lane)) {
+        incomingHeadCompletionBypassResult := io.completion(lane).data
+      }
+    }
+    when(io.flush) {
+      stagedHeadCompletionBypassValid := False
+    }.otherwise {
+      stagedHeadCompletionBypassValid := incomingHeadCompletionBypassMask.orR
+      stagedHeadCompletionBypassResult := incomingHeadCompletionBypassResult
+    }
+  } else {
+    stagedHeadCompletionBypassValid := False
+  }
+
   for (entryIndex <- 0 until config.robEntries) {
     for (lane <- 0 until config.writebackWidth) {
       when(!io.flush && stagedCompletionMatches(entryIndex)(lane)) {
@@ -462,20 +490,13 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     // Only ordinary current-epoch head completions bypass the final entry.complete
     // register. Branches, serializing/system operations, and either decoded or
     // completion exceptions retain the existing precise retirement boundary.
-    val headCompletionBypassMask = Bits(config.writebackWidth bits)
-    for (lane <- 0 until config.writebackWidth) {
-      headCompletionBypassMask(lane) := stagedCompletionValid(lane) &&
-        stagedCompletionCurrent(lane) &&
-        stagedRobPointer(lane) === candidates(0).state.pointer &&
-        candidates(0).state.valid && !candidates(0).state.complete &&
-        !stagedException(lane).valid && !stagedBranchResolved(lane)
-    }
     headCompletionBypass := !io.flush && candidates(0).state.payloadReady &&
+      stagedHeadCompletionBypassValid &&
+      candidates(0).state.valid && !candidates(0).state.complete &&
       !candidates(0).exception.valid && !candidates(0).state.serializing &&
       !candidates(0).payload.isBranch &&
-      candidates(0).payload.systemOperation === SystemOperation.none &&
-      headCompletionBypassMask.orR
-    headCompletionBypassResult := MuxOH(headCompletionBypassMask, stagedResult)
+      candidates(0).payload.systemOperation === SystemOperation.none
+    headCompletionBypassResult := stagedHeadCompletionBypassResult
   } else {
     headCompletionBypass := False
     headCompletionBypassResult := 0

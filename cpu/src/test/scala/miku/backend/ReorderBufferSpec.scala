@@ -582,6 +582,65 @@ class ReorderBufferSpec extends AnyFunSuite {
     }
   }
 
+  test("head bypass tracks the next head while an older entry retires") {
+    val config = OooCoreConfig.FourIssueThreeCommit.copy(
+      enableHeadCompletionCommitBypass = true
+    )
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-rob-head-turnover")
+      .compile(new ReorderBufferProbe(config))
+      .doSim("ooo-rob-head-turnover", 0x4f4f55) { dut =>
+        def sample(): Unit = {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+        }
+
+        dut.clockDomain.forkStimulus(period = 10)
+        initialize(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample()
+
+        dut.io.allocateValid #= 3
+        dut.io.allocateAccept #= true
+        dut.io.allocateSerializing #= 1
+        dut.io.allocatePc(0) #= 0x100
+        dut.io.allocatePc(1) #= 0x104
+        sleep(1)
+        val older = dut.io.allocatedPointer(0).toBigInt
+        val younger = dut.io.allocatedPointer(1).toBigInt
+        sample()
+
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.allocateSerializing #= 0
+        dut.io.completionRobPointer(0) #= older
+        dut.io.completionValid #= 1
+        sample()
+        assert(dut.io.commitValid.toBigInt == 0)
+
+        dut.io.completionValid #= 0
+        sample()
+        assert(dut.io.commitValid.toBigInt == 1)
+        assert(dut.io.commitPc(0).toBigInt == 0x100)
+
+        // The completion is accepted while the serializing older head retires.
+        // The following cycle must bypass the newly presented head without a bubble.
+        dut.io.completionRobPointer(0) #= younger
+        dut.io.completionValid #= 1
+        sample()
+        assert(dut.io.commitValid.toBigInt == 1)
+        assert(dut.io.commitPc(0).toBigInt == 0x104)
+        assert(dut.io.commitResult(0).toBigInt == 0x100)
+
+        dut.io.completionValid #= 0
+        sample()
+        assert(dut.io.occupancy.toBigInt == 0)
+        assert(dut.io.empty.toBoolean)
+      }
+  }
+
   test("head completion bypass preserves precise retirement boundaries") {
     val config = OooCoreConfig.FourIssueThreeCommit.copy(
       enableHeadCompletionCommitBypass = true
