@@ -59,11 +59,18 @@ Verilator 零 warning lint、Yosys 结构检查和 16 个 Python 合同测试。
 默认值仍为 `ff`，没有绑定 CPU 内部名称或 dhrystone 特例。clean perf20、ideal memory、
 seed 0 的 dhrystone 到达公开 `test_finish` 端点，LED 均为 1，CPU 周期为 `5887`：
 
-- 模型 key：`fa862138e4f4f09a6f0583a208c42f2628d46a52c809e0d66218cc3e986d9299`
-- 模型 SHA-256：`ad7cbd35418483a2526f14d06fe9ca0585d83d55bd3199dac7710f7f6a51b24d`
+- 模型 key：`131d74d85414bf3e740046a47e92ada7cf9815aed84f48748c4d0b140dce83ec`
+- 模型 SHA-256：`36d48b80fab497f686a885596c15b7d1658f8be106d275569477917381bf9a3e`
 - 软件 key：`5bdd4b294f1bf1f85b70a21cc73928faf8032ef2e9b2b836098fe8562c785912`
 
 最初的 2,000,000 ns smoke 在 allbench 镜像启动搬运阶段超时，按 `config/harness`
 流程排查后将验证窗口调为 20,000,000 ns；最终通过结果来自同一 RTL 和软件镜像，不能
 把前一次未到端点误报为 DUT 失败。未传 `--switch` 的短运行快照仍为 `ff`，证明默认
 行为保持不变。
+
+随后用同一 RTL、软件镜像和运行参数对“一次初始化赋值”与“每次求值前驱动”模型做
+A/B：两者均提交 `535823` 条指令、经历 `2773406` 个仿真周期，结束 PC、LED 和
+dhrystone 的 `5887` CPU 周期完全相同。持续驱动没有改变正常 perf20 路径的 DUT 行为，
+同时避免断点恢复状态取得外部输入的所有权。仿真包装层进一步把 C++ 关键字 `switch`
+对应的顶层端口命名为 `switch_pins`；testbench 只访问 Verilator 公开导出的
+`top->switch_pins`，不再依赖其 `__SYM__switch` 转义命名。

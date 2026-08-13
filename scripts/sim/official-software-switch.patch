@@ -1,3 +1,25 @@
+diff --git a/sims/verilator/testbench/simu_top.v b/sims/verilator/testbench/simu_top.v
+index 331f95c..123df67 100644
+--- a/sims/verilator/testbench/simu_top.v
++++ b/sims/verilator/testbench/simu_top.v
+@@ -66,7 +66,7 @@ module simu_top
+     output     [1 :0] led_rg1,      
+     output     [7 :0] num_csn,      
+     output     [6 :0] num_a_g,      
+-    input      [7 :0] switch,       
++    input      [7 :0] switch_pins,  
+     output     [3 :0] btn_key_col,  
+     input      [3 :0] btn_key_row,  
+     input      [1 :0] btn_step      
+@@ -126,7 +126,7 @@ soc_top #(
+     .led_rg1             (led_rg1       ),
+     .num_csn             (num_csn       ),
+     .num_a_g             (num_a_g       ),
+-    .switch              (switch        ),
++    .switch              (switch_pins   ),
+     .btn_key_col         (btn_key_col   ),
+     .btn_key_row         (btn_key_row   ),
+     .btn_step            (btn_step      )
 diff --git a/sims/verilator/testbench/include/cpu_tool.h b/sims/verilator/testbench/include/cpu_tool.h
 index 4b7a64f..ca36eb8 100644
 --- a/sims/verilator/testbench/include/cpu_tool.h
@@ -30,7 +52,7 @@ index d67dca6..9cb606e 100644
          PARSE_INT64(time_limit,"--time-limit")
          PARSE_FLAG(time_check,"--time-check")
 diff --git a/sims/verilator/testbench/testbench.cpp b/sims/verilator/testbench/testbench.cpp
-index ead750c..5f98d4d 100644
+index ead750c..55c76d4 100644
 --- a/sims/verilator/testbench/testbench.cpp
 +++ b/sims/verilator/testbench/testbench.cpp
 @@ -103,7 +103,7 @@ void CpuTestbench::simulate(vluint64_t& main_time) {
@@ -38,7 +60,7 @@ index ead750c..5f98d4d 100644
      double timer;
  
 -#define EVAL ((clock=!clock),main_time+=1,this->eval(main_time))
-+#define EVAL ((top->__SYM__switch = switch_value),(clock=!clock),main_time+=1,this->eval(main_time))
++#define EVAL ((top->switch_pins = switch_value),(clock=!clock),main_time+=1,this->eval(main_time))
  
      if (restore_bp_time == 0) {
          reset = reset_valid;
@@ -57,6 +79,20 @@ index ead750c..5f98d4d 100644
      printf("total clock \t\tis %lld\n", clock_total);
      printf("total instruction \tis %lld\n", inst_total);
 +    printf("debug PC snapshot \tis %08x\n", top->debug0_wb_pc);
-+    printf("switch/num/led snapshot \tis %02x / %08x / %x / %x\n", top->__SYM__switch, top->num_data, top->led_rg0, top->led_rg1);
++    printf("switch/num/led snapshot \tis %02x / %08x / %x / %x\n", top->switch_pins, top->num_data, top->led_rg0, top->led_rg1);
      printf("instruction per cycle\tis %lf\n", (double) inst_total / clock_total);
      printf("simulation time \tis %lf s\n", std::chrono::nanoseconds(end-start).count() / 1000000000.0);
+diff --git a/sims/verilator/testbench/include/golden_trace.h b/sims/verilator/testbench/include/golden_trace.h
+index 4d663b6..810746f 100644
+--- a/sims/verilator/testbench/include/golden_trace.h
++++ b/sims/verilator/testbench/include/golden_trace.h
+@@ -94,7 +94,7 @@ public:
+         confreg_num_r = 0;
+         sim_over = false;
+         sim_over_from_option = false;
+         dead_clock = 0;
+-        top->__SYM__switch = 0xff;
++        top->switch_pins = switch_value;
+         top->btn_key_row   = 0;
+         top->btn_step      = 3;
+         
