@@ -116,6 +116,7 @@ cpu-generate:
 		--out "$(BUILD_ROOT)/rtl/generation-manifest.json"
 
 cpu-locked-gates: cpu-generate
+	@rm -rf "$(BUILD_ROOT)/gates/port" "$(BUILD_ROOT)/gates/lint" "$(BUILD_ROOT)/gates/yosys"
 	@mkdir -p "$(BUILD_ROOT)/gates"
 	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" port-check \
 		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
