@@ -95,7 +95,7 @@ final case class OooCoreConfig(
     enableLoadCompletionEarlyWakeup: Boolean = true,
     enableFrontendTranslationResponseBypass: Boolean = true,
     enableFrontendTranslationTurnover: Boolean = true,
-    enableFrontendHistoryTurnover: Boolean = false,
+    enableFrontendHistoryTurnover: Boolean = true,
     enableFrontendCacheHitTurnover: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,
     enableL2WriteBack: Boolean = true,
