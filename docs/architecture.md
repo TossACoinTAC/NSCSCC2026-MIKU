@@ -194,6 +194,11 @@ frontend dynamic enqueue，ROB/IQ 网络保留为可能再次浮现的路径族�
 `待实验` 表示已有明确实验变量；`采纳/否决` 必须有完整证据。
 后续发现的潜在正确性问题统一使用 `Cxx` 编号，并自动成为性能实验之前的 blocking
 test gate；只有定向测试证明风险不存在，或修复后完成相应回归，才恢复性能候选排序。
+性能候选从设计开始就要同时约束周期收益与时序压力，优先采用已有寄存边界、局部控制、
+窄选择和低扇出的等价结构；这部分是候选实现本身，不另设综合前 RTL 修改阶段。能够
+脱离性能候选独立启用、独立 A/B 和独立保留的时序优化作为普通候选进入完整验证链。
+已有通用候选保留 `Txx` 编号，新候选可使用短领域前缀，例如前端 `FTxx`、后端 `BTxx`、
+访存 `MTxx`。任何新 RTL 都必须重新完成相应测试和性能归因，不能继承修改前的证据。
 
 本表也为历史上已经实现、但早期没有单独编号的内存优化补充回溯编号 `L06-L09`。
 这些编号只用于统一候选账本和归因，不改变原始提交、生成 RTL 或既有实验的身份；
@@ -264,6 +269,7 @@ B response，并不能证明一个更年轻的访存在它确定为 SUC 之前�
 | Q01 | 缩窄 dispatch/IQ scheduling uop | Queue/Window/IQ 当前保存完整 `RenamedMicroOp`，包含许多只在 ROB commit 或特定 FU 使用的冷字段；按调度/端口保留必要字段可减少约 11k-LUT 调度存储与 compaction 布线 | 多种 payload 或 side table 增加接口和对齐验证；branch/CSR/LSU 所需字段不能遗漏，可能增加取回 mux | 各 bundle bit width、hierarchical LUT/FF、dispatch/IQ 路径、cycle count、完整 SoC WNS、所有 FU 定向测试 | 讨论 |
 | F02 | 切断 L2 refill 到 L1I response predecode 的组合/布线路径 | 同平台上一候选的最差路径位于此处，数据路径 10.328 ns、route 占 76.8%；当前 top-N 已不由它主导 | 增加 response 级可能改变 miss/critical-group 延迟；复制 predecode 会增加面积和拥塞 | 新候选 top-N 是否重新出现该族、I-miss hit/critical-group latency、perf20 分项 | **历史路径：条件触发** |
 | F03 | 缩短 L1I response 到 frontend buffer enqueue 的控制锥 | 当前 `60fba481 + c398` 100 MHz routed WNS 路径由已注册的 L1I `responseValid` 经 response/prediction/prefix/tail 逻辑到 8-entry frontend buffer 的动态写 CE；9/10 条最差 CPU setup path 属于该族，最差 route 占 77.3% | 单纯增加 response register 会增加前端延迟；banked/rotating buffer、局部 valid 复制或拆分 correction/learn 与 enqueue 时，必须保持四槽压缩、PC/prediction 配对、组内 taken 截断及 redirect kill | frontend top-10 setup、response-valid fanout、各段组合级数、buffer enqueue/empty 周期、branch correction、IPC、LUT/FF、完整 SoC WNS | **高优先级：当前 WNS 路径** |
+| FT01 | 按 fetch lane 构造 speculative RAS link address | 历史 matching route 中 `translationPc` 经预测选择和 32-bit `+4` 到 speculative RAS 的路径仅余 `+0.022 ns`；call link 只可能是 16-byte fetch group 内四个固定槽位的下一 PC，可由 group base 和 lane 构造，避免 selected branch PC 驱动完整加法链 | 必须覆盖 lane 0-3，尤其 lane 3 跨组；immediate/delayed speculative update、return、correction 和 flush 的地址语义必须不变。Vivado 也可能已共享或化简原加法器，真实收益只能由 matching route 证明 | 四 lane RAS 定向测试、生成 RTL 组合结构、完整 perf20 非退化、matching frontend top-N/WNS/LUT | **实现中：待完整回归与 matching route** |
 | P02 | Vivado strategy/seed 与物理优化 A/B | `Explore`、phys_opt、LUT combining、局部寄存器复制和不同实现 seed 可能在同一 RTL 上改变 route-dominated WNS；适合先判断结果是否受物理随机性主导 | strategy/seed 不能替代 RTL 时序修复，跨 seed 选择最好的单次结果会造成过拟合；必须保留完整报告、实现选项、DRC 和 bitstream hash | 同一 RTL/软件下多个 seed 的 WNS/TNS、top-path 族、congestion、runtime、资源、cycle/frequency 产品；禁止跨 RTL 借用 slack | 待实验 |
 | P01 | 物理感知的模块局部性、寄存器复制与必要的 floorplan 实验 | 完整 SoC 关键路径以 route delay 为主，说明逻辑等价的布局可能产生明显差异 | 过早固定 Pblock 会恶化全局拥塞并使结果依赖 seed；不能掩盖结构性广播问题 | congestion、SLR/clock-region 分布、跨区 nets、多个实现 seed 的 WNS 稳定性 | 讨论 |
 
