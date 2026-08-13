@@ -443,12 +443,22 @@ class ReorderBufferSpec extends AnyFunSuite {
           dut.io.completionBranchTarget(0) #= target
           dut.io.completionValid #= 1
           sample()
+          var commitObservations = 0
+          def observeCommit(): Unit = {
+            if ((dut.io.commitValid.toBigInt & 1) != 0) {
+              commitObservations += 1
+              assert(dut.io.commitPc(0).toBigInt == BigInt(pc))
+              if (isBranch) assert(dut.io.commitBranchTarget(0).toBigInt == target)
+            }
+          }
+          observeCommit()
           dut.io.completionValid #= 0
           dut.io.completionBranchResolved #= 0
-          sample()
-          assert((dut.io.commitValid.toBigInt & 1) == 1)
-          if (isBranch) assert(dut.io.commitBranchTarget(0).toBigInt == target)
-          sample()
+          for (_ <- 0 until 4) {
+            sample()
+            observeCommit()
+          }
+          assert(commitObservations == 1)
         }
 
         dut.clockDomain.forkStimulus(period = 10)
