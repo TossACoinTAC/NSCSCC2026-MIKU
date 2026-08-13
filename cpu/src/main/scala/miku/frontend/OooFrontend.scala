@@ -247,6 +247,20 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     }
   }
   val requestHistoryValid = translatedConditionalSeen.asBits.orR
+  // A call link is one of four fixed offsets inside an aligned 16-byte fetch
+  // group.  Build it from the group base and lane so the selected branch PC
+  // does not feed a full-width +4 carry chain on the speculative RAS path.
+  val requestPredictedLane =
+    requestPredictedPc(fetchGroupOffsetWidth - 1 downto 2)
+  val sameGroupReturnAddress = UInt(config.xlen bits)
+  sameGroupReturnAddress := translatedGroupBase
+  sameGroupReturnAddress(fetchGroupOffsetWidth - 1 downto 2) :=
+    (requestPredictedLane + 1).resized
+  val requestPredictedReturnAddress = Mux(
+    requestPredictedLane === U(config.fetchWidth - 1, config.fetchSlotWidth bits),
+    translatedGroupBase + fetchGroupBytes,
+    sameGroupReturnAddress
+  )
 
   // The predictor can fold this group's speculative GHR update into a same-cycle lookup; its RAS
   // update reaches the synchronous lookup response on the following edge.  The history-turnover
@@ -374,7 +388,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       requestPredictedType === PredictedBranchType.call
     predictorSpeculativeRasPop := requestPredictedTaken &&
       requestPredictedType === PredictedBranchType.ret
-    predictorSpeculativeReturnAddress := requestPredictedPc + 4
+    predictorSpeculativeReturnAddress := requestPredictedReturnAddress
   } else {
     val delayedUpdateValid = RegNext(requestFire) init (False)
     val delayedHistoryValid = Reg(Bool()) init (False)
@@ -391,7 +405,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         requestPredictedType === PredictedBranchType.call
       delayedRasPop := requestPredictedTaken &&
         requestPredictedType === PredictedBranchType.ret
-      delayedReturnAddress := requestPredictedPc + 4
+      delayedReturnAddress := requestPredictedReturnAddress
     }
     predictorSpeculativeUpdateValid := delayedUpdateValid
     predictorSpeculativeHistoryValid := delayedHistoryValid

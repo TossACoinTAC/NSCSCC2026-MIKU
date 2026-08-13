@@ -391,10 +391,11 @@ class OooFrontendSpec extends AnyFunSuite {
 
   test("a trained call and return turn over translation through the speculative RAS") {
     val historyTurnoverConfig = turnoverConfig.copy(enableFrontendHistoryTurnover = true)
-    SimConfig.withVerilator
+    val compiled = SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-frontend")
       .compile(new OooFrontend(historyTurnoverConfig))
-      .doSim("ooo-frontend-ras-turnover", 0x4c7d) { dut =>
+    for (callLane <- 0 until config.fetchWidth) {
+      compiled.doSim(s"ooo-frontend-ras-turnover-lane-$callLane", 0x4c7d + callLane) { dut =>
         dut.clockDomain.forkStimulus(period = 10)
         clearInputs(dut)
         dut.clockDomain.assertReset()
@@ -403,7 +404,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.waitSampling(132)
         sleep(1)
 
-        val callPc = config.resetVector + 0x300
+        val callPc = config.resetVector + 0x300 + callLane * 4
         val calleePc = callPc + 0x80
         val returnPc = callPc + 4
 
@@ -450,13 +451,14 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.io.cacheResponseValid #= true
         dut.io.cacheResponse.virtualAddress #= callPc
         dut.io.cacheResponse.physicalAddress #= callPc
-        dut.io.cacheResponse.instructions(0) #= encodeDirectBranch(0x15, 0x80)
-        for (lane <- 1 until config.fetchWidth) {
-          dut.io.cacheResponse.instructions(lane) #= (BigInt("00100000", 16) | lane)
+        for (lane <- 0 until config.fetchWidth) {
+          dut.io.cacheResponse.instructions(lane) #=
+            (if (lane == callLane) encodeDirectBranch(0x15, 0x80)
+             else (BigInt("00100000", 16) | lane))
         }
         setBranchPredecode(
           dut,
-          lane = 0,
+          lane = callLane,
           branchType = 4,
           target = calleePc,
           staticTaken = true
@@ -470,6 +472,94 @@ class OooFrontendSpec extends AnyFunSuite {
         assert(dut.io.cacheRequestValid.toBoolean)
         assert(dut.io.cacheRequest.virtualAddress.toBigInt == calleePc)
         assert(dut.io.translationRequest.valid.toBoolean)
+        assert(dut.io.translationRequest.virtualAddress.toBigInt == returnPc)
+      }
+    }
+  }
+
+  test("the delayed speculative RAS preserves a lane-three return address") {
+    val conservativeConfig = turnoverConfig.copy(enableFrontendHistoryTurnover = false)
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-frontend-delayed-ras")
+      .compile(new OooFrontend(conservativeConfig))
+      .doSim("ooo-frontend-delayed-ras-lane-3", 0x4c81) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling(132)
+        sleep(1)
+
+        val callPc = config.resetVector + 0x30c
+        val calleePc = callPc + 0x80
+        val returnPc = callPc + 4
+
+        dut.io.predictorUpdatePc #= callPc
+        dut.io.predictorUpdateTaken #= true
+        dut.io.predictorUpdateTarget #= calleePc
+        dut.io.predictorUpdateType #= 4
+        dut.io.predictorUpdateValid #= true
+        sample(dut)
+        dut.io.predictorUpdatePc #= calleePc
+        dut.io.predictorUpdateTarget #= 0
+        dut.io.predictorUpdateType #= 3
+        sample(dut)
+        dut.io.predictorUpdateValid #= false
+
+        dut.io.redirectTarget #= callPc
+        dut.io.redirectValid #= true
+        sample(dut)
+        dut.io.redirectValid #= false
+
+        while (!dut.io.translationRequest.valid.toBoolean) sample(dut)
+        assert(dut.io.translationRequest.virtualAddress.toBigInt == callPc)
+        dut.io.translationRequest.ready #= true
+        sample(dut)
+        dut.io.translationRequest.ready #= false
+
+        dut.io.translationResponse.valid #= true
+        dut.io.translationResponse.virtualAddress #= callPc
+        dut.io.translationResponse.physicalAddress #= callPc
+        dut.io.cacheRequestReady #= true
+        sleep(1)
+        assert(dut.io.translationResponse.ready.toBoolean)
+        assert(dut.io.cacheRequestValid.toBoolean)
+        assert(dut.io.cacheRequest.virtualAddress.toBigInt == callPc)
+        sample(dut)
+        dut.io.translationResponse.valid #= false
+        dut.io.cacheRequestReady #= false
+
+        while (!dut.io.translationRequest.valid.toBoolean) sample(dut)
+        assert(dut.io.translationRequest.virtualAddress.toBigInt == calleePc)
+        dut.io.translationRequest.ready #= true
+        sample(dut)
+        dut.io.translationRequest.ready #= false
+
+        clearPredecode(dut)
+        dut.io.cacheResponseValid #= true
+        dut.io.cacheResponse.virtualAddress #= callPc
+        dut.io.cacheResponse.physicalAddress #= callPc
+        for (lane <- 0 until config.fetchWidth) {
+          dut.io.cacheResponse.instructions(lane) #=
+            (if (lane == 3) encodeDirectBranch(0x15, 0x80)
+             else (BigInt("00100000", 16) | lane))
+        }
+        setBranchPredecode(dut, lane = 3, branchType = 4, target = calleePc, staticTaken = true)
+        dut.io.translationResponse.valid #= true
+        dut.io.translationResponse.virtualAddress #= calleePc
+        dut.io.translationResponse.physicalAddress #= calleePc
+        dut.io.cacheRequestReady #= true
+        sleep(1)
+        assert(dut.io.translationResponse.ready.toBoolean)
+        assert(dut.io.cacheRequestValid.toBoolean)
+        assert(dut.io.cacheRequest.virtualAddress.toBigInt == calleePc)
+        sample(dut)
+        dut.io.translationResponse.valid #= false
+        dut.io.cacheResponseValid #= false
+        dut.io.cacheRequestReady #= false
+
+        while (!dut.io.translationRequest.valid.toBoolean) sample(dut)
         assert(dut.io.translationRequest.virtualAddress.toBigInt == returnPc)
       }
   }
