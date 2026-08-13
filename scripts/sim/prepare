@@ -124,6 +124,12 @@ rtl_sha=$(sha256sum "$rtl" | awk '{print $1}')
 cache_root="$artifact_root/cache"
 mkdir -p "$cache_root/platforms" "$cache_root/models" "$cache_root/software" \
   "$cache_root/locks" "$artifact_root/prepared"
+# Cache entries are immutable after publication, but their parent directories
+# must remain writable so a different RTL or software identity can add a sibling.
+# Repair stale permissions left by older prepare implementations without making
+# any published entry writable.
+chmod u+rwx "$cache_root/platforms" "$cache_root/models" "$cache_root/software" \
+  "$cache_root/locks" "$artifact_root/prepared"
 tmp_dirs=()
 cleanup() {
   local directory
