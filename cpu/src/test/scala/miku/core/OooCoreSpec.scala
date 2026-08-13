@@ -39,6 +39,7 @@ class OooCoreSpec extends AnyFunSuite {
     assert(config.instructionBufferEntries == 16)
     assert(config.enableFrontendTranslationTurnover)
     assert(config.enableFrontendHistoryTurnover)
+    assert(config.enableHeadCompletionCommitBypass)
     assert(config.enableFrontendCacheHitTurnover)
     assert(config.dispatchQueueEntries == 8)
     assert(config.mshrEntries == 4)
