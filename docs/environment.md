@@ -16,9 +16,11 @@ Yosys、Python 和 LA32R GCC/QEMU/NEMU/picolibc。镜像通过 `make env-build` 
 复制 `config/local.env.example` 为 `config/local.env` 后配置路径。该文件不应包含版本
 锁、token 或板卡凭据。`make doctor` 只检查，不自动切换、重置或清理任何仓库。
 
-Chiplab gitlink 锁定 `c398d274812f164d387146fa7d8f612a4a1296d9`。其平台源码和官方
-toolchains 保留在子模块目录；CPU 生成 RTL 通过 `make chiplab-sync` 写入
-`IP/myCPU/mycpu_top.v`。
+Chiplab gitlink 锁定 `c398d274812f164d387146fa7d8f612a4a1296d9`。平台源码和官方
+toolchains 保留在子模块目录，但根流程不把 CPU RTL 写回 Chiplab；仿真和 Vivado
+目标从该 commit 创建隔离工作区，并注入 `build/rtl/mycpu_top.v`。Docker 镜像提供
+软件仿真所需的锁定工具链，Chiplab 内的官方 toolchains 只作为子仓库历史和平台
+参考保留。
 CPU 当前不依赖 `ip/sram/`，也不复制平台 PLL/DDR/AXI/JTAG IP。
 
 初赛 submission/team-ci 已退出决赛根仓库依赖图。现有同名克隆不由根 Makefile 管理，

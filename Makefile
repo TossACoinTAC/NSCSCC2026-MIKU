@@ -9,7 +9,6 @@ CPU_DIR ?= $(ROOT_DIR)/cpu
 CHIPLAB_HOME ?= $(ROOT_DIR)/chiplab
 LINUX_KERNEL_DIR ?= $(ROOT_DIR)/nscscc-linux-kernel
 LABAGENT_DIR ?= $(ROOT_DIR)/fpga-lab-agent
-CHIPLAB_TOOLCHAINS ?= $(CHIPLAB_HOME)/toolchains
 BUILD_ROOT ?= $(ROOT_DIR)/build
 DOCKER_IMAGE ?= nscscc-dev:ubuntu24.04-v1
 DOCKERFILE ?= $(ROOT_DIR)/docker/nscscc-dev.Dockerfile
@@ -42,10 +41,10 @@ FUNC58_WORKLOADS := func58
 CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_CACHE_VOLUME=$(DOCKER_CACHE_VOLUME) $(ROOT_DIR)/scripts/env/run-in-container
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-.PHONY: help doctor status ide-setup env-build toolchain-check chiplab-toolchains \
-  cpu-test cpu-test-all cpu-generate cpu-check cpu-locked-gates chiplab-sync \
+.PHONY: help doctor status ide-setup env-build toolchain-check \
+  cpu-test cpu-test-all cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-timing \
-  clean clean-build clean-cpu clean-sim clean-vivado clean-chiplab clean-ide-state clean-all
+  clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
 help:
 	@printf '%s\n' \
@@ -67,7 +66,7 @@ help:
 		'  make wave WAVE=...      用宿主机 Surfer 查看波形' \
 		'  make clean              清理可再生构建输出，保留 IDE 状态' \
 		'  make clean-all          额外清理显式 IDE 状态' '' \
-		'路径覆盖：VIVADO_HOME VIVADO SURFER CHIPLAB_TOOLCHAINS DOCKER_IMAGE JOBS SIM_LANES' \
+		'路径覆盖：VIVADO_HOME VIVADO SURFER DOCKER_IMAGE JOBS SIM_LANES' \
 		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项'
 
 doctor:
@@ -92,9 +91,6 @@ env-build:
 
 toolchain-check: env-build
 	@$(CONTAINER_RUN) sh -ec 'java -version; sbt --version; verilator --version; yosys -V; loongarch32r-linux-gnusf-gcc --version | head -n 1'
-
-chiplab-toolchains:
-	@CHIPLAB_TOOLCHAIN_ROOT="$(CHIPLAB_TOOLCHAINS)" scripts/chiplab/check-toolchains
 
 cpu-test:
 	@test -n "$(strip $(CPU_TEST))" || { printf 'CPU_TEST 必须是完整 suite 名称\n' >&2; exit 2; }
@@ -138,11 +134,6 @@ cpu-check: cpu-test-all cpu-generate cpu-locked-gates
 	@$(CONTAINER_RUN) python3 -I -m unittest discover \
 		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
 
-chiplab-sync: cpu-generate
-	@test "$(CHIPLAB_HOME)" != "$(ROOT_DIR)/cpu"
-	@install -D -m 0644 "$(BUILD_ROOT)/rtl/mycpu_top.v" "$(CHIPLAB_HOME)/IP/myCPU/mycpu_top.v"
-	@printf 'Chiplab CPU RTL 已同步；平台 IP 和 SRAM XCI 未被修改。\n'
-
 sim-prepare: cpu-generate
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/prepare" \
 		--workspace "$(ROOT_DIR)" --artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" \
@@ -178,7 +169,7 @@ perf20-sim:
 		--seeds 0 --lanes "$(SIM_LANES)" --time-limit "$(PERF20_TIME_LIMIT)" \
 		--sim-path "$(CONTAINER_SIM_PATH)" --allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
 
-linux-sim: cpu-generate
+linux-sim:
 	@$(MAKE) sim RUN_SOFTWARE=linux SIM_WORKLOADS=linux
 
 wave:
@@ -209,12 +200,9 @@ clean-sim:
 clean-vivado:
 	@python3 scripts/common/clean.py vivado
 
-clean-chiplab:
-	@scripts/chiplab/clean-generated.sh "$(CHIPLAB_HOME)"
-
 clean-ide-state:
 	@python3 scripts/common/clean.py ide
 
-clean: clean-build clean-cpu clean-sim clean-vivado
+clean: clean-build clean-cpu
 
-clean-all: clean clean-chiplab clean-ide-state
+clean-all: clean clean-ide-state

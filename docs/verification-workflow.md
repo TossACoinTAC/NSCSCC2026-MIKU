@@ -67,8 +67,9 @@ CPU 修改
   共同寻址，只在这些编译输入变化时重新翻译 Verilog、编译 C++ 并链接模型；
 - `software/` 由 suite、workload 集、软件输入 hash 和 staging 工具寻址。官方 func58 和
   perf20 使用 Chiplab 已锁定的 object，不会因重复执行 `make perf20-sim` 重新编译；
-- `prepared/` 只保存本次请求到三层缓存的不可变引用及 dirty patch 证据；`runs/` 再按
-  model/software/workload/seed/memory mode 隔离运行输出。
+- `prepared/` 只保存本次请求到三层缓存的不可变引用及（若工作树意外 dirty）状态证据；
+  正常干净 Chiplab 的 patch 文件为空。`runs/` 再按 model/software/workload/seed/memory
+  mode 隔离运行输出。
 
 缓存命中前必须复核 manifest、模型 hash、软件文件 hash 和当前 RTL hash。任何不一致都
 归为 `artifact`，不得启动仿真。`SIM_REBUILD=1 make sim-prepare ...` 可显式重建当前身份的
@@ -114,8 +115,9 @@ forwarding、dirty writeback 或 uncached ordering 问题时，即使只来自�
 
 `make clean` 只删 `build/` 可再生输出、CPU 编译输出、仿真输出和 Vivado 临时工程；
 不删 `.vscode/`、`.bsp/`、`.metals/`、`.scala-build/`、`Post_Impl_Bundles/`、
-`Stable_Backup/`、Chiplab toolchains 或任何嵌套仓库源码。`make clean-ide-state` 和
-`make clean-chiplab` 是显式操作，范围分别见 Makefile 和脚本。
+`Stable_Backup/`、Chiplab toolchains 或任何嵌套仓库源码。`make clean-ide-state` 是
+显式 IDE 状态清理；根 Makefile 不清理或同步 Chiplab 子模块。需要改变子模块内容时
+必须在其仓库内显式操作，并单独记录 gitlink、分支和 dirty 状态。
 
 SBT 的普通编译、测试报告和 SpinalSim 工作区统一位于 `cpu/target/`；生成并发布的
 RTL 仍位于 `build/rtl/`。`cpu/project/target/` 是 SBT 读取 `build.properties` 时产生的

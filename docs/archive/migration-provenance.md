@@ -14,5 +14,6 @@
 的构建、doctor、仿真或锁文件依赖，因此保留在工作区但不由根流程管理。
 
 决赛仍需要的 `chiplab/`、`nscscc-linux-kernel/` 和 `fpga-lab-agent/` 已登记为
-Git submodule。根提交锁定其 gitlink；已有 Chiplab harness/config dirty patch 没有被
-清理或写入子模块历史。
+Git submodule。根提交锁定其 gitlink；历史 Chiplab harness/config dirty patch 曾在
+本地适配中保留，但没有写入子模块历史。2026-08-13 已将这批适配恢复到锁定提交；
+当前仿真和 Vivado 均从该 gitlink 导出隔离工作区，再注入根仓库生成的 RTL。
