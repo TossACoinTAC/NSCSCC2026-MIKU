@@ -244,17 +244,17 @@ if [[ $rebuild == 1 || $model_valid == 0 ]]; then
   install -m 0444 "$rtl" "$model_staging/IP/myCPU/mycpu_top.v"
   export CHIPLAB_HOME="$model_staging"
 
-  TMPDIR=/tmp patch -d "$model_staging" -p1 --forward --batch < "$simulation_patch_file"
+  TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$simulation_patch_file"
   if [[ $suite != standard ]]; then
-    TMPDIR=/tmp patch -d "$model_staging" -p1 --forward --batch < "$official_patch_file"
+    TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$official_patch_file"
   fi
   if [[ $profile == instrumented ]]; then
-    TMPDIR=/tmp patch -d "$model_staging" -p1 --forward --batch < "$patch_file"
+    TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$patch_file"
     install -m 0444 "$workspace/scripts/sim/perf_monitor.h" \
       "$model_staging/sims/verilator/testbench/include/perf_monitor.h"
     install -m 0444 "$workspace/scripts/sim/perf_monitor.cpp" \
       "$model_staging/sims/verilator/testbench/perf_monitor.cpp"
-    TMPDIR=/tmp patch -d "$model_staging" -p1 --forward --batch < "$m01_patch_file"
+    TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$m01_patch_file"
     if ! awk '
       previous == "    top = new Vtop;" &&
         $0 == "    perf_monitor = new PerfMonitor(top);" { found = 1 }
