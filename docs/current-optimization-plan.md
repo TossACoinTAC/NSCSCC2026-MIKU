@@ -237,8 +237,15 @@ full 交叉验证。multiplier 独立 writeback lane 的重复 echo 候选 `WT03
 workload 活性反例否决：coremark、dhrystone 和 fireye_B2 均在测试开始后停止架构进展，
 `0704cd8` 已恢复默认 wake。前端 translation response VA 与已注册 translation owner PC、ATU instruction
 response identity 与已注册 context 是两个不增加拍数即可去掉实时输入依赖的候选，即使未
-进入当前 top-50，也按周期透明合同进入本批。redirect drain 同拍接收新 translation 时的
-owner 安装问题单列为性能候选，必须先用定向失败测试确认机会与正确语义。
+进入当前 top-50，也按周期透明合同进入本批。`FT06 @ a2b29d5` 已让 response VA 只参与
+owner comparator，接受后的 cache/predictor handoff 改用注册的 `translationPc`；完整门禁为
+39 suites / 222 tests，perf20 20 项逐项精确相等。`MT05 @ 6a42541` 已让 ATU 可见的
+instruction response VA 直接来自注册的 instruction context；paged/direct/DMW/cancel、mutation、
+backpressure 和同拍 replacement 定向测试以及完整门禁通过，生成 RTL 的公开 response VA 已直接
+连接 owner context，perf20 仍为 `5,014,520 -> 5,014,520`，20 项逐项精确相等。redirect drain
+同拍接收新 translation 时的 owner 安装问题单列为性能候选，必须先用定向失败测试确认机会与
+正确语义。本批最终组合的 func58 random-AXI seeds `240/255/141` 均为 58/58，已满足启动
+matching direct full implementation 的软件门禁。
 
 ## 系统、归档与发布
 
