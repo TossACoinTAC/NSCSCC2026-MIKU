@@ -91,6 +91,7 @@ final case class OooCoreConfig(
     // retaining F01 phase 1 and the cache response cut.
     enableDirectWakeupEchoSuppression: Boolean = false,
     enableHeadCompletionCommitBypass: Boolean = true,
+    enableBranchHeadCompletionBypass: Boolean = true,
     enableDirectDmwPretranslation: Boolean = true,
     enableLoadCompletionEarlyWakeup: Boolean = true,
     enableFrontendTranslationResponseBypass: Boolean = true,

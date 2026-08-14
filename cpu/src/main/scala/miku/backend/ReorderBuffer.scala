@@ -292,11 +292,41 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val stagedHeadCompletionBypassResult = Reg(Bits(config.xlen bits)) init (0)
   val headCompletionBypass = Bool()
   val headCompletionBypassResult = Bits(config.xlen bits)
+  val stagedHeadBranchBypassValid = Reg(Bool()) init (False)
+  val stagedHeadBranchBypassResult = Reg(Bits(config.xlen bits)) init (0)
+  val stagedHeadBranchBypassTaken = Reg(Bool()) init (False)
+  val stagedHeadBranchBypassTarget = Reg(UInt(config.xlen bits)) init (0)
+  val stagedHeadBranchBypassMispredict = Reg(Bool()) init (False)
+  val headBranchBypass = Bool()
+  val effectiveBranchTaken = Vec(Bool(), config.commitWidth)
+  val effectiveBranchTarget = Vec(UInt(config.xlen bits), config.commitWidth)
+  val effectiveBranchMispredict = Vec(Bool(), config.commitWidth)
   val canCommit = Vec(Bool(), config.commitWidth)
   val stopAfter = Vec(Bool(), config.commitWidth)
   val branchPrefix = Vec(UInt(log2Up(config.commitWidth + 1) bits), config.commitWidth)
   for (lane <- 0 until config.commitWidth) {
     val retiringBranch = candidates(lane).payload.isBranch && !candidates(lane).exception.valid
+    if (lane == 0) {
+      effectiveBranchTaken(lane) := Mux(
+        headBranchBypass,
+        stagedHeadBranchBypassTaken,
+        candidates(lane).state.branchTaken
+      )
+      effectiveBranchTarget(lane) := Mux(
+        headBranchBypass,
+        stagedHeadBranchBypassTarget,
+        candidates(lane).state.branchTarget
+      )
+      effectiveBranchMispredict(lane) := Mux(
+        headBranchBypass,
+        stagedHeadBranchBypassMispredict,
+        candidates(lane).state.branchMispredict
+      )
+    } else {
+      effectiveBranchTaken(lane) := candidates(lane).state.branchTaken
+      effectiveBranchTarget(lane) := candidates(lane).state.branchTarget
+      effectiveBranchMispredict(lane) := candidates(lane).state.branchMispredict
+    }
     if (lane == 0) {
       branchPrefix(lane) := retiringBranch.asUInt.resized
     } else {
@@ -305,10 +335,10 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val predictorHasCapacity = !retiringBranch ||
       branchPrefix(lane) <= io.predictorUpdateCapacity
     stopAfter(lane) := candidates(lane).exception.valid ||
-      candidates(lane).state.serializing || candidates(lane).state.branchMispredict
+      candidates(lane).state.serializing || effectiveBranchMispredict(lane)
     if (lane == 0) {
       canCommit(lane) := candidates(lane).state.valid &&
-        (candidates(lane).state.complete || headCompletionBypass) &&
+        (candidates(lane).state.complete || headCompletionBypass || headBranchBypass) &&
         candidates(lane).state.payloadReady && predictorHasCapacity
     } else {
       canCommit(lane) := candidates(lane).state.valid && candidates(lane).state.complete &&
@@ -325,9 +355,13 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     io.commit(lane).writesGpr := candidates(lane).payload.writesGpr
     if (lane == 0) {
       io.commit(lane).result := Mux(
-        headCompletionBypass,
-        headCompletionBypassResult,
-        candidates(lane).state.result
+        headBranchBypass,
+        stagedHeadBranchBypassResult,
+        Mux(
+          headCompletionBypass,
+          headCompletionBypassResult,
+          candidates(lane).state.result
+        )
       )
     } else {
       io.commit(lane).result := candidates(lane).state.result
@@ -343,8 +377,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     io.commit(lane).isStore := candidates(lane).payload.isStore
     io.commit(lane).isBranch := candidates(lane).payload.isBranch
     io.commit(lane).predictorType := candidates(lane).payload.predictorType
-    io.commit(lane).branchTaken := candidates(lane).state.branchTaken
-    io.commit(lane).branchTarget := candidates(lane).state.branchTarget
+    io.commit(lane).branchTaken := effectiveBranchTaken(lane)
+    io.commit(lane).branchTarget := effectiveBranchTarget(lane)
     io.commit(lane).predictorMetadata := candidates(lane).payload.predictorMetadata
     io.commit(lane).loadQueueIndex := candidates(lane).payload.loadQueueIndex
     io.commit(lane).storeQueueIndex := candidates(lane).payload.storeQueueIndex
@@ -356,7 +390,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val recoveryMask = Bits(config.commitWidth bits)
   for (lane <- 0 until config.commitWidth) {
     recoveryMask(lane) := io.commitValid(lane) &&
-      (candidates(lane).exception.valid || candidates(lane).state.branchMispredict)
+      (candidates(lane).exception.valid || effectiveBranchMispredict(lane))
   }
   io.recoveryValid := recoveryMask.orR
   io.recovery.cause := RecoveryCause.none
@@ -374,8 +408,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val recoveryIndex = selectLowest(recoveryMask, log2Up(config.commitWidth))
     io.recovery.robPointer := candidates(recoveryIndex).state.pointer
     io.recovery.pc := candidates(recoveryIndex).payload.pc
-    io.recovery.taken := candidates(recoveryIndex).state.branchTaken
-    io.recovery.target := candidates(recoveryIndex).state.branchTarget
+    io.recovery.taken := effectiveBranchTaken(recoveryIndex)
+    io.recovery.target := effectiveBranchTarget(recoveryIndex)
     io.recovery.exception := candidates(recoveryIndex).exception
     when(candidates(recoveryIndex).exception.valid) {
       io.recovery.cause := RecoveryCause.exception
@@ -471,6 +505,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
 
   if (config.enableHeadCompletionCommitBypass) {
     val incomingHeadCompletionBypassMask = Bits(config.writebackWidth bits)
+    val incomingHeadBranchBypassMask = Bits(config.writebackWidth bits)
     val incomingHeadStoreCompletionBypass = io.storeCompletionBypassValid &&
       io.storeCompletionBypass.recoveryEpoch === io.currentEpoch &&
       io.storeCompletionBypass.robPointer === payloadReadPointer(0)
@@ -481,12 +516,17 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.completion(lane).recoveryEpoch === io.currentEpoch &&
         io.completion(lane).robPointer === payloadReadPointer(0) &&
         !io.completion(lane).exception.valid && !io.completion(lane).branchResolved
+      incomingHeadBranchBypassMask(lane) := io.completionValid(lane) &&
+        io.completion(lane).recoveryEpoch === io.currentEpoch &&
+        io.completion(lane).robPointer === payloadReadPointer(0) &&
+        !io.completion(lane).exception.valid && io.completion(lane).branchResolved
       when(incomingHeadCompletionBypassMask(lane)) {
         incomingHeadCompletionBypassResult := io.completion(lane).data
       }
     }
     when(io.flush) {
       stagedHeadCompletionBypassValid := False
+      stagedHeadBranchBypassValid := False
     }.otherwise {
       stagedHeadCompletionBypassValid :=
         incomingHeadCompletionBypassMask.orR || incomingHeadStoreCompletionBypass
@@ -495,9 +535,31 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         B(0, config.xlen bits),
         incomingHeadCompletionBypassResult
       )
+      if (config.enableBranchHeadCompletionBypass) {
+        stagedHeadBranchBypassValid := incomingHeadBranchBypassMask.orR
+        for (lane <- 0 until config.writebackWidth) {
+          when(incomingHeadBranchBypassMask(lane)) {
+            stagedHeadBranchBypassResult := io.completion(lane).data
+            stagedHeadBranchBypassTaken := io.completion(lane).branchTaken
+            stagedHeadBranchBypassTarget := io.completion(lane).branchTarget
+            stagedHeadBranchBypassMispredict := io.completion(lane).branchMispredict
+          }
+        }
+      } else {
+        stagedHeadBranchBypassValid := False
+        stagedHeadBranchBypassResult := 0
+        stagedHeadBranchBypassTaken := False
+        stagedHeadBranchBypassTarget := 0
+        stagedHeadBranchBypassMispredict := False
+      }
     }
   } else {
     stagedHeadCompletionBypassValid := False
+    stagedHeadBranchBypassValid := False
+    stagedHeadBranchBypassResult := 0
+    stagedHeadBranchBypassTaken := False
+    stagedHeadBranchBypassTarget := 0
+    stagedHeadBranchBypassMispredict := False
   }
 
   for (entryIndex <- 0 until config.robEntries) {
@@ -524,9 +586,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   }
 
   if (config.enableHeadCompletionCommitBypass) {
-    // Only ordinary current-epoch head completions bypass the final entry.complete
-    // register. Branches, serializing/system operations, and either decoded or
-    // completion exceptions retain the existing precise retirement boundary.
+    // Ordinary current-epoch completions and, when enabled, fully resolved branches
+    // may bypass the final entry.complete register. Serializing/system operations and
+    // either decoded or completion exceptions retain the precise retirement boundary.
     headCompletionBypass := !io.flush && candidates(0).state.payloadReady &&
       stagedHeadCompletionBypassValid &&
       candidates(0).state.valid && !candidates(0).state.complete &&
@@ -534,9 +596,19 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       !candidates(0).payload.isBranch &&
       candidates(0).payload.systemOperation === SystemOperation.none
     headCompletionBypassResult := stagedHeadCompletionBypassResult
+    if (config.enableBranchHeadCompletionBypass) {
+      headBranchBypass := !io.flush && candidates(0).state.payloadReady &&
+        stagedHeadBranchBypassValid && candidates(0).state.valid &&
+        !candidates(0).state.complete && !candidates(0).exception.valid &&
+        !candidates(0).state.serializing && candidates(0).payload.isBranch &&
+        candidates(0).payload.systemOperation === SystemOperation.none
+    } else {
+      headBranchBypass := False
+    }
   } else {
     headCompletionBypass := False
     headCompletionBypassResult := 0
+    headBranchBypass := False
   }
 
   when(io.flush) {
@@ -593,7 +665,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   // Bits 40..51 extend the reserved portion of the V1 ABI. Existing readers
   // ignore them, while newer monitors can classify zero-retirement cycles.
   perfObservationV1Word4(40) := candidates(0).state.valid
-  perfObservationV1Word4(41) := candidates(0).state.complete || headCompletionBypass
+  perfObservationV1Word4(41) :=
+    candidates(0).state.complete || headCompletionBypass || headBranchBypass
   perfObservationV1Word4(42) := candidates(0).state.payloadReady
   perfObservationV1Word4(43) := observationHeadPredictorHasCapacity
   perfObservationV1Word4(44) := candidates(0).exception.valid
