@@ -9,7 +9,7 @@
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - perf20：`5,299,059` cycles，20/20 pass。
-- func58：BT02 matching RTL 的 random-AXI seeds `240/255/141` 均通过完整 func58。
+- func58：MT03 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
 - BT02 matching 100 MHz direct full implementation：setup `-0.678 ns`、hold `+0.053 ns`、DRC
   0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
 - 相对 BT02 前一份 direct full，器件总 LUT `90,221 -> 86,159`、寄存器
@@ -31,8 +31,8 @@
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 - `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
-  不再访问普通 Verilator 内部层级。完整 `cpu-check` 为 39 suites / 213 tests，Python
-  合同为 33 项；clean/instrumented dhrystone A/B 的平台周期 `2,727,045`、退休指令
+  不再访问普通 Verilator 内部层级。完整 `cpu-check` 为 39 suites / 214 tests，Python
+  合同为 36 项；clean/instrumented dhrystone A/B 的平台周期 `2,727,045`、退休指令
   `535,896`、计分周期 `5,425` 和 UART hash 均精确一致，全部计数器守恒 invariant 通过。
   `perf20-sim` 与 `func58-sim` 现可通过 `SIM_PROFILE=instrumented` 使用同一公开入口。
 
@@ -81,6 +81,14 @@ fully routed 和 bitstream 成功。正 WNS 不用于升频。
   setup/hold 为 `-0.678/+0.053 ns`，DRC、route 和 bitstream 完整；旧 IQ payload CE
   路径族已经消失，并降低 4,062 LUT，但新主导族转为 22 条 LSQ 到 ATU 路径。BT02
   继续保留，R1 尚未闭合；下一增量优先局部化 ATU response payload 的资格控制。
+- `MT03 @ 11da524`：ATU response slot 空闲时预填 direct/DMW bypass payload，accepted
+  request 只设置窄 valid；TLB completion 和 mutation 保持更高覆盖优先级。ATU 8 项、Core
+  4 项、系统集成、完整 `cpu-check`（39 suites、214 tests）和生成 RTL 结构检查均通过。
+  perf20 相对 BT02 为 `5,299,059 -> 5,299,059`，20 项逐项精确相等、几何平均
+  `1.000000000x`；func58 seeds `240/255/141` 均为 58/58。证据冻结在
+  `build/reports/experiments/R1-MT03/experiment-manifest.json`，逐项比较见
+  `build/reports/comparisons/R1-MT03.json`。为保持综合时间性价比，MT03 不单独启动
+  Vivado；下一增量从 ROB wakeup 到 IQ/地址发射寄存器的第二梯队路径中选择，之后组合实现。
 
 ## IPC 第 1 至第 3 轮
 
