@@ -34,7 +34,7 @@
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 - `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
   不再访问普通 Verilator 内部层级。当前完整 `cpu-check` 为 39 suites / 216 tests，Python
-  合同为 52 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
+  合同为 53 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
   精确一致，全部计数器守恒 invariant 通过。`perf20-sim` 与 `func58-sim` 可通过
   `SIM_PROFILE=instrumented` 使用同一公开入口。
 - L07 前的 M01 v4 完整 perf20 matrix 为 score `5,299,059`、ROI `5,299,039`、退休
@@ -42,12 +42,16 @@
   `54.38%`；按 head uop 分类，Load `22.87%`、Store `18.61%`、branch `8.19%`、other
   `4.70%`，ROB 空仅 `6.73%`。这使 Store/Load completion latency 进入首轮 IPC 候选，
   但这些比例是理论暴露上界，不能直接当作预期加速比。
-- L07 matching M01 v4 的 score/ROI 为 `5,104,911/5,104,891`，退休指令仍为
+- L07 matching M01 v5 的 score/ROI 为 `5,104,911/5,104,891`，退休指令仍为
   `3,608,034`，IPC 提高到 `0.706780`。Store head-incomplete 从 `986,333`
   降到 `764,452` cycles（占 ROI `18.61% -> 14.97%`），SQ 满周期从
   `11.13% -> 9.06%`；ROB 非空零退休同步减少 `198,145` cycles。Load
   head-incomplete 为 `1,224,728` cycles：相对占比升至 `23.99%`，但绝对值只比前一
   节点多 `12,819`，尚不能判断为 L07 引入的 Load 回归，也不能直接证明 L02 可回收。
+  v5 进一步量出 branch completion 命中 ROB head `156,532` 次（`3.0663%` ROI）、普通
+  Load 原始完成命中 head `354,260` 次（`6.9396%`）以及 oldest Load 阻塞但存在另一个
+  地址已就绪 pending Load `364,380` 次（`7.1379%`）。三者都是一拍或调度机会的上界；
+  只有 branch 项已具备不跨越 LSU 数据寄存边界的低侵入实现路径。
 
 ## R1：时序候选与周期验证
 
@@ -147,6 +151,17 @@ L07 matching instrumented perf20 进一步证明收益来自目标阻塞族：St
 顺序、cache request/response 与可跳过 oldest-load 机会，再决定 L02 或新的内存候选；
 branch resolve-to-recovery 暴露仍有 `153,592` cycles（约 `3.01%` ROI），可与内存方向
 并行形成同一综合批次的独立候选。
+
+同轮第二个 IPC 候选选择 `BR01`：对当前 epoch、精确命中 ROB head、无异常且 payload
+ready 的已解析 branch，在现有 ROB staging 边界保存 taken/target/mispredict，并允许下一拍
+退休；理论一拍机会为 `156,532` cycles（`3.0663%` ROI）。它不做 execute-time squash，
+不改变 speculative RAT/FreeList/LSQ，因此与 B01 的复杂选择性恢复不是同一机制。实现必须
+保持 predictor FIFO capacity、同拍多分支 prefix、精确异常、mispredict recovery 和
+commit debug result。
+
+同批时序候选选择 `BT04`：退出 BT03 的 9-way token payload read，恢复 BT02 已验证的本地
+两槽注册 issue output。BT03 周期中性但 matching top-50 占 47 条且未达成物理目标；BT04
+必须保持逐项周期精确相等，并与 L07/BR01 组合只做一次 matching direct full。
 
 ## 系统、归档与发布
 
