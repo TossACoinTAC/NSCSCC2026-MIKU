@@ -41,7 +41,7 @@
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 - `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
-  不再访问普通 Verilator 内部层级。当前 Scala 门禁为 39 suites / 222 tests，Python
+  不再访问普通 Verilator 内部层级。当前 Scala 门禁为 39 suites / 224 tests，Python
   合同为 56 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
   精确一致，全部计数器守恒 invariant 通过。`perf20-sim` 与 `func58-sim` 可通过
   `SIM_PROFILE=instrumented` 使用同一公开入口。
@@ -254,12 +254,15 @@ matching direct full implementation 的软件门禁。matching direct full 已�
 routed、bitstream 成功，但 setup 仍未闭合。top-50 分类为 IQ 38、ROB/CSR 4、cache/L2 7、
 predictor 1；最新主导族从 lane 1/3 转为 ROB lane 0 staged wake 到 LSU IQ 宽输出。
 
-下一时序节点 `WT04` 计划把 LSU IQ 的“持久 source-ready 更新”和“同拍 select bypass”
+时序节点 `WT04 @ 8457b6f` 已把 LSU IQ 的“持久 source-ready 更新”和“同拍 select bypass”
 拆成两个合同：所有已注册 completion wake 仍在原拍写入 resident/enqueue ready 状态，只有
-ALU direct wake 与 load early wake 继续进入 LSU IQ 同拍 select。这样不丢失 CSR、DIV、SC、
-Multiply 等首次 completion；它们的内存消费者最坏晚一拍被选择。该候选允许小于 `0.5%` 的
-平均性能回退，但必须完整记录 20 项变化，并以 matching route 判断 staged ROB tag 是否退出
-LSU IQ 宽 payload 路径。
+ALU direct wake 与 load early wake 进入 LSU IQ 同拍 select。IssueQueue/Backend 的开关 A/B
+测试证明 fast wake 延迟不变、registered-only wake 持久化且最坏晚一拍选择；完整 `cpu-check`
+为 39 suites / 224 tests，RTL、Yosys、Verilator strict-zero lint 和 56 项 Python 合同均通过。
+完整 perf20 相对 W01+FT06+MT05 为 `5,014,520 -> 5,014,520`，20 项逐项精确相等、几何平均
+`1.000000000x`；func58 random-AXI seeds `240/255/141` 均为 58/58。候选已冻结在
+`build/reports/experiments/R2-WT04/experiment-manifest.json`；是否切断 staged ROB tag 到 LSU IQ
+宽 payload 的物理路径，只由该身份的 matching direct full 判断。
 
 ## 系统、归档与发布
 
