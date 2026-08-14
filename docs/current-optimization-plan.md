@@ -8,11 +8,13 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：当前 R3 RTL 为 `5,014,520` cycles，20/20 pass；W01 相对 WT02
+- perf20：当前 R4 RTL 为 `5,014,546` cycles，20/20 pass；R4 前三项保持
+  `5,014,520`，FT08 增加 26 cycles（`+0.000518%`），归一化几何平均性能回退
+  `0.005882%`，满足时序候选 `<0.5%` 的软件预算。W01 相对 WT02
   减少 42,348 cycles（`-0.837435%`），几何平均加速 `1.010598877x`；BR01 相对 L07
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
-  baseline `5,543,953` 累计 `-9.549738%`。
-- func58：当前 R3 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+  baseline `5,543,953` 累计 `-9.549269%`。
+- func58：当前 R4 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
 - 最近已完成的 R3 matching 100 MHz direct full implementation：setup `-0.440 ns`、hold `+0.009 ns`、
   setup TNS `-13.390 ns`、128 个失败 endpoint；DRC 0 error/critical warning、fully routed、
   bitstream 成功，但仍不是里程碑。placed utilization 为 88,048 LUT、54,595 FF、
@@ -282,11 +284,37 @@ matching direct full 为 setup/hold `-0.440/+0.009 ns`、setup TNS `-13.390 ns`�
 正 WNS 里程碑；归档见
 `Post_Impl_Bundles/cpu_434b34291ca7_chiplab_c398d274812f_perf_100mhz_20260815-031510/manifest.json`。
 
-下一轮时序工作不以单候选直接进入综合。先积累至少两个、通常两个至三个相对独立的候选，
-逐个完成定向测试、完整门禁和 perf20 A/B，再对最终组合只执行一次 direct full implementation。
-当前优先分别从 L1I response 到 frontend 状态、LSQ completion payload 和 IQ issue output
-选择至少三个相对独立且不增加拍数的候选；若某候选带来平均性能回退，归一化幅度必须小于
-`0.5%` 且单独记录。三个节点仍按线性顺序完成门禁，只对最终组合启动一次 Vivado。
+R4 不再把 RTL 文本变短或显式条件消失当作时序成功，而是按 R3 的详细 routed path 改变
+寄存边界或选择拓扑。当前累计四项：
+
+- `IT01 @ 71e36ee` 把 8-entry oldest-ready 串行覆盖链改为平衡归约树，目标是 R3 rank 6
+  的 wake/source-ready 到 issue payload 路径。双配置测试、完整门禁及独立 perf20 通过，
+  总周期保持 `5,014,520`，20 项逐项精确相等。
+- `MT06 @ 6011bd5` 为八个 Store 分别寄存格式化 forwarded Load data，下一拍只用已注册
+  owner 选择 bank，目标是 R3 rank 2/3/4/7 等 Store alias/年龄选择到 completion data 的
+  13-level 路径。LSQ 双配置测试及完整门禁通过。
+- `CT01 @ e7fb4ad` 在合法 hit turnover 候选存在时预读同步 L1I data array，让 tag hit 只
+  决定接受与可见性，不再驱动 RAM enable。它只针对 R3 rank 30 的次级物理路径，不宣称
+  解决 rank 1 的 frontend correction 锥。MT06+CT01 相对 IT01 的完整 perf20 为
+  `5,014,520 -> 5,014,520`，20 项逐项精确相等；该矩阵只能证明二者组合周期透明。
+- `FT08 @ c085441 + 5486380` 对 rank 1/5/8/10 的共同 16-level 路径做状态边界重构：prediction
+  correction 当拍只捕获 corrected PC、translation drain 与 uncached drain 的窄 token，宽
+  outstanding/drop/prediction cleanup 延后到既有 recovery 周期。cached owner 由同步 L1I
+  kill 取消，uncached owner 保留 drain；新增负向测试覆盖 recovery 周期到达的最小延迟
+  uncached response。首次完整 perf 进一步暴露并复现一个真实边界：hit-turnover 年轻响应
+  已在 correction 边沿注册，next-cycle L1I kill 不能撤回其输出；旧接收条件会错误入队四条
+  年轻指令，使 occupancy 从 2 增到 6。`5486380` 用同一个已注册 kill token 将该响应分类为
+  drop，未把 predecode 接回状态锥。修复后 Frontend 25/25、完整 `cpu-check` 39 suites/229
+  tests、RTL/Yosys/Verilator/Python 合同均通过；发布 RTL hash 为
+  `b169f8139a794ed20a6b9a0e5db346957485ee7c71c5aff46fe4283e4bfa553e`。完整 perf20
+  20/20，相对前三项组合为 `5,014,520 -> 5,014,546`（`+0.000518%`）；归一化几何
+  平均性能回退 `0.005882%`，最大单项回退为 dhrystone 的 `0.05849%`，没有异常长尾。
+  该微小而可归因的周期代价由 matching route 是否真正移除 frontend correction 路径来裁决。
+
+R4 最终组合 func58 三 seed 均已通过；冻结 manifest 后只启动一次
+100 MHz direct full implementation。若 route 仍未闭合，必须用新的 top-50 判断哪类路径
+被真正移除、转移或复制，再设计下一批至少两个候选；不根据单次 WNS 数字回退已通过软件
+门禁的候选，也不把综合器可重新推导的表面布尔改写重复列为新方向。
 
 ## 系统、归档与发布
 
