@@ -25,6 +25,9 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     val completionExceptionValid = in Bits (config.writebackWidth bits)
     val completionBranchResolved = in Bits (config.writebackWidth bits)
     val completionBranchTarget = in Vec (UInt(config.xlen bits), config.writebackWidth)
+    val storeCompletionBypassValid = in Bool ()
+    val storeCompletionBypassRobPointer = in UInt (config.robPointerWidth bits)
+    val storeCompletionBypassRecoveryEpoch = in UInt (config.recoveryEpochWidth bits)
     val currentEpoch = in UInt (config.recoveryEpochWidth bits)
     val predictorUpdateCapacity = in UInt (log2Up(config.commitWidth + 1) bits)
     val completionWakeupValid = out Bits (config.writebackWidth bits)
@@ -54,6 +57,9 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
   rob.io.currentEpoch := io.currentEpoch
   rob.io.predictorUpdateCapacity := io.predictorUpdateCapacity
   rob.io.completionValid := io.completionValid
+  rob.io.storeCompletionBypassValid := io.storeCompletionBypassValid
+  rob.io.storeCompletionBypass.robPointer := io.storeCompletionBypassRobPointer
+  rob.io.storeCompletionBypass.recoveryEpoch := io.storeCompletionBypassRecoveryEpoch
   for (lane <- 0 until config.writebackWidth) {
     val completion = rob.io.completion(lane)
     completion.robPointer := io.completionRobPointer(lane)
@@ -101,6 +107,9 @@ class ReorderBufferSpec extends AnyFunSuite {
     dut.io.completionWritesPdst #= 0
     dut.io.completionExceptionValid #= 0
     dut.io.completionBranchResolved #= 0
+    dut.io.storeCompletionBypassValid #= false
+    dut.io.storeCompletionBypassRobPointer #= 0
+    dut.io.storeCompletionBypassRecoveryEpoch #= 0
     dut.io.currentEpoch #= 0
     dut.io.predictorUpdateCapacity #= config.commitWidth
     dut.io.allocateSerializing #= 0
@@ -739,6 +748,78 @@ class ReorderBufferSpec extends AnyFunSuite {
         dut.io.completionValid #= 0
         sample()
         assert(dut.io.completionWakeupCandidateValid.toBigInt == 0)
+      }
+  }
+
+  test("narrow Store completion obeys epoch and flush while retaining head bypass") {
+    val config = OooCoreConfig.FourIssueThreeCommit.copy(
+      enableHeadCompletionCommitBypass = true
+    )
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-rob-store-completion")
+      .compile(new ReorderBufferProbe(config))
+      .doSim("ooo-rob-narrow-store-completion", 0x4f4f54) { dut =>
+        def sample(): Unit = {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+        }
+
+        def allocateOne(pc: Int): BigInt = {
+          dut.io.allocateValid #= 1
+          dut.io.allocateAccept #= true
+          dut.io.allocatePc(0) #= pc
+          sleep(1)
+          val pointer = dut.io.allocatedPointer(0).toBigInt
+          sample()
+          dut.io.allocateValid #= 0
+          dut.io.allocateAccept #= false
+          pointer
+        }
+
+        dut.clockDomain.forkStimulus(period = 10)
+        initialize(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample()
+
+        dut.io.currentEpoch #= 2
+        val firstPointer = allocateOne(0x1c000100)
+        dut.io.storeCompletionBypassRobPointer #= firstPointer
+        dut.io.storeCompletionBypassRecoveryEpoch #= 1
+        dut.io.storeCompletionBypassValid #= true
+        sample()
+        dut.io.storeCompletionBypassValid #= false
+        assert(dut.io.commitValid.toBigInt == 0)
+        assert(dut.io.completionWakeupValid.toBigInt == 0)
+        sample()
+        assert(dut.io.commitValid.toBigInt == 0)
+
+        dut.io.storeCompletionBypassRecoveryEpoch #= 2
+        dut.io.storeCompletionBypassValid #= true
+        sample()
+        dut.io.storeCompletionBypassValid #= false
+        assert((dut.io.commitValid.toBigInt & 1) == 1)
+        assert(dut.io.commitPc(0).toBigInt == 0x1c000100)
+        assert(dut.io.commitResult(0).toBigInt == 0)
+        assert(dut.io.completionWakeupValid.toBigInt == 0)
+        sample()
+        assert(dut.io.occupancy.toBigInt == 0)
+
+        val flushedPointer = allocateOne(0x1c000104)
+        dut.io.storeCompletionBypassRobPointer #= flushedPointer
+        dut.io.storeCompletionBypassRecoveryEpoch #= 2
+        dut.io.storeCompletionBypassValid #= true
+        dut.io.flush #= true
+        sample()
+        dut.io.storeCompletionBypassValid #= false
+        dut.io.flush #= false
+        assert(dut.io.empty.toBoolean)
+        for (_ <- 0 until 2) {
+          sample()
+          assert(dut.io.commitValid.toBigInt == 0)
+          assert(dut.io.completionWakeupValid.toBigInt == 0)
+        }
       }
   }
 

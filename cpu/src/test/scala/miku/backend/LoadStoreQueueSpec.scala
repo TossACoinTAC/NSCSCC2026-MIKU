@@ -38,6 +38,8 @@ private final class LoadStoreQueueProbe(config: OooCoreConfig) extends Component
     val reservationLineAddress = in Bits (config.reservationAddressWidth bits)
     val completionValid = out Bool ()
     val completion = out(Completion(config))
+    val storeCompletionBypassValid = out Bool ()
+    val storeCompletionBypass = out(StoreCompletionIdentity(config))
     val loadWakeupValid = out Bool ()
     val loadWakeupPdst = out UInt (config.physicalRegIndexWidth bits)
     val loadWakeupRecoveryEpoch = out UInt (config.recoveryEpochWidth bits)
@@ -111,8 +113,33 @@ private final class LoadStoreQueueProbe(config: OooCoreConfig) extends Component
   io.translationRequestAddress := lsq.io.translationRequest.virtualAddress
   io.dataRequestValid := lsq.io.dataRequestValid
   io.dataRequest := lsq.io.dataRequest
-  io.completionValid := lsq.io.completionValid
+  // Present one semantic completion stream to behavior tests while exposing
+  // the narrow Store path separately for structural assertions. This probe
+  // adapter keeps tests independent of the production writeback encoding.
+  val semanticStoreCompletion = Completion(config)
+  semanticStoreCompletion.robPointer := lsq.io.storeCompletionBypass.robPointer
+  semanticStoreCompletion.recoveryEpoch := lsq.io.storeCompletionBypass.recoveryEpoch
+  semanticStoreCompletion.pdst := 0
+  semanticStoreCompletion.writesPdst := False
+  semanticStoreCompletion.data := 0
+  semanticStoreCompletion.sideEffectData := 0
+  semanticStoreCompletion.exception.valid := False
+  semanticStoreCompletion.exception.ecode := 0
+  semanticStoreCompletion.exception.esubcode := 0
+  semanticStoreCompletion.exception.badVAddrValid := False
+  semanticStoreCompletion.exception.badVAddr := 0
+  semanticStoreCompletion.exception.tlbRefill := False
+  semanticStoreCompletion.branchResolved := False
+  semanticStoreCompletion.branchTaken := False
+  semanticStoreCompletion.branchTarget := 0
+  semanticStoreCompletion.branchMispredict := False
+  io.completionValid := lsq.io.completionValid || lsq.io.storeCompletionBypassValid
   io.completion := lsq.io.completion
+  when(lsq.io.storeCompletionBypassValid) {
+    io.completion := semanticStoreCompletion
+  }
+  io.storeCompletionBypassValid := lsq.io.storeCompletionBypassValid
+  io.storeCompletionBypass := lsq.io.storeCompletionBypass
   io.loadWakeupValid := lsq.io.loadWakeupValid
   io.loadWakeupPdst := lsq.io.loadWakeupPdst
   io.loadWakeupRecoveryEpoch := lsq.io.loadWakeupRecoveryEpoch
@@ -1154,7 +1181,10 @@ class LoadStoreQueueSpec extends AnyFunSuite {
           dut.io.translationResponseEnable #= true
           sleep(1)
           assert(dut.io.completionValid.toBoolean == enabled)
+          assert(dut.io.storeCompletionBypassValid.toBoolean == enabled)
           if (enabled) {
+            assert(dut.io.storeCompletionBypass.robPointer.toBigInt == 6)
+            assert(dut.io.storeCompletionBypass.recoveryEpoch.toBigInt == 0)
             assert(dut.io.completion.robPointer.toBigInt == 6)
             assert(!dut.io.completion.writesPdst.toBoolean)
             assert(!dut.io.completion.exception.valid.toBoolean)
@@ -1162,6 +1192,7 @@ class LoadStoreQueueSpec extends AnyFunSuite {
 
           sample(dut)
           dut.io.translationResponseEnable #= false
+          assert(!dut.io.storeCompletionBypassValid.toBoolean)
           assert(dut.io.completionValid.toBoolean != enabled)
           if (!enabled) {
             assert(dut.io.completion.robPointer.toBigInt == 6)
@@ -1422,10 +1453,10 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         sample(dut)
         dut.io.aguValid #= false
 
-        assert(dut.io.completionValid.toBoolean)
-        assert(dut.io.completion.robPointer.toBigInt == 0)
-        assert(!dut.io.completion.writesPdst.toBoolean)
+        assert(dut.io.storeCompletionBypassValid.toBoolean)
+        assert(dut.io.storeCompletionBypass.robPointer.toBigInt == 0)
         sample(dut)
+        assert(!dut.io.storeCompletionBypassValid.toBoolean)
         // Forwarded Loads use the registered completion path. The cycle after
         // the direct Store completion therefore remains empty before the Load appears.
         assert(!dut.io.completionValid.toBoolean)

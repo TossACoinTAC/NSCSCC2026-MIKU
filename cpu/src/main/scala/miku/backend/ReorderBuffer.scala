@@ -69,6 +69,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
 
     val completionValid = in Bits (config.writebackWidth bits)
     val completion = in Vec (Completion(config), config.writebackWidth)
+    val storeCompletionBypassValid = in Bool ()
+    val storeCompletionBypass = in(StoreCompletionIdentity(config))
     val completionWakeupValid = out Bits (config.writebackWidth bits)
     val completionWakeupCandidateValid = out Bits (config.writebackWidth bits)
     val completionWakeupPdst =
@@ -406,7 +408,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   // wakeup latency while keeping currentEpoch out of the IQ select-to-uop
   // write path.
   val stagedCompletionCurrent = Reg(Bits(config.writebackWidth bits)) init (0)
+  val stagedStoreCompletionValid = RegInit(False)
+  val stagedStoreCompletionCurrent = RegInit(False)
+  val stagedStoreCompletionRobPointer = Reg(UInt(config.robPointerWidth bits))
   val stagedCompletionMatches = Vec(Bits(config.writebackWidth bits), config.robEntries)
+  val stagedStoreCompletionMatches = Bits(config.robEntries bits)
   for (entryIndex <- 0 until config.robEntries) {
     for (lane <- 0 until config.writebackWidth) {
       val stagedIndex = stagedRobPointer(lane)(config.robIndexWidth - 1 downto 0)
@@ -416,6 +422,22 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         entries(entryIndex).valid && !entries(entryIndex).complete &&
         entries(entryIndex).pointer.msb === stagedRobPointer(lane).msb
     }
+    val stagedStoreIndex =
+      stagedStoreCompletionRobPointer(config.robIndexWidth - 1 downto 0)
+    stagedStoreCompletionMatches(entryIndex) := stagedStoreCompletionValid &&
+      stagedStoreCompletionCurrent &&
+      stagedStoreIndex === U(entryIndex, config.robIndexWidth bits) &&
+      entries(entryIndex).valid && !entries(entryIndex).complete &&
+      entries(entryIndex).pointer.msb === stagedStoreCompletionRobPointer.msb
+  }
+  when(io.flush) {
+    stagedStoreCompletionValid := False
+    stagedStoreCompletionCurrent := False
+  }.otherwise {
+    stagedStoreCompletionValid := io.storeCompletionBypassValid
+    stagedStoreCompletionRobPointer := io.storeCompletionBypass.robPointer
+    stagedStoreCompletionCurrent := io.storeCompletionBypassValid &&
+      io.storeCompletionBypass.recoveryEpoch === io.currentEpoch
   }
   for (lane <- 0 until config.writebackWidth) {
     io.completionWakeupCandidateValid(lane) := stagedCompletionCurrent(lane) &&
@@ -449,6 +471,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
 
   if (config.enableHeadCompletionCommitBypass) {
     val incomingHeadCompletionBypassMask = Bits(config.writebackWidth bits)
+    val incomingHeadStoreCompletionBypass = io.storeCompletionBypassValid &&
+      io.storeCompletionBypass.recoveryEpoch === io.currentEpoch &&
+      io.storeCompletionBypass.robPointer === payloadReadPointer(0)
     val incomingHeadCompletionBypassResult = Bits(config.xlen bits)
     incomingHeadCompletionBypassResult := 0
     for (lane <- 0 until config.writebackWidth) {
@@ -463,8 +488,13 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     when(io.flush) {
       stagedHeadCompletionBypassValid := False
     }.otherwise {
-      stagedHeadCompletionBypassValid := incomingHeadCompletionBypassMask.orR
-      stagedHeadCompletionBypassResult := incomingHeadCompletionBypassResult
+      stagedHeadCompletionBypassValid :=
+        incomingHeadCompletionBypassMask.orR || incomingHeadStoreCompletionBypass
+      stagedHeadCompletionBypassResult := Mux(
+        incomingHeadStoreCompletionBypass,
+        B(0, config.xlen bits),
+        incomingHeadCompletionBypassResult
+      )
     }
   } else {
     stagedHeadCompletionBypassValid := False
@@ -484,6 +514,12 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
           entries(entryIndex).branchTarget := stagedBranchTarget(lane)
         }
       }
+    }
+    when(!io.flush && stagedStoreCompletionMatches(entryIndex)) {
+      entries(entryIndex).complete := True
+      entries(entryIndex).result := B(0, config.xlen bits)
+      entries(entryIndex).sideEffectData := B(0, config.xlen bits)
+      entries(entryIndex).completionExceptionValid := False
     }
   }
 

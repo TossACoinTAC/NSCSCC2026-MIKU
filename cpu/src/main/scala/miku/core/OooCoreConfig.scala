@@ -85,7 +85,7 @@ final case class OooCoreConfig(
     storeQueueEntries: Int = 8,
     mshrEntries: Int = 4,
     enableDivideFastPath: Boolean = false,
-    enableFastStoreCompletion: Boolean = false,
+    enableFastStoreCompletion: Boolean = true,
     enableStoreTranslationLookahead: Boolean = true,
     // Timing experiment: remove the low-ROI wakeup/retirement shortcuts while
     // retaining F01 phase 1 and the cache response cut.

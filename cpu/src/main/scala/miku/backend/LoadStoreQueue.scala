@@ -165,6 +165,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     val dataResponse = in(CacheResponse(config))
     val completionValid = out Bool ()
     val completion = out(Completion(config))
+    val storeCompletionBypassValid = out Bool ()
+    val storeCompletionBypass = out(StoreCompletionIdentity(config))
     val loadWakeupValid = out Bool ()
     val loadWakeupPdst = out UInt (config.physicalRegIndexWidth bits)
     val loadWakeupRecoveryEpoch = out UInt (config.recoveryEpochWidth bits)
@@ -753,31 +755,16 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // exception payload. Any exceptional, SC, uncached, or collision case keeps
   // using the fully registered completion path below.
   val fastStoreCompletionValid = fastStoreCompletionCandidate && !completionValid
-  val fastStoreCompletion = Completion(config)
-  fastStoreCompletion.robPointer := Mux(
+  val fastStoreCompletionRobPointer = Mux(
     translatedFastStore,
     translationOwnerRobPointer,
     headStore.robPointer
   )
-  fastStoreCompletion.recoveryEpoch := Mux(
+  val fastStoreCompletionRecoveryEpoch = Mux(
     translatedFastStore,
     translationOwnerRecoveryEpoch,
     headStore.recoveryEpoch
   )
-  fastStoreCompletion.pdst := 0
-  fastStoreCompletion.writesPdst := False
-  fastStoreCompletion.data := 0
-  fastStoreCompletion.sideEffectData := 0
-  fastStoreCompletion.exception.valid := False
-  fastStoreCompletion.exception.ecode := 0
-  fastStoreCompletion.exception.esubcode := 0
-  fastStoreCompletion.exception.badVAddrValid := False
-  fastStoreCompletion.exception.badVAddr := 0
-  fastStoreCompletion.exception.tlbRefill := False
-  fastStoreCompletion.branchResolved := False
-  fastStoreCompletion.branchTaken := False
-  fastStoreCompletion.branchTarget := 0
-  fastStoreCompletion.branchMispredict := False
   when(io.flush) {
     aguExceptionCompletionValid := False
     // Cached writes only enter this buffer after retirement and must survive a
@@ -835,11 +822,11 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     // from being replicated onto every completion payload register.
     completion := generatedCompletion
   }
-  io.completionValid := completionValid || fastStoreCompletionValid
+  io.completionValid := completionValid
   io.completion := completion
-  when(fastStoreCompletionValid) {
-    io.completion := fastStoreCompletion
-  }
+  io.storeCompletionBypassValid := fastStoreCompletionValid
+  io.storeCompletionBypass.robPointer := fastStoreCompletionRobPointer
+  io.storeCompletionBypass.recoveryEpoch := fastStoreCompletionRecoveryEpoch
   io.loadWakeupValid := completionValid && completionLoadWakeup
   io.loadWakeupPdst := completion.pdst
   io.loadWakeupRecoveryEpoch := completion.recoveryEpoch

@@ -83,6 +83,10 @@ private final class OooBackendDispatchProbe(config: OooCoreConfig) extends Compo
 
   backend.io.issueReady := io.issueReady
   backend.io.completionValid := io.completionValid
+  backend.io.storeCompletionBypassValid := False
+  backend.io.storeCompletionBypass.assignFromBits(
+    B(0, backend.io.storeCompletionBypass.getBitsWidth bits)
+  )
   backend.io.directWakeupValid := 0
   backend.io.directWakeupValid(0) := io.directWakeupValid
   private val multiplyPort =

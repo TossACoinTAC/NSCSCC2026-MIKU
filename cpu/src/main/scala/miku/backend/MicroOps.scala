@@ -150,6 +150,17 @@ final case class Completion(config: OooCoreConfig) extends Bundle {
   val branchMispredict = Bool()
 }
 
+/** Identity-only completion for an ordinary cached Store.
+  *
+  * Such a Store has no destination register, result, side effect payload, or
+  * completion-time exception. Keeping it separate from [[Completion]] avoids
+  * routing a mostly constant wide bundle through the execution writeback mux.
+  */
+final case class StoreCompletionIdentity(config: OooCoreConfig) extends Bundle {
+  val robPointer = UInt(config.robPointerWidth bits)
+  val recoveryEpoch = UInt(config.recoveryEpochWidth bits)
+}
+
 final case class RecoveryRequest(config: OooCoreConfig) extends Bundle {
   val cause = UInt(RecoveryCause.Width bits)
   val robPointer = UInt(config.robPointerWidth bits)
