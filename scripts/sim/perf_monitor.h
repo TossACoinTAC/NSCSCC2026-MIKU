@@ -77,6 +77,7 @@ private:
     std::uint64_t frontend_occupancy_hist_[kFrontendOccupancyBins] = {};
     std::uint64_t frontend_events_[12] = {};
     std::uint64_t frontend_request_interval_hist_[8] = {};
+    std::uint64_t frontend_request_sequences_ = 0;
     std::uint64_t frontend_last_request_cycle_ = 0;
     bool frontend_seen_request_ = false;
 

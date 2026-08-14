@@ -146,6 +146,7 @@ void PerfMonitor::reset_accumulators() {
     std::fill(std::begin(frontend_events_), std::end(frontend_events_), 0);
     std::fill(std::begin(frontend_request_interval_hist_),
               std::end(frontend_request_interval_hist_), 0);
+    frontend_request_sequences_ = 0;
     reset_interval_state();
 
     std::fill(std::begin(issue_ready_cycles_),
@@ -267,6 +268,8 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
         if (frontend_seen_request_) {
             frontend_request_interval_hist_[latency_bucket(
                 cycles_ - frontend_last_request_cycle_)]++;
+        } else {
+            frontend_request_sequences_++;
         }
         frontend_seen_request_ = true;
         frontend_last_request_cycle_ = cycles_;
@@ -488,7 +491,7 @@ void PerfMonitor::write_json(const char *path) const {
         std::fprintf(file, "%s%llu", index == 0 ? "" : ", ",
                      static_cast<unsigned long long>(frontend_occupancy_hist_[index]));
     }
-    std::fprintf(file, "], \"translation_request_fire\": %llu, \"translation_outstanding_cycles\": %llu, \"translation_response_fire\": %llu, \"translated_request_valid_cycles\": %llu, \"cache_request_base_valid_cycles\": %llu, \"cache_request_fire\": %llu, \"cache_response_fire\": %llu, \"cache_outstanding_cycles\": %llu, \"cache_hit_pending_cycles\": %llu, \"predictor_update_valid_cycles\": %llu, \"predictor_update_fire\": %llu, \"turnover_token_cycles\": %llu, \"request_interval_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]},\n",
+    std::fprintf(file, "], \"translation_request_fire\": %llu, \"translation_outstanding_cycles\": %llu, \"translation_response_fire\": %llu, \"translated_request_valid_cycles\": %llu, \"cache_request_base_valid_cycles\": %llu, \"cache_request_fire\": %llu, \"cache_response_fire\": %llu, \"cache_outstanding_cycles\": %llu, \"cache_hit_pending_cycles\": %llu, \"predictor_update_valid_cycles\": %llu, \"predictor_update_fire\": %llu, \"turnover_token_cycles\": %llu, \"request_interval_sequences\": %llu, \"request_interval_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]},\n",
                  static_cast<unsigned long long>(frontend_events_[0]),
                  static_cast<unsigned long long>(frontend_events_[1]),
                  static_cast<unsigned long long>(frontend_events_[2]),
@@ -501,6 +504,7 @@ void PerfMonitor::write_json(const char *path) const {
                  static_cast<unsigned long long>(frontend_events_[9]),
                  static_cast<unsigned long long>(frontend_events_[10]),
                  static_cast<unsigned long long>(frontend_events_[11]),
+                 static_cast<unsigned long long>(frontend_request_sequences_),
                  static_cast<unsigned long long>(frontend_request_interval_hist_[0]),
                  static_cast<unsigned long long>(frontend_request_interval_hist_[1]),
                  static_cast<unsigned long long>(frontend_request_interval_hist_[2]),

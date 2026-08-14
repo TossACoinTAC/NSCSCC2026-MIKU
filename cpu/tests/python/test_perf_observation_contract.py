@@ -61,6 +61,7 @@ def valid_document() -> dict:
         "frontend": {
             "occupancy_histogram": [1] + [0] * 16,
             "request_interval_histogram": [0] * 8,
+            "request_interval_sequences": 0,
             "cache_request_fire": 0,
         },
         "issue": {
@@ -164,6 +165,28 @@ class PerfObservationContractTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("do not form closed pairs", result.stdout)
 
+    def test_accepts_multiple_roi_request_sequences(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["cycles"] = 4
+        document["roi"]["counter_read_markers"] = 4
+        document["roi"]["closed_pairs"] = 2
+        document["retire_width_histogram"] = [4, 0, 0, 0]
+        document["unused_commit_slots"] = 12
+        document["zero_retire_loss"] = {
+            "recovery": 0,
+            "rob_empty": 4,
+            "rob_nonempty": 0,
+        }
+        document["rob"]["occupancy_histogram"] = [4] + [0] * 32
+        document["frontend"]["occupancy_histogram"] = [4] + [0] * 16
+        document["frontend"]["cache_request_fire"] = 4
+        document["frontend"]["request_interval_sequences"] = 2
+        document["frontend"]["request_interval_histogram"] = [0, 2] + [0] * 6
+        document["dispatch"]["fire_histogram"] = [4, 0, 0, 0, 0]
+        document["branch"]["commit_histogram"] = [4, 0, 0, 0]
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_rejects_wrong_abi_identity(self) -> None:
         document = copy.deepcopy(valid_document())
         document["observation_abi"]["word_count"] = 7
@@ -231,7 +254,6 @@ class PerfObservationContractTest(unittest.TestCase):
             all('--profile "instrumented"' in line for line in profile_arguments),
             result.stdout,
         )
-
 
 if __name__ == "__main__":
     unittest.main()

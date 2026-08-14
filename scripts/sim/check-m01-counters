@@ -106,7 +106,18 @@ if schema in {"miku-perf-observation-v1", "miku-perf-observation-v2"}:
     ):
         fail("frontend request interval histogram must contain eight nonnegative integers")
     request_fire = frontend.get("cache_request_fire")
-    if sum(frontend_intervals) != max(request_fire - 1, 0):
+    if schema == "miku-perf-observation-v2":
+        request_sequences = frontend.get("request_interval_sequences")
+        if (
+            not isinstance(request_sequences, int)
+            or request_sequences < 0
+            or request_sequences > request_fire
+        ):
+            fail("frontend request interval sequence count is invalid")
+        expected_intervals = request_fire - request_sequences
+    else:
+        expected_intervals = max(request_fire - 1, 0)
+    if sum(frontend_intervals) != expected_intervals:
         fail("frontend request intervals do not conserve request fires")
 
     issue = counters.get("issue", {})
