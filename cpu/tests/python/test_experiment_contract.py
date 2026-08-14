@@ -179,6 +179,15 @@ Slack (MET) : 0.100ns
         self.assertIn("miku.privileged.AddressTranslationUnitSpec", result["scala_suites"])
         self.assertIn("miku.core.OooCoreSystemIntegrationSpec", result["scala_suites"])
 
+    def test_execution_impact_is_package_based(self) -> None:
+        mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
+        path = "cpu/src/main/scala/miku/execute/OooExecutionCluster.scala"
+        result = calculate_impact([path], mapping)
+        self.assertEqual(result["unmatched_paths"], [])
+        self.assertIn("miku.execute.OooExecutionClusterSpec", result["scala_suites"])
+        self.assertIn("miku.backend.OooBackendWithDataCacheSpec", result["scala_suites"])
+        self.assertIn("tests/python/test_generation_contract.py", result["python_contracts"])
+
     def test_backend_completion_and_changed_suite_are_mapped(self) -> None:
         mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
         result = calculate_impact(
