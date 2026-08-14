@@ -87,9 +87,9 @@ final case class OooCoreConfig(
     enableDivideFastPath: Boolean = false,
     enableFastStoreCompletion: Boolean = true,
     enableStoreTranslationLookahead: Boolean = true,
-    // Timing experiment: remove the low-ROI wakeup/retirement shortcuts while
-    // retaining F01 phase 1 and the cache response cut.
-    enableDirectWakeupEchoSuppression: Boolean = false,
+    // Keep first-time variable-latency completions while suppressing only the
+    // registered echo of a tag that was already broadcast by a direct wake.
+    enableDirectWakeupEchoSuppression: Boolean = true,
     enableDirectOnlyPortEchoSuppression: Boolean = true,
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableFlushDecoupledDirectWakeup: Boolean = true,
