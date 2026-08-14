@@ -54,9 +54,12 @@ fully routed 和 bitstream 成功。正 WNS 不用于升频。
 - `FT02 @ bcce5fe`：OooFrontend 定向 23 项、完整 `cpu-check` 和 perf20 通过。turnover
   token 由匹配且成功的 translation response 资格化，下一次翻译仍保持同拍启动；相对
   MT02 总周期 `5,306,558 -> 5,299,059`（`-0.141316%`），几何平均加速 `1.006239125x`。
-  该节点出现可归因的分项周期变化，已从“周期透明”转为 R1 性能候选；FT03 将在此节点
-  上继续验证，最终组合仍按平均性能门槛和 direct implementation 判定。
-- `FT03`：下一节点，尚未形成候选 RTL。
+  该节点出现可归因的分项周期变化，已从“周期透明”转为 R1 性能候选；最终组合仍按
+  平均性能门槛和 direct implementation 判定。
+- `FT03 @ e14957a`：OooFrontend 定向 23 项和完整 `cpu-check` 通过；taken 后的年轻
+  lane 只写入不可见槽位，`count/tail` 继续定义唯一可见前缀。perf20 相对 FT02 20 项
+  逐项精确相等，总周期 `5,299,059`、几何平均 `1.000000000x`。R1 RTL 节点已完成，
+  下一步运行最终 func58 三 seed 和一次 direct full implementation。
 
 ## IPC 第 1 至第 3 轮
 
