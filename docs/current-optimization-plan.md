@@ -9,7 +9,7 @@
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - perf20：`5,299,059` cycles，20/20 pass。
-- func58：R1 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58 通过。
+- func58：BT02 matching RTL 的 random-AXI seeds `240/255/141` 均通过完整 func58。
 - R1 matching 100 MHz direct full implementation：setup `-0.466 ns`、hold `+0.050 ns`、DRC
   0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
 - 相对上一份 direct full，setup 改善 `0.086 ns`；CPU 层次 LUT `76,873 -> 77,789`
@@ -31,9 +31,10 @@
 
 ## R1：时序候选与周期验证
 
-按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积。每个节点独立提交，并执行受影响
-suite、完整 `cpu-check`、完整 perf20 20/20 和相对前一节点的 A/B。五项结束后运行 func58
-三 seed，再执行一次 100 MHz direct full implementation。
+首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
+CE 后，再以 `BT02` 作为同一 R1 的证据驱动增量。每个节点独立提交，并执行受影响 suite、
+完整 `cpu-check`、完整 perf20 20/20 和相对前一节点的 A/B；每个待实现组合在启动 Vivado
+前补齐 matching func58 三 seed。
 
 理想结果是 perf20 20 项逐项相等。最终组合允许归一化几何平均性能回退小于 `0.5%`，但
 必须记录全部分项，并与目标路径族、WNS、TNS 和资源变化交叉验证。周期改善的候选转为性能
@@ -65,9 +66,12 @@ fully routed 和 bitstream 成功。正 WNS 不用于升频。
 - R1 首批组合的 func58 seeds `240/255/141` 均为 58/58；direct full 为 setup
   `-0.466 ns`、hold `+0.050 ns`、fully routed、DRC 0 error/critical warning 且 bitstream
   成功。该结果比旧 direct full 改善 `0.086 ns`，但尚未满足 setup 门禁，不能晋级。
-- 下一增量为 `BT02`：固定 IQ 宽 payload 的物理槽，只压缩窄年龄索引，消除
-  `issueReady/redirect -> queue payload CE`。完成定向、完整门禁和 perf20 后，再执行下一次
-  direct full；允许小于 `0.5%` 的平均性能回退，但必须记录并和时序收益交叉验证。
+- `BT02 @ 26bfef9`：IQ resident payload 改为固定物理槽，仅压缩 3-bit 年龄索引。
+  IssueQueue 10 项定向测试、完整 `cpu-check`（39 suites、213 tests）和 perf20 20/20 通过；
+  相对 R1 首批组合 20 项逐项精确相等，总周期 `5,299,059`、几何平均
+  `1.000000000x`。matching func58 seeds `240/255/141` 均通过，证据已冻结到
+  `build/reports/experiments/R1-BT02/experiment-manifest.json`。下一步只运行一次 100 MHz
+  direct full，用新的 IQ top-50、WNS/TNS 和资源结果判定该结构是否闭合 R1。
 
 ## IPC 第 1 至第 3 轮
 
