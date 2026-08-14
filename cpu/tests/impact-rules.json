@@ -26,6 +26,12 @@
       "python_contracts": ["tests/python/test_core_interface.py"]
     },
     {
+      "name": "address-translation",
+      "paths": ["cpu/src/main/scala/miku/privileged/AddressTranslationUnit.scala", "cpu/src/main/scala/miku/privileged/HierarchicalTlb.scala"],
+      "scala_suites": ["miku.privileged.AddressTranslationUnitSpec", "miku.core.OooCoreIntegrationSpec", "miku.core.OooCoreSystemIntegrationSpec"],
+      "python_contracts": ["tests/python/test_cache_memory_contract.py", "tests/python/test_core_interface.py"]
+    },
+    {
       "name": "predictor",
       "paths": ["cpu/src/main/scala/miku/predict/*.scala"],
       "scala_suites": ["miku.predict.BranchPredictorSpec", "miku.frontend.OooFrontendSpec", "miku.core.PredictorUpdateQueueSpec", "miku.core.OooCoreSpec"],

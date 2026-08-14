@@ -147,6 +147,21 @@ Slack (MET) : 0.100ns
         self.assertIn("miku.backend.IssueQueueSpec", result["scala_suites"])
         self.assertNotIn("miku.backend.LoadStoreQueueSpec", result["scala_suites"])
 
+    def test_translation_impact_includes_owner_and_system_contracts(self) -> None:
+        mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
+        path = "cpu/src/main/scala/miku/privileged/AddressTranslationUnit.scala"
+        result = calculate_impact([path], mapping)
+        self.assertEqual(result["unmatched_paths"], [])
+        self.assertIn("miku.privileged.AddressTranslationUnitSpec", result["scala_suites"])
+        self.assertIn("miku.core.OooCoreSystemIntegrationSpec", result["scala_suites"])
+
+    def test_unknown_rtl_path_is_reported_unmatched(self) -> None:
+        mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
+        path = "cpu/src/main/scala/miku/unknown/UnmappedUnit.scala"
+        result = calculate_impact([path], mapping)
+        self.assertEqual(result["unmatched_paths"], [path])
+        self.assertEqual(result["scala_suites"], [])
+
     def test_cpu_source_hash_ignores_tests_but_tracks_generation_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             cpu = Path(directory)
