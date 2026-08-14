@@ -218,9 +218,13 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val translationResponseAcceptedValid = translationResponseFire && translationOutstanding &&
     translationResponseMatches && !io.translationResponse.cancelled &&
     !io.translationResponse.exception.valid && !io.redirectValid
+  // Once a response matches, the registered owner is the same architectural PC and is already
+  // local to the frontend.  Keep the live response VA only in the identity comparator so it does
+  // not also drive the cache/predictor payload path.
+  val acceptedTranslationPc = translationPc
   val requestTranslationPc = Mux(
     translationResponseBypassValid,
-    io.translationResponse.virtualAddress,
+    acceptedTranslationPc,
     Mux(translatedRequestValid, translatedPc, translationPc)
   )
   val requestPrediction = Vec(BankedFetchPrediction(config), config.fetchWidth)
@@ -755,7 +759,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
           translatedExceptionValid := False
         }.elsewhen(translationResponseMatches && !io.translationResponse.exception.valid) {
           translatedRequestValid := True
-          translatedPc := io.translationResponse.virtualAddress
+          translatedPc := acceptedTranslationPc
           translatedPhysicalAddress := io.translationResponse.physicalAddress
           translatedUncached := io.translationResponse.uncached
           for (lane <- 0 until config.fetchWidth) {
