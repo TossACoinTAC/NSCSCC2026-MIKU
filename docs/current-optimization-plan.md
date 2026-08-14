@@ -8,10 +8,11 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：BR01 matching RTL 为 `5,057,854` cycles，20/20 pass；相对 L07
+- perf20：BT04 matching RTL 为 `5,057,854` cycles，20/20 pass；BT04 相对 BR01
+  20 项逐项精确相等；BR01 相对 L07
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
   baseline `5,543,953` 累计 `-8.768094%`。
-- func58：L07 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+- func58：BT04 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
 - MT03+BT03 matching 100 MHz direct full implementation：setup `-0.694 ns`、hold `+0.053 ns`、
   DRC 0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
 - 相对 BT02 matching direct full，器件总 LUT `86,159 -> 86,489`、寄存器
@@ -163,9 +164,16 @@ clean perf20 为 `5,104,911 -> 5,057,854`，总周期 `-0.921799%`、几何平�
 `build/reports/experiments/R2-BR01/experiment-manifest.json`。它不做 execute-time squash，
 不改变 speculative RAT/FreeList/LSQ，因此与 B01 的复杂选择性恢复不是同一机制。
 
-同批时序候选选择 `BT04`：退出 BT03 的 9-way token payload read，恢复 BT02 已验证的本地
-两槽注册 issue output。BT03 周期中性但 matching top-50 占 47 条且未达成物理目标；BT04
-必须保持逐项周期精确相等，并与 L07/BR01 组合只做一次 matching direct full。
+同批时序候选 `BT04 @ 50f998c` 已实现并保留：退出 BT03 的 9-way token payload read，
+恢复 BT02 已验证的每端口本地两槽注册 issue output；配置开关仍可选择 BT03 token 路径，
+用于结构 A/B 回归。IssueQueue 10 项、Backend 17 项以及完整 `cpu-check`（39 suites / 218
+tests）通过，测试覆盖两种输出结构在 backpressure 下的 payload 稳定性和连续逐拍发射。
+clean perf20 相对 BR01 为 `5,057,854 -> 5,057,854`，20 项逐项精确相等、几何平均
+`1.000000000x`；matching func58 seeds `240/255/141` 均为 58/58。逐项证据见
+`build/reports/comparisons/R2-BT04.json`，冻结证据见
+`build/reports/experiments/R2-BT04-local-issue-output/experiment-manifest.json`。L07、BR01 与 BT04
+最终组合只运行一次 100 MHz direct full；BT04 是否移除 IQ token-read 路径墙以及组合能否闭合，
+只由该次 matching implementation 判定。
 
 ## 系统、归档与发布
 

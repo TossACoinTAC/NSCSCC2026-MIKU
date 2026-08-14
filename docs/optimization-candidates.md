@@ -30,9 +30,9 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 
 ## 2. 当前默认组合与本轮证据
 
-当前默认启用的主要候选包括 F01/H03 frontend turnover、B03-full、L05、L07、L08、W02、H01、Q01，以及本轮新增的 E02、FT01、FT02、FT03、BT02、MT03 与 BT03；E01、W01 默认关闭。当前 RTL 已通过完整 `make cpu-check`（39 suites、216 tests）、perf20 20/20，以及 matching func58 seeds `240/255/141` 的完整测试。
+当前默认启用的主要候选包括 F01/H03 frontend turnover、B03-full、L05、L07、L08、W02、H01、Q01，以及本轮新增的 E02、FT01、FT02、FT03、BT02、MT03 与 BT04；BT03 作为可配置 A/B 结构保留但默认关闭，E01、W01 默认关闭。当前 RTL 已通过完整 `make cpu-check`（39 suites、218 tests）、perf20 20/20，以及 matching func58 seeds `240/255/141` 的完整测试。
 
-本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。L07 窄 Store completion 将其降至 `5,104,911`（增量 `-3.663820%`，几何平均 `1.038957091x`），BR01 再降至 `5,057,854`（增量 `-0.921799%`，几何平均 `1.009753745x`；相对原始 baseline 累计 `-8.768094%`）。各增量的逐项变化均单独记录，不能把累计收益拆分给其他候选。MT03+BT03 matching 100 MHz direct full 已产生 fully-routed bitstream，hold `+0.053 ns` 且 DRC 0 error/critical warning，但 setup `-0.694 ns`，因此仍归档为 candidate；L07 与 BR01 尚无 matching implementation，不能继承该时序数据。相对 BT02 matching direct full，器件总 LUT `86,159 -> 86,489`、寄存器 `53,633 -> 54,358`、slice `26,856 -> 26,920`，BRAM `68.5 -> 56.5`。MT03 使原有 22 条 LSQ 到 ATU 路径全部移出 top-50；BT03 移除了宽 issue-address 寄存器，却引入由 recovery/wakeup/select 经 9-way payload read 到输出级的 IQ 路径墙，当前 top-50 为 IQ 47、frontend 3。setup 相对 BT02 变化 `-0.016 ns`，不足以从单次 route 证明确定性退化，但 BT03 的目标路径族并未被真正切断。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
+本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。L07 窄 Store completion 将其降至 `5,104,911`（增量 `-3.663820%`，几何平均 `1.038957091x`），BR01 再降至 `5,057,854`（增量 `-0.921799%`，几何平均 `1.009753745x`；相对原始 baseline 累计 `-8.768094%`），BT04 相对 BR01 20 项逐项精确相等。各增量的逐项变化均单独记录，不能把累计收益拆分给其他候选。MT03+BT03 matching 100 MHz direct full 已产生 fully-routed bitstream，hold `+0.053 ns` 且 DRC 0 error/critical warning，但 setup `-0.694 ns`，因此仍归档为 candidate；L07、BR01 与 BT04 的组合 direct full 尚待完成，不能继承旧时序数据。相对 BT02 matching direct full，器件总 LUT `86,159 -> 86,489`、寄存器 `53,633 -> 54,358`、slice `26,856 -> 26,920`，BRAM `68.5 -> 56.5`。MT03 使原有 22 条 LSQ 到 ATU 路径全部移出 top-50；BT03 移除了宽 issue-address 寄存器，却引入由 recovery/wakeup/select 经 9-way payload read 到输出级的 IQ 路径墙，当前 top-50 为 IQ 47、frontend 3。setup 相对 BT02 变化 `-0.016 ns`，不足以从单次 route 证明确定性退化，但 BT03 的目标路径族并未被真正切断。BT04 已恢复本地两槽注册 issue output，物理效果只由当前 matching direct full 判断。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
 
 ## 3. 候选总表
 
@@ -110,16 +110,16 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | FT03 | L1I response 到 frontend enqueue 去控制化 | 四 lane payload 固定位置写入，taken prefix、valid lane count 与 tail 可见性独立控制，减少 predecode/target 对宽 payload CE 的影响 | 被截断 lane 可写无效槽但绝不能可见；组内 taken、buffer wrap、redirect kill 和 decode 可见周期必须保持 | frontend buffer/taken-prefix/wrap/redirect 测试、完整 perf20 A/B、frontend top-N | 已实现并纳入 R1 | `e14957a` 的 OooFrontend 23 项定向测试和完整 `cpu-check` 通过；perf20 `5,299,059 -> 5,299,059`，20 项逐项精确相等、几何平均 `1.000000000x`；R1 matching top-50 未再出现 frontend。 |
 | BT02 | IQ 固定 payload 物理槽与窄年龄索引 | resident payload 只在 enqueue 时写固定空闲槽，发射后只压缩 3-bit 年龄顺序索引；`issueReady`、wakeup/select 和 recovery 不再控制全部宽 payload 的 CE | 年龄顺序、空闲槽回收、同拍 enqueue/dequeue、wakeup、flush 和 LSU 注册输出必须保持原语义；额外 indirection mux 可能转移读取路径压力 | IssueQueue 随机/flush/compaction 测试、完整门禁、perf20 A/B、IQ top-50、LUT/FF | 已实现并保留；matching route 已完成，R1 尚未闭合 | `26bfef9` 的 IssueQueue 10 项定向测试和完整 `cpu-check`（39 suites、213 tests）通过；perf20 相对 R1 首批组合 `5,299,059 -> 5,299,059`，20 项逐项精确相等、几何平均 `1.000000000x`，func58 seeds `240/255/141` 均通过。matching direct full 中旧 IQ payload CE 路径族从 top-50 消失，器件总 LUT 减少 4,062、寄存器减少 600、slice 减少 240，同时增加 12 BRAM；setup/hold 为 `-0.678/+0.053 ns`，新的主导族为 22 条 LSQ 到 ATU 路径。候选实现了目标结构变化，但尚未形成时序闭合里程碑。 |
 | BT03 | 普通 IQ 发射地址级改用窄 slot token | BT02 已让 resident payload 固定在物理槽，但普通端口仍把完整 uop 复制到 issue-address 寄存器，使 ROB completion/wakeup/select 控制宽寄存器 D。为普通端口增加一个物理槽并只寄存 slot token，可保留原有 8-entry resident 容量和 address-stage 时延 | token 持有期间 payload 槽不能回收；同拍接受旧 token、选择新 token、enqueue 和 flush 必须保持所有权唯一。新增槽和读 mux 可能把压力转移到 payload read path | backpressure payload 稳定/逐拍吞吐、IssueQueue/Backend 回归、完整 perf20 A/B、func58 三 seed、ROB-to-IQ top-N、LUT/FF/BRAM | 已实现且功能/周期通过；物理目标未达成，待重做或移除 | `b78a701` 的 IssueQueue 10 项、Backend 17 项和完整 `cpu-check`（39 suites、215 tests）通过；生成 RTL 已移除普通端口的宽 `issueAddressUop` 寄存器，只保留 4-bit slot token。perf20 `5,299,059 -> 5,299,059`，20 项逐项精确相等、几何平均 `1.000000000x`；func58 seeds `240/255/141` 均为 58/58。matching direct full 为 setup/hold `-0.694/+0.053 ns`，IQ 占 top-50 的 47 条；新最差路径由 recovery/wakeup/select 经 9-way slot payload read 到输出级，说明宽寄存器虽已移除，控制锥并未被切断。相对 BT02 setup 仅变化 `-0.016 ns`，单次 route 不足以证明确定性退化，但物理目标明确未达成。 |
-| BT04 | 退出 BT03 token read，恢复本地两槽注册 issue output | BT03 周期完全中性，却把 recovery/wakeup/select 经 9-way payload read 推成 47/50 的 IQ 路径墙。恢复 BT02 已验证的每端口本地两槽注册输出，以宽寄存器换取固定局部读取和清晰时序边界；MT03 已另行移除当时 BT02 暴露的 LSQ/ATU 路径 | 宽 payload FF/CE 和面积会回升；两槽 count/read/write pointer、flush、backpressure 与逐拍吞吐必须保持。物理收益只能由与 L07/BR01 matching 的 direct full 判断 | IssueQueue/Backend 定向测试、perf20 逐项精确相等、func58、IQ/LSQ top-50、LUT/FF/BRAM、setup/hold | 已批准实现 | BT03 自身为周期中性；其 matching top-50 有 47 条 IQ token read 路径。BT04 尚无当前组合的周期或实现结果。 |
+| BT04 | 退出 BT03 token read，恢复本地两槽注册 issue output | BT03 周期完全中性，却把 recovery/wakeup/select 经 9-way payload read 推成 47/50 的 IQ 路径墙。恢复 BT02 已验证的每端口本地两槽注册输出，以宽寄存器换取固定局部读取和清晰时序边界；MT03 已另行移除当时 BT02 暴露的 LSQ/ATU 路径 | 宽 payload FF/CE 和面积会回升；两槽 count/read/write pointer、flush、backpressure 与逐拍吞吐必须保持。物理收益只能由与 L07/BR01 matching 的 direct full 判断 | IssueQueue/Backend 定向测试、perf20 逐项精确相等、func58、IQ/LSQ top-50、LUT/FF/BRAM、setup/hold | 已实现并默认启用；软件门禁通过，待 matching direct full | `50f998c` 恢复普通端口本地两槽注册输出，并保留 BT03 token 模式作 A/B；IssueQueue 10 项、Backend 17 项和完整门禁 39 suites/218 tests 通过。perf20 `5,057,854 -> 5,057,854`，20 项逐项精确相等、几何平均 `1.000000000x`；func58 seeds `240/255/141` 均为 58/58。逐项证据为 `build/reports/comparisons/R2-BT04.json`，冻结身份为 `build/reports/experiments/R2-BT04-local-issue-output/experiment-manifest.json`；IQ 路径族和面积变化待 matching direct full。 |
 
 ## 4. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
 
-当前 P1 正确性 gate 已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。R1 首批五项、BT02 以及 MT03+BT03 组合均已完成 matching direct full implementation。MT03 达成了 LSQ/ATU 路径局部化目标；BT03 的正确性和周期证据通过，但新 IQ token payload read 路径占 top-50 的 47 条。最新 direct full setup 为 `-0.694 ns`，R1 仍不能晋级稳定竞赛 milestone。
+当前 P1 正确性 gate 已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。R1 首批五项、BT02 以及 MT03+BT03 组合均已完成 matching direct full implementation。MT03 达成了 LSQ/ATU 路径局部化目标；BT03 的正确性和周期证据通过，但新 IQ token payload read 路径占 top-50 的 47 条。BT04 已恢复本地两槽注册输出并通过软件门禁，L07+BR01+BT04 的 matching direct full 结果待完成；在此之前最新可引用的 direct full setup 仍为 `-0.694 ns`，R1 不能晋级稳定竞赛 milestone。
 
-1. 本轮周期从 5,543,953 降至 5,057,854，减少 486,099（-8.768094%）；最新 matching full run 仍对应 L07/BR01 前 RTL，setup 为 -0.694 ns，不能作为两项的时序结果。
+1. 本轮周期从 5,543,953 降至 5,057,854，减少 486,099（-8.768094%）；BT04 相对 BR01 周期严格中性。最新已完成的 matching full run 仍对应 L07/BR01/BT04 前 RTL，setup 为 -0.694 ns，不能作为当前组合的时序结果。
 2. P02 post-route 仅用于判断物理随机性和提取最新 top-N 路径；其结果无论是否闭合都不能晋级 Stable_Backup 或正式竞赛产物。
 3. 下一份正式 bitstream 必须从 matching RTL 直接执行一次 full implementation，并由该 run 自身满足 setup/hold、DRC、route 和 bitstream 门禁。
 4. 下一轮 IPC 候选仍优先从前端持续供给、分支训练/恢复和已量化的 load-use 暴露中选择；ROB/PRF 扩容因当前占用证据降为低优先级。
@@ -133,9 +133,9 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 ## 6. 证据入口
 
 - 当前 RTL：`build/rtl/generation-manifest.json`。
-- 当前实验冻结：`build/reports/experiments/R2-BR01/experiment-manifest.json`。
-- 当前 perf20：`build/sim/runs/cpu_d6da9c1c6615_chiplab_c398d274812f/clean-perf20_model_7f9725272861_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；相对 L07 的逐项比较为 `build/reports/comparisons/R2-BR01.json`。
-- 当前 func58：`build/sim/runs/cpu_d6afe23f0dbe_chiplab_c398d274812f/clean-func58_model_cd13d00ed935_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
+- 当前实验冻结：`build/reports/experiments/R2-BT04-local-issue-output/experiment-manifest.json`。
+- 当前 perf20：`build/sim/runs/cpu_df08ad420da4_chiplab_c398d274812f/clean-perf20_model_a7d3b33a62ee_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；相对 BR01 的逐项比较为 `build/reports/comparisons/R2-BT04.json`。
+- 当前 func58：`build/sim/runs/cpu_df08ad420da4_chiplab_c398d274812f/clean-func58_model_85d40dd594e5_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
 - 当前 instrumented perf20：`build/sim/runs/cpu_d6afe23f0dbe_chiplab_c398d274812f/instrumented-perf20_model_012e3c7fc04f_software_f6e7c20f71a4/ideal/matrix_168c541ab78a_perf20.csv`；汇总为 `build/reports/observations/R2-L07-perf20-v4.json`。
 - M01 v5 决策矩阵：`build/sim/runs/cpu_9bc200a9f6f6_chiplab_c398d274812f/instrumented-perf20_model_7b40bca59eea_software_f6e7c20f71a4/ideal/matrix_168c541ab78a_perf20.csv`；汇总为 `build/reports/observations/R2-M01-perf20-v5.json`。
 - 当前 full implementation candidate：`Post_Impl_Bundles/cpu_888d4e6dcfe5_chiplab_c398d274812f_perf_100mhz_20260814-161355/manifest.json`。
