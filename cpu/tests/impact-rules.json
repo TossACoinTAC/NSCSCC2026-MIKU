@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "name": "issue-queue",
+      "paths": ["cpu/src/main/scala/miku/backend/IssueQueue.scala"],
+      "scala_suites": ["miku.backend.IssueQueueSpec", "miku.backend.OooBackendDispatchSpec", "miku.core.OooCoreIntegrationSpec", "miku.core.OooCoreSpec"],
+      "python_contracts": ["tests/python/test_generation_contract.py"]
+    },
+    {
+      "name": "load-store-queue",
+      "paths": ["cpu/src/main/scala/miku/backend/LoadStoreQueue*.scala"],
+      "scala_suites": ["miku.backend.LoadStoreQueueSpec", "miku.backend.OooBackendWithDataCacheSpec", "miku.core.OooCoreIntegrationSpec"],
+      "python_contracts": ["tests/python/test_cache_memory_contract.py"]
+    },
+    {
+      "name": "cache-hierarchy",
+      "paths": ["cpu/src/main/scala/miku/memory/L1*.scala", "cpu/src/main/scala/miku/memory/L2*.scala", "cpu/src/main/scala/miku/memory/Shared*.scala", "cpu/src/main/scala/miku/memory/DataCacheHierarchy.scala"],
+      "scala_suites": ["miku.memory.DataCacheHierarchySpec", "miku.memory.L1DataCacheSpec", "miku.memory.L1InstructionCacheSpec", "miku.memory.L2CacheSpec", "miku.memory.SharedCacheHierarchySpec", "miku.backend.OooBackendWithDataCacheSpec"],
+      "python_contracts": ["tests/python/test_cache_memory_contract.py"]
+    },
+    {
+      "name": "frontend",
+      "paths": ["cpu/src/main/scala/miku/frontend/*.scala"],
+      "scala_suites": ["miku.frontend.OooFrontendSpec", "miku.core.OooCoreIntegrationSpec", "miku.core.OooCoreSpec"],
+      "python_contracts": ["tests/python/test_core_interface.py"]
+    },
+    {
+      "name": "predictor",
+      "paths": ["cpu/src/main/scala/miku/predict/*.scala"],
+      "scala_suites": ["miku.predict.BranchPredictorSpec", "miku.frontend.OooFrontendSpec", "miku.core.PredictorUpdateQueueSpec", "miku.core.OooCoreSpec"],
+      "python_contracts": ["tests/python/test_core_interface.py"]
+    },
+    {
+      "name": "configuration",
+      "paths": ["cpu/src/main/scala/miku/config/*.scala", "cpu/src/main/scala/miku/core/OooCoreConfig.scala"],
+      "scala_suites": ["miku.config.CoreConfigSpec", "miku.core.OooCoreIntegrationSpec", "miku.core.OooCoreSpec"],
+      "python_contracts": ["tests/python/test_generation_contract.py", "tests/python/test_core_interface.py"]
+    },
+    {
+      "name": "experiment-harness",
+      "paths": ["scripts/experiment/*.py", "scripts/vivado/archive.py", "Makefile", "cpu/tests/manifest.yml", "cpu/tests/impact-rules.json", "cpu/tests/python/test_experiment_contract.py"],
+      "scala_suites": [],
+      "python_contracts": ["tests/python/test_experiment_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_repository_contract.py"]
+    },
+    {
+      "name": "documentation",
+      "paths": ["README.md", "docs/*.md", "scripts/common/check_docs.py"],
+      "scala_suites": [],
+      "python_contracts": ["tests/python/test_repository_contract.py"]
+    },
+    {
+      "name": "python-contract-suite",
+      "paths": ["cpu/tests/python/test_*.py"],
+      "scala_suites": [],
+      "python_contracts": ["tests/python/test_cache_memory_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_core_interface.py", "tests/python/test_experiment_contract.py", "tests/python/test_generation_contract.py", "tests/python/test_repository_contract.py", "tests/python/test_sim_contract.py", "tests/python/test_toolchain_contract.py"]
+    },
+    {
+      "name": "generation-identity",
+      "paths": ["scripts/common/content_hash.py", "scripts/cpu/write_generation_manifest.py", "scripts/sim/prepare", "scripts/sim/matrix"],
+      "scala_suites": [],
+      "python_contracts": ["tests/python/test_experiment_contract.py", "tests/python/test_generation_contract.py", "tests/python/test_sim_contract.py"]
+    }
+  ]
+}

@@ -15,6 +15,13 @@ import subprocess
 import sys
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiment"))
+from common import (
+    ExperimentError,
+    load_json as load_experiment_json,
+    validate_experiment_manifest,
+)
+
 
 REQUIRED_IMPL_ARTIFACTS = {
     "soc_top.bit": "soc_top.bit",
@@ -167,15 +174,33 @@ def select_archive_class(stage: str, requested: str, timing_pass: bool) -> str:
     return requested
 
 
-def relative_evidence(root: Path, source_tree_hash: str, chiplab_commit: str) -> list[Path]:
-    run_root = (
-        root
-        / "build/sim/runs"
-        / f"cpu_{source_tree_hash[:12]}_chiplab_{chiplab_commit[:12]}"
-    )
-    if not run_root.is_dir():
-        return []
-    return sorted(path for path in run_root.rglob("matrix_*.csv") if path.is_file())
+def load_experiment_evidence(
+    root: Path,
+    manifest_path: Path,
+    generation: dict[str, Any],
+    chiplab_commit: str,
+) -> tuple[dict[str, Any], list[Path]]:
+    manifest_path = manifest_path.resolve()
+    try:
+        manifest_path.relative_to(root)
+    except ValueError as error:
+        raise ArchiveError(f"实验清单必须位于工作区内: {manifest_path}") from error
+    experiment = load_experiment_json(manifest_path)
+    validate_experiment_manifest(experiment, root)
+    cpu = experiment["cpu"]
+    expected = {
+        "source_tree_sha256": generation["source_tree_sha256"],
+        "raw_rtl_sha256": generation["raw_rtl_sha256"],
+        "published_rtl_sha256": generation["published_rtl_sha256"],
+        "generation_manifest_sha256": sha256(root / "build/rtl/generation-manifest.json"),
+    }
+    actual = {key: cpu.get(key) for key in expected}
+    if actual != expected:
+        raise ArchiveError(f"实验清单与当前生成 RTL 身份不一致: {actual} != {expected}")
+    if experiment["platform"].get("chiplab_commit") != chiplab_commit:
+        raise ArchiveError("实验清单与当前 Chiplab 身份不一致")
+    evidence = [(root / item["path"]).resolve() for item in experiment["evidence"]]
+    return experiment, evidence
 
 
 def artifact_record(path: Path) -> dict[str, int | str]:
@@ -190,6 +215,7 @@ def main() -> int:
     parser.add_argument("--chiplab-commit", required=True)
     parser.add_argument("--kind", choices=("perf", "func"), required=True)
     parser.add_argument("--requested-mhz", required=True)
+    parser.add_argument("--experiment-manifest", type=Path, required=True)
     parser.add_argument("--impl-dir", type=Path)
     parser.add_argument("--stage", choices=("full", "postroute"), default="full")
     parser.add_argument(
@@ -262,8 +288,8 @@ def main() -> int:
     )
     destination = archive_root / name
 
-    evidence = relative_evidence(
-        root, str(generation["source_tree_sha256"]), args.chiplab_commit
+    experiment, evidence = load_experiment_evidence(
+        root, args.experiment_manifest, generation, args.chiplab_commit
     )
     manifest: dict[str, Any] = {
         "schema_version": 2,
@@ -291,6 +317,10 @@ def main() -> int:
         "drc": drc,
         "utilization": utilization,
         "toolchain": generation["toolchain"],
+        "experiment": {
+            "id": experiment["experiment_id"],
+            "manifest_sha256": sha256(args.experiment_manifest),
+        },
         "evidence": [],
         "artifacts": {},
     }
@@ -324,7 +354,7 @@ def main() -> int:
 
         for source in evidence:
             source_path = source.relative_to(root)
-            target = temporary / "evidence" / source_path.name
+            target = temporary / "evidence" / source_path
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
             manifest["evidence"].append(
@@ -348,6 +378,10 @@ def main() -> int:
         )
         manifest["artifacts"][generation_target.name] = artifact_record(generation_target)
 
+        experiment_target = temporary / "experiment-manifest.json"
+        shutil.copy2(args.experiment_manifest, experiment_target)
+        manifest["artifacts"][experiment_target.name] = artifact_record(experiment_target)
+
         manifest_path = temporary / "manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
@@ -361,6 +395,7 @@ def main() -> int:
             f"competition_flow_eligible={str(args.stage == 'full').lower()}",
             f"competition_eligible={str(args.stage == 'full' and timing_pass).lower()}",
             f"purpose={'physical-exploration' if args.stage == 'postroute' else 'competition-build'}",
+            f"experiment_id={experiment['experiment_id']}",
             f"cpu_source_commit={source_commit}",
             f"cpu_source_tree_sha256={generation['source_tree_sha256']}",
             f"chiplab_commit={args.chiplab_commit}",
@@ -401,6 +436,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (ArchiveError, json.JSONDecodeError) as error:
+    except (ArchiveError, ExperimentError, json.JSONDecodeError) as error:
         print(f"implementation archive failed: {error}", file=sys.stderr)
         raise SystemExit(1)

@@ -37,6 +37,18 @@ SOC_BUILD_KIND ?= perf
 SOC_BUILD_DIR ?= $(BUILD_ROOT)/chiplab-$(SOC_BUILD_KIND)
 SOC_IMPL_DIR ?=
 SOC_IMPL_STAGE ?= full
+SOC_EXPERIMENT_MANIFEST ?=
+EXPERIMENT_ID ?= experiment-$(shell date +%Y%m%d-%H%M%S)
+EXPERIMENT_EVIDENCE ?=
+EXPERIMENT_MANIFEST ?= $(BUILD_ROOT)/reports/experiments/$(EXPERIMENT_ID)/experiment-manifest.json
+BASE_MATRIX ?=
+CANDIDATE_MATRIX ?=
+COMPARE_ID ?= comparison-$(shell date +%Y%m%d-%H%M%S)
+COMPARE_OUT ?= $(BUILD_ROOT)/reports/comparisons/$(COMPARE_ID).json
+TIMING_REPORT ?=
+TIMING_OUT ?= $(BUILD_ROOT)/reports/timing/$(notdir $(basename $(TIMING_REPORT))).json
+TEST_BASE ?= HEAD
+TEST_IMPACT_OUT ?= $(BUILD_ROOT)/reports/test-impact/$(shell date +%Y%m%d-%H%M%S).json
 POST_ROUTE_INPUT_DCP ?= $(BUILD_ROOT)/chiplab-perf/fpga/nscscc-team/run_vivado/project/loongson.runs/impl_1/soc_top_routed.dcp
 POST_ROUTE_OUTPUT ?= $(BUILD_ROOT)/vivado/postroute-$(shell date +%Y%m%d-%H%M%S)
 CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
@@ -48,7 +60,7 @@ FUNC58_WORKLOADS := func58
 CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_CACHE_VOLUME=$(DOCKER_CACHE_VOLUME) $(ROOT_DIR)/scripts/env/run-in-container
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-.PHONY: help doctor status ide-setup env-build toolchain-check docs-check \
+.PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact \
   cpu-test cpu-test-all cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
@@ -61,6 +73,10 @@ help:
 		'  make ide-setup          生成指向 cpu/build.sbt 的 BSP 配置' \
 		'  make env-build          构建锁定 CPU/仿真工具镜像' \
 		'  make docs-check         验证文档入口与候选账本结构' \
+		'  make experiment-freeze  冻结源码、RTL、工具和显式证据身份' \
+		'  make experiment-compare 比较两组身份兼容的完整 perf20' \
+		'  make timing-analyze      自动归类 Vivado top timing paths' \
+		'  make test-impact         按变更路径列出必须运行的测试' \
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
 		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
 		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
@@ -77,7 +93,7 @@ help:
 		'  make clean              清理可再生构建输出，保留 IDE 状态' \
 		'  make clean-all          额外清理显式 IDE 状态' '' \
 		'路径覆盖：VIVADO_HOME VIVADO SURFER DOCKER_IMAGE JOBS SIM_LANES' \
-		'实现归档：SOC_ARCHIVE_CLASS=auto|candidate|stable SOC_BUILD_KIND=perf|func' \
+		'实现归档：SOC_EXPERIMENT_MANIFEST=... SOC_ARCHIVE_CLASS=auto|candidate|stable' \
 		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项'
 
 doctor:
@@ -105,6 +121,27 @@ toolchain-check: env-build
 
 docs-check:
 	@python3 scripts/common/check_docs.py
+
+experiment-freeze: cpu-generate
+	@python3 scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
+		--experiment-id "$(EXPERIMENT_ID)" --chiplab-dir "$(CHIPLAB_HOME)" \
+		--chiplab-commit "$(CHIPLAB_COMMIT)" --docker-image "$(DOCKER_IMAGE)" \
+		--generation-manifest "$(BUILD_ROOT)/rtl/generation-manifest.json" \
+		$(foreach item,$(EXPERIMENT_EVIDENCE),--evidence "$(item)") --out "$(EXPERIMENT_MANIFEST)"
+
+experiment-compare:
+	@test -n "$(strip $(BASE_MATRIX))" || { printf 'BASE_MATRIX 不能为空\n' >&2; exit 2; }
+	@test -n "$(strip $(CANDIDATE_MATRIX))" || { printf 'CANDIDATE_MATRIX 不能为空\n' >&2; exit 2; }
+	@python3 scripts/experiment/compare.py --baseline "$(BASE_MATRIX)" \
+		--candidate "$(CANDIDATE_MATRIX)" --out "$(COMPARE_OUT)"
+
+timing-analyze:
+	@test -n "$(strip $(TIMING_REPORT))" || { printf 'TIMING_REPORT 不能为空\n' >&2; exit 2; }
+	@python3 scripts/experiment/timing_analyze.py --report "$(TIMING_REPORT)" --out "$(TIMING_OUT)"
+
+test-impact:
+	@python3 scripts/experiment/test_impact.py --root "$(ROOT_DIR)" \
+		--manifest "$(CPU_DIR)/tests/manifest.yml" --base "$(TEST_BASE)" --out "$(TEST_IMPACT_OUT)"
 
 cpu-test:
 	@test -n "$(strip $(CPU_TEST))" || { printf 'CPU_TEST 必须是完整 suite 名称\n' >&2; exit 2; }
@@ -193,11 +230,15 @@ wave:
 	"$(SURFER)" "$$(wslpath -w "$(WAVE)")"
 
 soc-impl: cpu-generate
+	@test -n "$(strip $(SOC_EXPERIMENT_MANIFEST))" || { printf 'SOC_EXPERIMENT_MANIFEST 不能为空；先运行 experiment-freeze\n' >&2; exit 2; }
+	@test -f "$(SOC_EXPERIMENT_MANIFEST)" || { printf '实验清单不存在: %s\n' "$(SOC_EXPERIMENT_MANIFEST)" >&2; exit 2; }
 	@VIVADO="$(VIVADO)" PERF_CPU_MHZ="$(PERF_CPU_MHZ)" \
 		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-perf"
 	@$(MAKE) soc-archive SOC_BUILD_KIND=perf SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
 
 soc-func: cpu-generate
+	@test -n "$(strip $(SOC_EXPERIMENT_MANIFEST))" || { printf 'SOC_EXPERIMENT_MANIFEST 不能为空；先运行 experiment-freeze\n' >&2; exit 2; }
+	@test -f "$(SOC_EXPERIMENT_MANIFEST)" || { printf '实验清单不存在: %s\n' "$(SOC_EXPERIMENT_MANIFEST)" >&2; exit 2; }
 	@VIVADO="$(VIVADO)" PERF_CPU_MHZ=32.726797 \
 		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-func"
 	@$(MAKE) soc-archive SOC_BUILD_KIND=func PERF_CPU_MHZ=32.726797 SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
@@ -212,12 +253,15 @@ soc-postroute-opt:
 		SOC_ARCHIVE_CLASS=candidate PERF_CPU_MHZ="$(PERF_CPU_MHZ)"
 
 soc-archive:
+	@test -n "$(strip $(SOC_EXPERIMENT_MANIFEST))" || { printf 'SOC_EXPERIMENT_MANIFEST 不能为空\n' >&2; exit 2; }
+	@test -f "$(SOC_EXPERIMENT_MANIFEST)" || { printf '实验清单不存在: %s\n' "$(SOC_EXPERIMENT_MANIFEST)" >&2; exit 2; }
 	@case "$(SOC_BUILD_KIND)" in perf|func) ;; *) \
 		printf 'SOC_BUILD_KIND 必须是 perf 或 func\n' >&2; exit 2 ;; esac
 	@python3 scripts/vivado/archive.py --root "$(ROOT_DIR)" \
 		--build-dir "$(SOC_BUILD_DIR)" \
 		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
 		--kind "$(SOC_BUILD_KIND)" --requested-mhz "$(PERF_CPU_MHZ)" \
+		--experiment-manifest "$(SOC_EXPERIMENT_MANIFEST)" \
 		--class "$(SOC_ARCHIVE_CLASS)" --stage "$(SOC_IMPL_STAGE)" \
 		$(if $(strip $(SOC_IMPL_DIR)),--impl-dir "$(SOC_IMPL_DIR)",)
 

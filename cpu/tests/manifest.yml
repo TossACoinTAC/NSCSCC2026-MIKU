@@ -1,5 +1,6 @@
 schema_version: 1
 description: "只通过公开合同和结构化证据验证；测试适配不得删除断言。"
+impact_map: tests/impact-rules.json
 tests:
   - name: generation
     path: tests/python/test_generation_contract.py
@@ -22,3 +23,6 @@ tests:
   - name: candidate
     path: tests/python/test_candidate_manifest.py
     categories: [artifact]
+  - name: experiment
+    path: tests/python/test_experiment_contract.py
+    categories: [artifact, harness]

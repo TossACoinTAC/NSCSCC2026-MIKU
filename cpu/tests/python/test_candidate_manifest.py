@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts/vivado"))
 from archive import (
     ArchiveError,
     implementation_passes,
+    load_experiment_evidence,
     parse_drc,
     parse_key_values,
     parse_utilization,
@@ -97,6 +98,51 @@ class CandidateManifestTest(unittest.TestCase):
         self.assertEqual(select_archive_class("full", "auto", False), "candidate")
         with self.assertRaises(ArchiveError):
             select_archive_class("full", "stable", False)
+
+    def test_archive_only_accepts_explicit_matching_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "build/rtl").mkdir(parents=True)
+            generation_path = root / "build/rtl/generation-manifest.json"
+            generation = {
+                "source_tree_sha256": "a" * 64,
+                "raw_rtl_sha256": "b" * 64,
+                "published_rtl_sha256": "c" * 64,
+            }
+            import hashlib
+            import json
+            generation_path.write_text(json.dumps(generation))
+            evidence = root / "result.csv"
+            evidence.write_text("result\n")
+            experiment = {
+                "schema_version": 1,
+                "experiment_id": "archive-contract",
+                "workspace": {},
+                "cpu": {
+                    **generation,
+                    "generation_manifest_sha256": hashlib.sha256(
+                        generation_path.read_bytes()
+                    ).hexdigest(),
+                },
+                "platform": {"chiplab_commit": "d" * 40},
+                "toolchain": {},
+                "simulations": [],
+                "evidence": [{
+                    "path": "result.csv",
+                    "sha256": hashlib.sha256(evidence.read_bytes()).hexdigest(),
+                    "bytes": evidence.stat().st_size,
+                }],
+            }
+            experiment_path = root / "experiment.json"
+            experiment_path.write_text(json.dumps(experiment))
+            loaded, paths = load_experiment_evidence(
+                root, experiment_path, generation, "d" * 40
+            )
+            self.assertEqual(loaded["experiment_id"], "archive-contract")
+            self.assertEqual(paths, [evidence])
+            evidence.write_text("tampered\n")
+            with self.assertRaises(ValueError):
+                load_experiment_evidence(root, experiment_path, generation, "d" * 40)
 
 
 if __name__ == "__main__":

@@ -89,7 +89,7 @@ if [[ $lanes == 3 ]]; then
 fi
 
 cpu_commit=$(git -C "$workspace" rev-parse HEAD)
-cpu_source_sha=$(python3 "$workspace/scripts/common/content_hash.py" "$cpu_dir")
+cpu_source_sha=$(python3 "$workspace/scripts/common/content_hash.py" --profile cpu-source "$cpu_dir")
 cpu_short=${cpu_source_sha:0:12}
 variant=$profile
 if [[ $suite != standard ]]; then

@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
-from content_hash import tree_hash
+from content_hash import cpu_source_hash
 
 
 def file_hash(path: Path) -> str:
@@ -38,8 +38,8 @@ def main() -> int:
         source_commit = "workspace-uncommitted"
     document = {
         "schema_version": 1,
-        "source_tree": "cpu/src + cpu/build.sbt + cpu/project",
-        "source_tree_sha256": tree_hash(cpu),
+        "source_tree": "cpu/src/main + cpu/build.sbt + cpu/project",
+        "source_tree_sha256": cpu_source_hash(cpu),
         "source_commit": source_commit,
         "raw_rtl": str(args.raw.resolve()),
         "raw_rtl_sha256": file_hash(args.raw),
