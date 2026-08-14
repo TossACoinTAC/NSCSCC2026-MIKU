@@ -1470,6 +1470,78 @@ class OooFrontendSpec extends AnyFunSuite {
     }
   }
 
+  test("a hit handoff preserves the older prediction owner while the active owner advances") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-frontend")
+      .compile(new OooFrontend(turnoverConfig))
+      .doSim("ooo-frontend-hit-handoff-prediction-owner", 0x4c6e) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+
+        // Wait for BTB invalidation, then train a direct prediction for the older group.
+        dut.clockDomain.waitSampling(134)
+        sleep(1)
+        val firstPc = config.resetVector + 0x200
+        val predictedTarget = firstPc + 0x40
+        dut.io.predictorUpdatePc #= firstPc
+        dut.io.predictorUpdateTaken #= true
+        dut.io.predictorUpdateTarget #= predictedTarget
+        dut.io.predictorUpdateType #= 1
+        dut.io.predictorUpdateValid #= true
+        sample(dut)
+        dut.io.predictorUpdateValid #= false
+
+        dut.io.redirectTarget #= firstPc
+        dut.io.redirectValid #= true
+        sample(dut)
+        dut.io.redirectValid #= false
+        acceptFetch(dut, firstPc)
+        assert(dut.io.predictorDebugTaken.toBoolean)
+
+        // Accept the predicted target and hand it to L1I on the older hit.  This edge advances
+        // the active cache owner while reserving the registered response for firstPc.
+        assert(dut.io.translationRequest.valid.toBoolean)
+        assert(dut.io.translationRequest.virtualAddress.toBigInt == predictedTarget)
+        dut.io.translationRequest.ready #= true
+        sample(dut)
+        dut.io.translationRequest.ready #= false
+        dut.io.translationResponse.valid #= true
+        dut.io.translationResponse.virtualAddress #= predictedTarget
+        dut.io.translationResponse.physicalAddress #= predictedTarget
+        dut.io.cacheHitResponsePending #= true
+        dut.io.cacheRequestReady #= true
+        sleep(1)
+        assert(dut.io.cacheRequestValid.toBoolean)
+        assert(dut.io.cacheRequest.virtualAddress.toBigInt == predictedTarget)
+        sample(dut)
+
+        // The older registered response must still observe its trained prediction even though
+        // cache* now describes predictedTarget.  staticTaken=false makes stale/new-owner mixing
+        // externally visible as predictedTaken=false.
+        dut.io.translationResponse.valid #= false
+        dut.io.cacheHitResponsePending #= false
+        dut.io.cacheRequestReady #= false
+        dut.io.cacheResponseValid #= true
+        dut.io.cacheResponse.virtualAddress #= firstPc
+        dut.io.cacheResponse.physicalAddress #= firstPc
+        dut.io.cacheResponse.instructions(0) #= encodeDirectBranch(0x14, 0x40)
+        for (lane <- 1 until config.fetchWidth) {
+          dut.io.cacheResponse.instructions(lane) #= (BigInt("00100000", 16) | (lane + 1))
+        }
+        setBranchPredecode(dut, 0, 1, predictedTarget, staticTaken = false)
+        sleep(1)
+        sample(dut)
+        dut.io.cacheResponseValid #= false
+        assert(dut.io.decodeValid.toBigInt != 0)
+        assert(dut.io.decoded(0).pc.toBigInt == firstPc)
+        assert(dut.io.decoded(0).predictedTaken.toBoolean)
+        assert(dut.io.decoded(0).predictedTarget.toBigInt == predictedTarget)
+      }
+  }
+
   test("response handoff reserves buffer space for both fetch groups") {
     val capacityConfig = config.copy(instructionBufferEntries = 8)
     SimConfig.withVerilator

@@ -161,6 +161,17 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val pendingResponsePredictedLane = Reg(UInt(config.fetchSlotWidth bits)) init (0)
   val pendingResponsePredictedTarget =
     Reg(UInt(config.xlen bits)) init (U(config.resetVector, config.xlen bits))
+  // Prefill the inactive response owner from the registered active owner every cycle.  Only the
+  // narrow pending-valid bit is qualified by the synchronous L1I hit, keeping tag-hit control out
+  // of the wide predictor-context register enables.  On a turnover edge these assignments observe
+  // the old cache owner while requestFire installs the younger owner into cache* registers.
+  pendingResponsePc := cachePc
+  pendingResponsePredictedTaken := cachePredictedTaken
+  pendingResponsePredictedLane := cachePredictedLane
+  pendingResponsePredictedTarget := cachePredictedTarget
+  for (lane <- 0 until config.fetchWidth) {
+    pendingResponsePrediction(lane) := cachePrediction(lane)
+  }
   io.predictorDebugTaken := cachePredictedTaken
   io.predictorDebugHit := cachePrediction(0).hit
   io.predictorDebugType := cachePrediction(0).branchType
@@ -831,13 +842,6 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     // transient owner on the following cycle.
     when(earlyCachedHandoffFire) {
       cacheResponseContextPending := True
-      pendingResponsePc := cachePc
-      pendingResponsePredictedTaken := cachePredictedTaken
-      pendingResponsePredictedLane := cachePredictedLane
-      pendingResponsePredictedTarget := cachePredictedTarget
-      for (lane <- 0 until config.fetchWidth) {
-        pendingResponsePrediction(lane) := cachePrediction(lane)
-      }
     }
     when(cachedCorrectionKillPending) {
       cacheResponseContextPending := False
