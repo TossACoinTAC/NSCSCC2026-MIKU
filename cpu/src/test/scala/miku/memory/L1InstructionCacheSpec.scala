@@ -583,6 +583,61 @@ class L1InstructionCacheSpec extends AnyFunSuite {
       }
   }
 
+  test("speculative instruction-array read preserves hit turnover and miss recovery") {
+    for (enabled <- Seq(false, true)) {
+      val testConfig = config.copy(enableSpeculativeInstructionArrayRead = enabled)
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-l1i-array-read-$enabled"
+        )
+        .compile(new L1InstructionCacheProbe(testConfig))
+        .doSim(s"ooo-l1i-array-read-$enabled", if (enabled) 0x4c91 else 0x4c90) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearInputs(dut)
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          dut.clockDomain.waitSampling(config.instructionCache.sets + 8)
+
+          val firstAddress = BigInt(0x100)
+          val secondAddress = BigInt(0x180)
+          installLine(dut, firstAddress, 1000)
+          installLine(dut, secondAddress, 2000)
+          acceptRequest(dut, firstAddress, firstAddress)
+
+          dut.io.requestValid #= true
+          dut.io.request.virtualAddress #= secondAddress
+          dut.io.request.physicalAddress #= secondAddress
+          sleep(1)
+          assert(dut.io.requestReady.toBoolean)
+          sample(dut)
+          assertResponse(dut, firstAddress, 1000)
+          dut.io.requestValid #= false
+          sample(dut)
+          assertResponse(dut, secondAddress, 2000)
+
+          val missAddress = BigInt(0x2c0)
+          acceptRequest(dut, firstAddress, firstAddress)
+          dut.io.requestValid #= true
+          dut.io.request.virtualAddress #= missAddress
+          dut.io.request.physicalAddress #= missAddress
+          sleep(1)
+          assert(dut.io.requestReady.toBoolean)
+          sample(dut)
+          dut.io.requestValid #= false
+          assertResponse(dut, firstAddress, 1000)
+          var missWait = 0
+          while (!dut.io.lineReadValid.toBoolean && missWait < 8) {
+            sample(dut)
+            missWait += 1
+          }
+          assert(dut.io.lineReadValid.toBoolean)
+          assert(dut.io.lineRead.lineAddress.toBigInt == (missAddress & ~BigInt(0x3f)))
+        }
+    }
+  }
+
   test("L1I hit turnover yields to kill, invalidate, and maintenance") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1i-hit-turnover-control")

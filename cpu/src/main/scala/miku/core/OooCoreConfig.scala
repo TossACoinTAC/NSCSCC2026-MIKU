@@ -106,6 +106,7 @@ final case class OooCoreConfig(
     enableFrontendHistoryTurnover: Boolean = true,
     enableBalancedFrontendPredictionSelect: Boolean = true,
     enableFrontendCacheHitTurnover: Boolean = true,
+    enableSpeculativeInstructionArrayRead: Boolean = true,
     enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,
     enableL2WriteBack: Boolean = true,
