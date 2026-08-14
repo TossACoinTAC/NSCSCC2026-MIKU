@@ -9,7 +9,7 @@
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - perf20：`5,299,059` cycles，20/20 pass。
-- func58：MT03 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+- func58：BT03 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
 - BT02 matching 100 MHz direct full implementation：setup `-0.678 ns`、hold `+0.053 ns`、DRC
   0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
 - 相对 BT02 前一份 direct full，器件总 LUT `90,221 -> 86,159`、寄存器
@@ -31,7 +31,7 @@
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 - `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
-  不再访问普通 Verilator 内部层级。完整 `cpu-check` 为 39 suites / 214 tests，Python
+  不再访问普通 Verilator 内部层级。当前完整 `cpu-check` 为 39 suites / 215 tests，Python
   合同为 36 项；clean/instrumented dhrystone A/B 的平台周期 `2,727,045`、退休指令
   `535,896`、计分周期 `5,425` 和 UART hash 均精确一致，全部计数器守恒 invariant 通过。
   `perf20-sim` 与 `func58-sim` 现可通过 `SIM_PROFILE=instrumented` 使用同一公开入口。
@@ -88,7 +88,17 @@ fully routed 和 bitstream 成功。正 WNS 不用于升频。
   `1.000000000x`；func58 seeds `240/255/141` 均为 58/58。证据冻结在
   `build/reports/experiments/R1-MT03/experiment-manifest.json`，逐项比较见
   `build/reports/comparisons/R1-MT03.json`。为保持综合时间性价比，MT03 不单独启动
-  Vivado；下一增量从 ROB wakeup 到 IQ/地址发射寄存器的第二梯队路径中选择，之后组合实现。
+  Vivado。
+- `BT03 @ b78a701`：普通执行端口不再复制完整 issue-address uop；IQ 为 8 个 resident
+  entry 配置 9 个固定物理 payload slot，发射后仅以 4-bit token 保留被 backpressure 的
+  payload 所有权。LSU 端口继续使用原有双槽注册输出。IssueQueue 10 项、Backend 17 项
+  定向测试及完整 `cpu-check`（39 suites、215 tests）通过；新增测试证明 backpressure 下
+  payload 稳定，并保持释放后的逐拍吞吐。perf20 相对 MT03 为
+  `5,299,059 -> 5,299,059`，20 项逐项精确相等、几何平均 `1.000000000x`；func58 seeds
+  `240/255/141` 均为 58/58。冻结证据见
+  `build/reports/experiments/R1-BT03/experiment-manifest.json`，逐项比较见
+  `build/reports/comparisons/R1-BT03.json`。MT03 与 BT03 已形成两个独立目标路径族的组合，
+  下一步进行一次 100 MHz direct full implementation。
 
 ## IPC 第 1 至第 3 轮
 
