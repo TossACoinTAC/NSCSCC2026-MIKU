@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <iterator>
 
 #include "Vsimu_top.h"
 #include "Vsimu_top___024root.h"
@@ -81,9 +82,13 @@ PerfMonitor::PerfMonitor(Vsimu_top *top) : top_(top) { active_monitor = this; }
 void PerfMonitor::begin_cycle() {
     if (commit_cycle_pending_) sampling_protocol_errors_++;
     commit_cycle_pending_ = true;
+    pending_commit_count_ = 0;
 }
 
-void PerfMonitor::cancel_cycle() { commit_cycle_pending_ = false; }
+void PerfMonitor::cancel_cycle() {
+    commit_cycle_pending_ = false;
+    pending_commit_count_ = 0;
+}
 
 PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
     CycleSnapshot snapshot;
@@ -102,8 +107,96 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
         field(snapshot.words[0], 0, 32) == kObservationMagic &&
         field(snapshot.words[0], 32, 8) == kObservationVersion &&
         field(snapshot.words[0], 40, 8) == kObservationWordCount;
-    if (!snapshot.abi_valid) abi_errors_++;
     return snapshot;
+}
+
+void PerfMonitor::reset_interval_state() {
+    frontend_seen_request_ = false;
+    frontend_last_request_cycle_ = 0;
+    std::fill(std::begin(branch_resolve_cycle_),
+              std::end(branch_resolve_cycle_), 0);
+    std::fill(std::begin(branch_mispredict_pending_),
+              std::end(branch_mispredict_pending_), false);
+}
+
+void PerfMonitor::reset_accumulators() {
+    cycles_ = 0;
+    std::fill(std::begin(retire_hist_), std::end(retire_hist_), 0);
+    sampled_instructions_ = 0;
+    observed_instructions_ = 0;
+    trace_signature_ = 1469598103934665603ULL;
+    abi_errors_ = 0;
+    sampling_protocol_errors_ = 0;
+    source_retire_alignment_errors_ = 0;
+    non_prefix_retire_ = 0;
+
+    recovery_cycles_ = 0;
+    std::fill(std::begin(recovery_cause_), std::end(recovery_cause_), 0);
+    std::fill(std::begin(zero_retire_), std::end(zero_retire_), 0);
+
+    rob_occupancy_sum_ = 0;
+    rob_occupancy_max_ = 0;
+    rob_full_cycles_ = 0;
+    std::fill(std::begin(rob_occupancy_hist_),
+              std::end(rob_occupancy_hist_), 0);
+
+    frontend_decode_valid_sum_ = 0;
+    std::fill(std::begin(frontend_occupancy_hist_),
+              std::end(frontend_occupancy_hist_), 0);
+    std::fill(std::begin(frontend_events_), std::end(frontend_events_), 0);
+    std::fill(std::begin(frontend_request_interval_hist_),
+              std::end(frontend_request_interval_hist_), 0);
+    reset_interval_state();
+
+    std::fill(std::begin(issue_ready_cycles_),
+              std::end(issue_ready_cycles_), 0);
+    std::fill(std::begin(issue_ready_entries_),
+              std::end(issue_ready_entries_), 0);
+    std::fill(std::begin(issue_occupancy_sum_),
+              std::end(issue_occupancy_sum_), 0);
+    std::fill(std::begin(issue_full_cycles_),
+              std::end(issue_full_cycles_), 0);
+    std::fill(std::begin(issue_fire_by_port_),
+              std::end(issue_fire_by_port_), 0);
+    issue_valid_sum_ = 0;
+    issue_fire_sum_ = 0;
+
+    dispatch_valid_sum_ = 0;
+    dispatch_fire_sum_ = 0;
+    std::fill(std::begin(dispatch_fire_hist_),
+              std::end(dispatch_fire_hist_), 0);
+
+    std::fill(std::begin(branch_commit_hist_),
+              std::end(branch_commit_hist_), 0);
+    branch_retired_ = 0;
+    predictor_update_cycles_ = 0;
+    branch_resolved_ = 0;
+    branch_mispredicted_ = 0;
+    branch_recovery_matches_ = 0;
+    branch_recovery_without_resolution_ = 0;
+    branch_resolve_to_recovery_cycles_ = 0;
+    branch_resolve_to_recovery_max_ = 0;
+    std::fill(std::begin(branch_resolve_to_recovery_hist_),
+              std::end(branch_resolve_to_recovery_hist_), 0);
+
+    load_queue_occupancy_sum_ = 0;
+    store_queue_occupancy_sum_ = 0;
+    load_queue_full_cycles_ = 0;
+    store_queue_full_cycles_ = 0;
+    std::fill(std::begin(lsq_events_), std::end(lsq_events_), 0);
+    std::fill(std::begin(cache_events_), std::end(cache_events_), 0);
+    std::fill(std::begin(cache_occupancy_sum_),
+              std::end(cache_occupancy_sum_), 0);
+    std::fill(std::begin(axi_valid_), std::end(axi_valid_), 0);
+    std::fill(std::begin(axi_fire_), std::end(axi_fire_), 0);
+    std::fill(std::begin(axi_backpressure_),
+              std::end(axi_backpressure_), 0);
+    std::fill(std::begin(axi_error_), std::end(axi_error_), 0);
+}
+
+bool PerfMonitor::is_counter_read(std::uint32_t instruction) {
+    // LA32R rdtimel.w (assembler alias rdcntvl.w) has only rd in bits 4:0.
+    return (instruction & 0xffffffe0U) == 0x00006000U;
 }
 
 void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
@@ -117,6 +210,7 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     sampled_instructions_ += retired_count;
 
     if (!snapshot.abi_valid) {
+        abi_errors_++;
         source_retire_alignment_errors_ += retired_count;
         zero_retire_[1] += bit(retired_count == 0);
         rob_occupancy_hist_[0]++;
@@ -260,25 +354,72 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     axi_error_[1] += field(axi, 16, 1);
 }
 
+void PerfMonitor::accumulate_commit(const CommitRecord &commit) {
+    observed_instructions_++;
+    fnv_byte(trace_signature_, commit.index);
+    fnv_u32(trace_signature_, static_cast<std::uint32_t>(commit.pc));
+    fnv_u32(trace_signature_, commit.instruction);
+}
+
 void PerfMonitor::record_commit_cycle(std::uint8_t count) {
     if (!commit_cycle_pending_) return;
     commit_cycle_pending_ = false;
     const CycleSnapshot current = capture_snapshot();
     const CycleSnapshot aligned = snapshot_history_[kCommitObservationLag - 1];
+    const bool aligned_available =
+        snapshot_history_count_ == kCommitObservationLag;
     for (unsigned index = kCommitObservationLag - 1; index > 0; index--) {
         snapshot_history_[index] = snapshot_history_[index - 1];
     }
     snapshot_history_[0] = current;
-    accumulate_snapshot(aligned, count);
+    if (!aligned_available) snapshot_history_count_++;
+
+    if (count > 3 || count != pending_commit_count_) {
+        sampling_protocol_errors_++;
+        pending_commit_count_ = 0;
+        return;
+    }
+
+    unsigned marker_count = 0;
+    for (unsigned index = 0; index < pending_commit_count_; index++) {
+        marker_count += is_counter_read(pending_commits_[index].instruction);
+    }
+    if (marker_count != 0) {
+        for (unsigned marker = 0; marker < marker_count; marker++) {
+            if (!roi_marker_seen_) {
+                reset_accumulators();
+                roi_marker_seen_ = true;
+                roi_active_ = true;
+            } else if (roi_active_) {
+                roi_active_ = false;
+                roi_closed_pairs_++;
+            } else {
+                roi_active_ = true;
+                reset_interval_state();
+            }
+            roi_counter_read_markers_++;
+        }
+        pending_commit_count_ = 0;
+        return;
+    }
+
+    if (aligned_available && (!roi_marker_seen_ || roi_active_)) {
+        accumulate_snapshot(aligned, count);
+        for (unsigned index = 0; index < pending_commit_count_; index++) {
+            accumulate_commit(pending_commits_[index]);
+        }
+    }
+    pending_commit_count_ = 0;
 }
 
 void PerfMonitor::record_commit(std::uint64_t pc, std::uint32_t instruction,
                                 std::uint8_t index) {
     if (!commit_cycle_pending_) return;
-    observed_instructions_++;
-    fnv_byte(trace_signature_, index);
-    fnv_u32(trace_signature_, static_cast<std::uint32_t>(pc));
-    fnv_u32(trace_signature_, instruction);
+    if (pending_commit_count_ >= 3) {
+        sampling_protocol_errors_++;
+        return;
+    }
+    pending_commits_[pending_commit_count_++] = {pc, instruction, index};
 }
 
 void PerfMonitor::write_json(const char *path) const {
@@ -293,12 +434,17 @@ void PerfMonitor::write_json(const char *path) const {
         retire_hist_[0] + retire_hist_[1] + retire_hist_[2] + retire_hist_[3] == cycles_;
     const bool hist_instructions_ok = retire_sum == sampled_instructions_;
     const bool commit_count_ok = observed_instructions_ == sampled_instructions_;
+    const bool roi_complete = !roi_marker_seen_ || !roi_active_;
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
 
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v1\",\n");
+    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v2\",\n");
     std::fprintf(file, "  \"observation_abi\": {\"magic\": \"MIKU\", \"version\": 1, \"word_count\": 8},\n");
-    std::fprintf(file, "  \"roi\": \"difftest-observation-window-source-aligned\",\n");
+    std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"closed_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
+                 roi_marker_seen_ ? "counter-read-pairs" : "full-run",
+                 static_cast<unsigned long long>(roi_counter_read_markers_),
+                 static_cast<unsigned long long>(roi_closed_pairs_),
+                 roi_complete ? "true" : "false");
     std::fprintf(file, "  \"commit_observation_lag_cycles\": %u,\n", kCommitObservationLag);
     std::fprintf(file, "  \"cycles\": %llu,\n", static_cast<unsigned long long>(cycles_));
     std::fprintf(file, "  \"retired_instructions\": %llu,\n", static_cast<unsigned long long>(sampled_instructions_));
@@ -412,12 +558,13 @@ void PerfMonitor::write_json(const char *path) const {
                  static_cast<unsigned long long>(axi_fire_[0]), static_cast<unsigned long long>(axi_fire_[1]), static_cast<unsigned long long>(axi_fire_[2]), static_cast<unsigned long long>(axi_fire_[3]), static_cast<unsigned long long>(axi_fire_[4]),
                  static_cast<unsigned long long>(axi_backpressure_[0]), static_cast<unsigned long long>(axi_backpressure_[1]), static_cast<unsigned long long>(axi_backpressure_[2]), static_cast<unsigned long long>(axi_backpressure_[3]), static_cast<unsigned long long>(axi_backpressure_[4]),
                  static_cast<unsigned long long>(axi_error_[0]), static_cast<unsigned long long>(axi_error_[1]));
-    std::fprintf(file, "  \"invariants\": {\"abi_valid\": %s, \"retire_hist_cycles\": %s, \"retire_hist_instructions\": %s, \"commit_observation\": %s, \"source_retire_alignment\": %s, \"abi_errors\": %llu, \"source_retire_alignment_errors\": %llu, \"sampling_protocol_errors\": %llu, \"non_prefix_retire_cycles\": %llu}\n",
+    std::fprintf(file, "  \"invariants\": {\"abi_valid\": %s, \"retire_hist_cycles\": %s, \"retire_hist_instructions\": %s, \"commit_observation\": %s, \"source_retire_alignment\": %s, \"roi_complete\": %s, \"abi_errors\": %llu, \"source_retire_alignment_errors\": %llu, \"sampling_protocol_errors\": %llu, \"non_prefix_retire_cycles\": %llu}\n",
                  abi_errors_ == 0 ? "true" : "false",
                  hist_cycles_ok ? "true" : "false",
                  hist_instructions_ok ? "true" : "false",
                  commit_count_ok ? "true" : "false",
                  source_retire_alignment_errors_ == 0 ? "true" : "false",
+                 roi_complete ? "true" : "false",
                  static_cast<unsigned long long>(abi_errors_),
                  static_cast<unsigned long long>(source_retire_alignment_errors_),
                  static_cast<unsigned long long>(sampling_protocol_errors_),

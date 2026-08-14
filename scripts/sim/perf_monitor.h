@@ -28,13 +28,31 @@ private:
         bool abi_valid = false;
     };
 
+    struct CommitRecord {
+        std::uint64_t pc = 0;
+        std::uint32_t instruction = 0;
+        std::uint8_t index = 0;
+    };
+
     CycleSnapshot capture_snapshot();
     void accumulate_snapshot(const CycleSnapshot &snapshot,
                              std::uint8_t retired_count);
+    void accumulate_commit(const CommitRecord &commit);
+    void reset_accumulators();
+    void reset_interval_state();
+    static bool is_counter_read(std::uint32_t instruction);
 
     Vsimu_top *top_;
     CycleSnapshot snapshot_history_[kCommitObservationLag] = {};
+    unsigned snapshot_history_count_ = 0;
     bool commit_cycle_pending_ = false;
+    CommitRecord pending_commits_[3] = {};
+    std::uint8_t pending_commit_count_ = 0;
+
+    bool roi_marker_seen_ = false;
+    bool roi_active_ = false;
+    std::uint64_t roi_counter_read_markers_ = 0;
+    std::uint64_t roi_closed_pairs_ = 0;
 
     std::uint64_t cycles_ = 0;
     std::uint64_t retire_hist_[4] = {};

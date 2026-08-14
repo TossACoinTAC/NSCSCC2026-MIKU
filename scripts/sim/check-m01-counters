@@ -19,12 +19,37 @@ except (OSError, json.JSONDecodeError) as error:
     fail(str(error))
 
 schema = counters.get("schema_version")
-if schema == "miku-perf-observation-v1":
+if schema in {"miku-perf-observation-v1", "miku-perf-observation-v2"}:
     abi = counters.get("observation_abi")
     if abi != {"magic": "MIKU", "version": 1, "word_count": 8}:
         fail(f"unexpected observation ABI {abi!r}")
     if counters.get("commit_observation_lag_cycles") != 4:
         fail("unexpected DiffTest commit observation lag")
+
+    if schema == "miku-perf-observation-v2":
+        roi = counters.get("roi")
+        if not isinstance(roi, dict):
+            fail("ROI must be a structured object")
+        mode = roi.get("mode")
+        markers = roi.get("counter_read_markers")
+        pairs = roi.get("closed_pairs")
+        complete = roi.get("complete")
+        if mode not in {"full-run", "counter-read-pairs"}:
+            fail(f"unexpected ROI mode {mode!r}")
+        if not isinstance(markers, int) or markers < 0:
+            fail("ROI counter_read_markers must be a nonnegative integer")
+        if not isinstance(pairs, int) or pairs < 0:
+            fail("ROI closed_pairs must be a nonnegative integer")
+        if complete is not True:
+            fail("ROI counter-read markers are incomplete")
+        if roi.get("boundary_cycles_included") is not False:
+            fail("ROI boundary cycles must be excluded")
+        if mode == "full-run" and (markers != 0 or pairs != 0):
+            fail("full-run ROI cannot contain counter-read markers")
+        if mode == "counter-read-pairs" and (
+            markers < 2 or markers % 2 != 0 or pairs != markers // 2
+        ):
+            fail("counter-read ROI markers do not form closed pairs")
 
     hist = counters.get("retire_width_histogram")
     if not isinstance(hist, list) or len(hist) != 4 or not all(
@@ -170,6 +195,8 @@ if schema == "miku-perf-observation-v1":
     ):
         if invariants.get(name) is not True:
             fail(f"invariant {name} is not true")
+    if schema == "miku-perf-observation-v2" and invariants.get("roi_complete") is not True:
+        fail("invariant roi_complete is not true")
     for name in (
         "abi_errors", "source_retire_alignment_errors",
         "sampling_protocol_errors", "non_prefix_retire_cycles",
@@ -178,7 +205,7 @@ if schema == "miku-perf-observation-v1":
             fail(f"invariant counter {name} is nonzero")
 
     print(
-        f"PerfObservationV1 counters pass: cycles={cycles} instructions={instructions} "
+        f"PerfObservation counters pass: schema={schema} cycles={cycles} instructions={instructions} "
         f"ipc={instructions / cycles if cycles else 0:.6f} "
         f"trace={counters.get('commit_trace_signature_fnv1a64')}"
     )

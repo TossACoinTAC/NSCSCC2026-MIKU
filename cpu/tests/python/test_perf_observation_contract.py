@@ -24,8 +24,15 @@ OBSERVATION_SOURCES = (
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v1",
+        "schema_version": "miku-perf-observation-v2",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
+        "roi": {
+            "mode": "counter-read-pairs",
+            "counter_read_markers": 2,
+            "closed_pairs": 1,
+            "complete": True,
+            "boundary_cycles_included": False,
+        },
         "commit_observation_lag_cycles": 4,
         "cycles": 1,
         "retired_instructions": 0,
@@ -93,6 +100,7 @@ def valid_document() -> dict:
             "retire_hist_instructions": True,
             "commit_observation": True,
             "source_retire_alignment": True,
+            "roi_complete": True,
             "abi_errors": 0,
             "source_retire_alignment_errors": 0,
             "sampling_protocol_errors": 0,
@@ -118,7 +126,43 @@ class PerfObservationContractTest(unittest.TestCase):
     def test_accepts_versioned_public_contract(self) -> None:
         result = self.run_checker(valid_document())
         self.assertEqual(result.returncode, 0, result.stdout)
-        self.assertIn("PerfObservationV1 counters pass", result.stdout)
+        self.assertIn("PerfObservation counters pass", result.stdout)
+
+    def test_accepts_existing_v1_evidence(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v1"
+        document["roi"] = "difftest-observation-window-source-aligned"
+        document["invariants"].pop("roi_complete")
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_accepts_full_run_without_counter_markers(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["roi"] = {
+            "mode": "full-run",
+            "counter_read_markers": 0,
+            "closed_pairs": 0,
+            "complete": True,
+            "boundary_cycles_included": False,
+        }
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_incomplete_counter_read_pair(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["roi"]["counter_read_markers"] = 3
+        document["roi"]["complete"] = False
+        document["invariants"]["roi_complete"] = False
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("markers are incomplete", result.stdout)
+
+    def test_rejects_inconsistent_closed_pair_count(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["roi"]["closed_pairs"] = 2
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("do not form closed pairs", result.stdout)
 
     def test_rejects_wrong_abi_identity(self) -> None:
         document = copy.deepcopy(valid_document())
@@ -152,6 +196,14 @@ class PerfObservationContractTest(unittest.TestCase):
         )
         for name in forbidden:
             self.assertNotIn(name, source)
+
+    def test_monitor_detects_counter_reads_from_public_commit_instruction(self) -> None:
+        source = MONITOR.read_text(encoding="utf-8")
+        self.assertIn(
+            "(instruction & 0xffffffe0U) == 0x00006000U",
+            source,
+        )
+        self.assertIn("pending_commits_", source)
 
     def test_each_abi_word_has_one_local_owner(self) -> None:
         combined = "\n".join(path.read_text(encoding="utf-8") for path in OBSERVATION_SOURCES)
