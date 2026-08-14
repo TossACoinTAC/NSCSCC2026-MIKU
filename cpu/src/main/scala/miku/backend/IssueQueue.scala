@@ -287,47 +287,53 @@ final class IssueQueue(
     val occupancy = out UInt (log2Up(config.issueQueueEntriesPerPort + 1) bits)
   }
 
-  // Keep resident uops compacted in age order, as the ysyx issue queue does.
-  // Wakeup-to-select therefore crosses one payload lookup instead of an age
-  // lookup followed by a second physical-slot lookup.
-  val queue = Vec.fill(config.issueQueueEntriesPerPort)(Reg(IssueEntry(config, portIndex)))
+  // Payload remains in a fixed physical slot for its whole resident lifetime.
+  // Only the narrow age-order index array compacts after an out-of-order issue;
+  // execution backpressure therefore cannot become the CE of every payload bit.
+  private val entryCount = config.issueQueueEntriesPerPort
+  private val entryIndexWidth = log2Up(entryCount)
+  val payloadSlots = Vec.fill(entryCount)(Reg(IssueEntry(config, portIndex)))
+  val slotOccupied = Reg(Bits(entryCount bits)) init (0)
+  val ageOrder = Vec.fill(entryCount)(Reg(UInt(entryIndexWidth bits)))
   val count = Reg(UInt(log2Up(config.issueQueueEntriesPerPort + 1) bits)) init (0)
 
-  val wakeupEntry1 = Bits(config.issueQueueEntriesPerPort bits)
-  val wakeupEntry2 = Bits(config.issueQueueEntriesPerPort bits)
-  for (entry <- 0 until config.issueQueueEntriesPerPort) {
-    wakeupEntry1(entry) := False
-    wakeupEntry2(entry) := False
+  val wakeupSlot1 = Bits(entryCount bits)
+  val wakeupSlot2 = Bits(entryCount bits)
+  val readySlot = Bits(entryCount bits)
+  for (slot <- 0 until entryCount) {
+    wakeupSlot1(slot) := False
+    wakeupSlot2(slot) := False
     for (write <- 0 until config.writebackWidth) {
-      when(io.wakeupValid(write) && io.wakeupPdst(write) === queue(entry).psrc1) {
-        wakeupEntry1(entry) := True
+      when(io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc1) {
+        wakeupSlot1(slot) := True
       }
-      when(io.wakeupValid(write) && io.wakeupPdst(write) === queue(entry).psrc2) {
-        wakeupEntry2(entry) := True
+      when(io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc2) {
+        wakeupSlot2(slot) := True
       }
     }
-  }
-
-  val readyMap = Bits(config.issueQueueEntriesPerPort bits)
-  for (entry <- 0 until config.issueQueueEntriesPerPort) {
     val storeDataIsDecoupled =
       if (config.executionPorts(portIndex).capabilities.contains(ExecutionUnitKind.LoadStore)) {
-        queue(entry).memory.isStore
+        payloadSlots(slot).memory.isStore
       } else {
         False
       }
-    readyMap(entry) := U(entry, count.getWidth bits) < count &&
-      (queue(entry).source1Ready || wakeupEntry1(entry)) &&
-      (storeDataIsDecoupled || queue(entry).source2Ready || wakeupEntry2(entry)) &&
-      (!(if (portHasSystem) queue(entry).system.serializing else False) ||
-        queue(entry).robPointer === io.robHeadPointer)
+    readySlot(slot) := slotOccupied(slot) &&
+      (payloadSlots(slot).source1Ready || wakeupSlot1(slot)) &&
+      (storeDataIsDecoupled || payloadSlots(slot).source2Ready || wakeupSlot2(slot)) &&
+      (!(if (portHasSystem) payloadSlots(slot).system.serializing else False) ||
+        payloadSlots(slot).robPointer === io.robHeadPointer)
   }
 
-  val issueIndex = selectLowest(readyMap)
-  val issueIndexWide = UInt(count.getWidth bits)
-  issueIndexWide := issueIndex.resize(count.getWidth)
+  val readyAge = Bits(entryCount bits)
+  for (age <- 0 until entryCount) {
+    readyAge(age) := U(age, count.getWidth bits) < count && readySlot(ageOrder(age))
+  }
+  val issueAgeIndex = selectLowest(readyAge)
+  val issueAgeIndexWide = UInt(count.getWidth bits)
+  issueAgeIndexWide := issueAgeIndex.resize(count.getWidth)
+  val issueSlot = ageOrder(issueAgeIndex)
   val selectedUop = RenamedMicroOp(config)
-  unpackIssueEntry(selectedUop, queue(issueIndex))
+  unpackIssueEntry(selectedUop, payloadSlots(issueSlot))
   val queueDequeue = Bool()
 
   if (config.executionPorts(portIndex).registeredIssueOutput) {
@@ -347,7 +353,7 @@ final class IssueQueue(
     io.issue := outputHead
 
     val outputDequeue = io.issueValid && io.issueReady
-    queueDequeue := outputEnqueueReady && readyMap.orR
+    queueDequeue := outputEnqueueReady && readyAge.orR
     val nextOutputCount = UInt(outputCount.getWidth bits)
     nextOutputCount := outputCount + queueDequeue.asUInt - outputDequeue.asUInt
 
@@ -365,9 +371,9 @@ final class IssueQueue(
     for (slot <- 0 until 2) nextOutputSlots(slot) := outputSlots(slot)
     when(queueDequeue) {
       when(outputWritePointer) {
-        nextOutputSlots(1) := queue(issueIndex)
+        nextOutputSlots(1) := payloadSlots(issueSlot)
       }.otherwise {
-        nextOutputSlots(0) := queue(issueIndex)
+        nextOutputSlots(0) := payloadSlots(issueSlot)
       }
     }
     // Visibility is carried entirely by outputCount.  Updating the local
@@ -376,7 +382,7 @@ final class IssueQueue(
 
     io.occupancy := (count + outputCount).resized
   } else {
-    io.issueValid := readyMap.orR
+    io.issueValid := readyAge.orR
     io.issue := selectedUop
     queueDequeue := io.issueValid && io.issueReady
     io.occupancy := count
@@ -391,9 +397,11 @@ final class IssueQueue(
   // flush branches below have priority over every enqueue/dequeue update.
   io.enqueueReady := enqueueReadyReg
   val enqueueFire = io.enqueueValid && io.enqueueReady
-  val enqueueIndex = UInt(log2Up(config.issueQueueEntriesPerPort) bits)
-  enqueueIndex := count.resized
-  when(queueDequeue) { enqueueIndex := (count - 1).resized }
+  val freeSlots = ~slotOccupied
+  val enqueueSlot = selectLowest(freeSlots)
+  val enqueueAgeIndex = UInt(entryIndexWidth bits)
+  enqueueAgeIndex := count.resized
+  when(queueDequeue) { enqueueAgeIndex := (count - 1).resized }
 
   val enqueueWakeup1 = io.wakeupValid.asBools
     .zip(io.wakeupPdst)
@@ -413,37 +421,42 @@ final class IssueQueue(
 
   when(io.flush) {
     count := 0
+    slotOccupied := 0
   }.otherwise {
     count := count + enqueueFire.asUInt - queueDequeue.asUInt
+    when(queueDequeue) { slotOccupied(issueSlot) := False }
+    when(enqueueFire) { slotOccupied(enqueueSlot) := True }
   }
-  // count alone defines resident entries.  Payload mutation on a flush edge is
-  // harmless, so each slot can take an unconditional local next state while
-  // redirect only clears visibility.
-  for (entry <- 0 until config.issueQueueEntriesPerPort) {
-    val nextEntry = IssueEntry(config, portIndex)
-    copyIssueEntry(
-      nextEntry,
-      queue(entry),
-      queue(entry).source1Ready || wakeupEntry1(entry),
-      queue(entry).source2Ready || wakeupEntry2(entry)
-    )
-    val entryEnqueue = enqueueFire &&
-      enqueueIndex === U(entry, log2Up(config.issueQueueEntriesPerPort) bits)
-    if (entry < config.issueQueueEntriesPerPort - 1) {
-      val entryShift = queueDequeue &&
-        U(entry, count.getWidth bits) >= issueIndexWide &&
-        U(entry + 1, count.getWidth bits) < count
-      when(entryShift) {
-        copyIssueEntry(
-          nextEntry,
-          queue(entry + 1),
-          queue(entry + 1).source1Ready || wakeupEntry1(entry + 1),
-          queue(entry + 1).source2Ready || wakeupEntry2(entry + 1)
-        )
+
+  for (age <- 0 until entryCount) {
+    val nextAgeSlot = UInt(entryIndexWidth bits)
+    nextAgeSlot := ageOrder(age)
+    if (age < entryCount - 1) {
+      when(
+        queueDequeue &&
+          U(age, count.getWidth bits) >= issueAgeIndexWide &&
+          U(age + 1, count.getWidth bits) < count
+      ) {
+        nextAgeSlot := ageOrder(age + 1)
       }
     }
-    when(entryEnqueue) { nextEntry := enqueued }
-    queue(entry) := nextEntry
+    when(enqueueFire && enqueueAgeIndex === U(age, entryIndexWidth bits)) {
+      nextAgeSlot := enqueueSlot
+    }
+    ageOrder(age) := nextAgeSlot
+  }
+
+  for (slot <- 0 until entryCount) {
+    when(enqueueFire && enqueueSlot === U(slot, entryIndexWidth bits)) {
+      payloadSlots(slot) := enqueued
+    }.otherwise {
+      when(slotOccupied(slot) && wakeupSlot1(slot)) {
+        payloadSlots(slot).source1Ready := True
+      }
+      when(slotOccupied(slot) && wakeupSlot2(slot)) {
+        payloadSlots(slot).source2Ready := True
+      }
+    }
   }
 }
 
