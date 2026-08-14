@@ -1173,7 +1173,7 @@ class OooBackendDispatchSpec extends AnyFunSuite {
     }
   }
 
-  test("multiply issue wakes a dependant into the next-cycle result forward") {
+  test("multiply direct wake and raw result keep resident and later consumers live") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
       .compile(new OooBackendDispatchProbe(config))
@@ -1197,6 +1197,7 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         dut.io.inputValid #= 0
 
         var producerPdst = BigInt(0)
+        var producerRobPointer = BigInt(0)
         var producerSeen = false
         var cycles = 0
         while (!producerSeen && cycles < 16) {
@@ -1210,6 +1211,7 @@ class OooBackendDispatchSpec extends AnyFunSuite {
             ) {
               producerSeen = true
               producerPdst = dut.io.issuePdst(port).toBigInt
+              producerRobPointer = dut.io.issueRobPointer(port).toBigInt
             }
           }
           cycles += 1
@@ -1228,8 +1230,9 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         dut.io.multiplyForwardValid #= true
         dut.io.multiplyForwardPdst #= producerPdst
         dut.io.multiplyForwardData #= product
-        dut.io.completionValid #= 1
-        dut.io.completionRobPointer #= 0
+        dut.io.completionValid #= BigInt(1) << config.executionWidth
+        dut.io.completionLane #= config.executionWidth
+        dut.io.completionRobPointer #= producerRobPointer
         dut.io.completionPdst #= producerPdst
         dut.io.completionWritesPdst #= true
         dut.io.completionData #= product
@@ -1242,6 +1245,28 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         }
         assert(consumerPort.nonEmpty)
         assert(dut.io.issueSource1(consumerPort.get).toBigInt == product)
+
+        dut.io.multiplyForwardValid #= false
+        dut.io.completionValid #= 0
+        val laterConsumerPc = consumerPc + 4
+        dut.io.inputValid #= 1
+        dut.io.pc(0) #= laterConsumerPc
+        dut.io.instruction(0) #= BigInt("028005af", 16) // addi.w r15,r13,1
+        dut.clockDomain.waitSampling()
+        dut.io.inputValid #= 0
+
+        var laterResult = Option.empty[BigInt]
+        for (_ <- 0 until 16 if laterResult.isEmpty) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          for (port <- 0 until config.executionWidth) {
+            if (
+              (dut.io.issueValid.toBigInt & (BigInt(1) << port)) != 0 &&
+              dut.io.issuePc(port).toBigInt == laterConsumerPc
+            ) laterResult = Some(dut.io.issueSource1(port).toBigInt)
+          }
+        }
+        assert(laterResult.contains(product))
       }
   }
 

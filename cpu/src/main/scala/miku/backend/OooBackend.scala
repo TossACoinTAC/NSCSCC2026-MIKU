@@ -393,6 +393,14 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
         rob.io.completionWakeupPdst(write),
         io.loadWakeupPdst
       )
+    } else if (
+      write == config.executionWidth && config.enableMultiplyCompletionEchoSuppression
+    ) {
+      // The multiplier already broadcasts its destination when the fixed-latency pipe accepts
+      // the uop. Its dedicated result lane still writes the PRF/RAT and qualifies dispatch, but
+      // repeating the tag through every resident IQ only recreates a completed dependency.
+      earlyWakeupValid(write) := False
+      earlyWakeupPdst(write) := 0
     } else {
       earlyWakeupValid(write) := rob.io.completionWakeupCandidateValid(write)
       earlyWakeupPdst(write) := rob.io.completionWakeupPdst(write)
