@@ -1062,12 +1062,22 @@ class OooFrontendSpec extends AnyFunSuite {
         assert(!dut.io.cacheKill.toBoolean)
         sample(dut)
         dut.io.cacheRequestReady #= false
-        dut.io.cacheResponseValid #= false
+
+        // A turnover hit may already have registered the younger response on the correction
+        // edge.  The following-cycle kill must suppress that visible pulse as well as canceling
+        // the L1I lookup state; clearing only the frontend owner at the edge is too late.
+        clearPredecode(dut)
+        dut.io.cacheResponse.virtualAddress #= sequentialPc
+        dut.io.cacheResponse.physicalAddress #= sequentialPc
+        for (lane <- 0 until config.fetchWidth) {
+          dut.io.cacheResponse.instructions(lane) #= (BigInt("00100000", 16) | (5 + lane))
+        }
         assert(dut.io.cacheKill.toBoolean)
         // Predictor history/RAS restore is deliberately isolated from response predecode.  No
         // corrected lookup may start until that registered restore has completed.
         assert(!dut.io.translationRequest.valid.toBoolean)
         sample(dut)
+        dut.io.cacheResponseValid #= false
         assert(!dut.io.cacheKill.toBoolean)
         assert(dut.io.fetchPc.toBigInt == branchTarget)
         assert(dut.io.occupancy.toBigInt == 2)

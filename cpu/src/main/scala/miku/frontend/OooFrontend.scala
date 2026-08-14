@@ -410,7 +410,8 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val responseSelectsPendingContext = cacheResponseContextPending
   val activeCacheDropPending = if (config.enableDeferredFrontendCorrectionCleanup) {
     cacheDropPending ||
-      (predictionCorrectionFlushPending && predictionCorrectionUncachedDrainPending)
+      (predictionCorrectionFlushPending && predictionCorrectionUncachedDrainPending) ||
+      cachedCorrectionKillPending
   } else {
     cacheDropPending
   }
