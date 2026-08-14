@@ -13,9 +13,9 @@
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
   baseline `5,543,953` 累计 `-8.768094%`。
 - func58：WT01 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
-- L07+BR01+BT04 matching 100 MHz direct full implementation：setup `-1.442 ns`、hold
-  `+0.050 ns`、DRC 0 error/critical warning、fully routed、bitstream 成功，但 setup 明显退化，
-  因此 BT04 已否决并恢复 BT03 默认结构。
+- WT01 matching 100 MHz direct full implementation：setup `-0.824 ns`、hold `+0.056 ns`、
+  DRC 0 error/critical warning、fully routed、bitstream 成功；资源为 88,850 LUT、54,432 FF、
+  27,681 slice、54.5 BRAM、8 DSP。setup 仍未闭合，因此尚不是里程碑。
 - BT04 相对 MT03+BT03 的器件总 LUT `86,489 -> 89,422`、寄存器
   `54,358 -> 54,881`、slice `26,920 -> 27,745`，BRAM `56.5 -> 54.5`。其 top-50 全部为
   IQ，最差路径 `-1.442 ns`，由 recovery 经另一个 IQ 的 direct wakeup/select 级联到本地复制
@@ -183,7 +183,12 @@ C01 barrier 门禁、IQ flush 负向用例及完整 `cpu-check`（39 suites / 21
 已确认 direct-wakeup 表达式不含 `io_flush`，completion 仍含 `io_issueReady`。完整 perf20
 为 `5,057,854 -> 5,057,854`，20 项逐项精确相等、几何平均 `1.000000000x`；func58
 random-AXI seeds `240/255/141` 均为 58/58。逐项证据见
-`build/reports/comparisons/R2-WT01.json`；matching direct full 是后续晋级门禁。
+`build/reports/comparisons/R2-WT01.json`。matching direct full 的 setup/hold 为
+`-0.824/+0.056 ns`，DRC、route 和 bitstream 完整；WT01 已把 BT03 中由 recovery 驱动的
+IQ 路径从 top-50 的 47 条降为 0 条，证明物理目标达成。新的 top-50 分布为 frontend 19、
+predictor 10、cache/L2 9、IQ 11、ATU/other CPU 1；最差路径是 instruction translation
+response 的 virtual-address 到 uncached payload，随后是 frontend next-PC、BTB 更新和 L1I
+response prediction 路径。下一时序增量应处理这些已暴露路径，R1 仍未满足 setup 门禁。
 
 ## 系统、归档与发布
 
