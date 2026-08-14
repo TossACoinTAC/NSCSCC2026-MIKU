@@ -126,6 +126,32 @@ class AddressTranslationUnitSpec extends AnyFunSuite {
     cycles
   }
 
+  test("reset disables every main TLB entry") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-address-translation-reset"
+      )
+      .compile(new AddressTranslationUnit(config))
+      .doSim("ooo-address-translation-reset", 0x4c84) { dut =>
+        dut.domain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.domain.assertReset()
+        dut.domain.waitSampling(2)
+        dut.domain.deassertReset()
+        sample(dut)
+
+        for (index <- 0 until 32) {
+          dut.io.csrTlbIndex #= BigInt(index)
+          sleep(1)
+          assert(
+            ((dut.io.tlbReadIndex.toBigInt >> 31) & 1) == 1,
+            s"main TLB entry $index remained enabled after reset"
+          )
+        }
+      }
+  }
+
   test("data bypass response remains stable under backpressure and invalid input changes") {
     SimConfig.withVerilator
       .workspacePath(

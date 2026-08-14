@@ -88,6 +88,14 @@ final class HierarchicalTlb(microEntries: Int = 4, walkEntriesPerCycle: Int = 4)
     // 32:1 bundle muxes after RTL generation.
     val entryBanks = Vec.fill(walkEntriesPerCycle)(Vec.fill(8)(Reg(TlbEntryState())))
 
+    // Main-TLB contents are architecturally invalid after reset.  The payload may remain
+    // uninitialized, but no lookup or management search may observe it until software writes the
+    // entry.  Initializing only the qualification bit also avoids a wide reset tree over 32 full
+    // entries.
+    for (bank <- entryBanks; entry <- bank) {
+      entry.enabled.init(False)
+    }
+
     private def entryAt(index: Int): TlbEntryState =
       entryBanks(index % walkEntriesPerCycle)(index / walkEntriesPerCycle)
 
