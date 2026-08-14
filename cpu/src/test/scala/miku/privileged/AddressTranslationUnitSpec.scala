@@ -126,6 +126,59 @@ class AddressTranslationUnitSpec extends AnyFunSuite {
     cycles
   }
 
+  test("data bypass response remains stable under backpressure and invalid input changes") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-address-translation-data-response-stability"
+      )
+      .compile(new AddressTranslationUnit(config))
+      .doSim("ooo-address-translation-data-response-stability", 0x4c83) { dut =>
+        dut.domain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.io.dataResponse.ready #= false
+        dut.domain.assertReset()
+        dut.domain.waitSampling(2)
+        dut.domain.deassertReset()
+        sample(dut)
+
+        val acceptedAddress = BigInt(0x1c001238)
+        dut.io.dataRequest.valid #= true
+        dut.io.dataRequest.virtualAddress #= acceptedAddress
+        dut.io.dataRequest.isWrite #= true
+        sleep(1)
+        assert(dut.io.dataRequest.ready.toBoolean)
+        sample(dut)
+        dut.io.dataRequest.valid #= false
+
+        assert(dut.io.dataResponse.valid.toBoolean)
+        assert(dut.io.dataResponse.virtualAddress.toBigInt == acceptedAddress)
+        assert(dut.io.dataResponse.physicalAddress.toBigInt == acceptedAddress)
+        assert(!dut.io.dataResponse.uncached.toBoolean)
+        assert(!dut.io.dataResponse.cancelled.toBoolean)
+        assert(!dut.io.dataResponse.exception.valid.toBoolean)
+
+        dut.io.dataRequest.virtualAddress #= BigInt("deadbeec", 16)
+        dut.io.dataRequest.isWrite #= false
+        dut.io.dataMat #= 0
+        dut.io.disableCache #= true
+        dut.io.csrDa #= false
+        dut.io.csrPg #= true
+        dut.domain.waitSampling(2)
+
+        assert(dut.io.dataResponse.valid.toBoolean)
+        assert(dut.io.dataResponse.virtualAddress.toBigInt == acceptedAddress)
+        assert(dut.io.dataResponse.physicalAddress.toBigInt == acceptedAddress)
+        assert(!dut.io.dataResponse.uncached.toBoolean)
+        assert(!dut.io.dataResponse.cancelled.toBoolean)
+        assert(!dut.io.dataResponse.exception.valid.toBoolean)
+
+        dut.io.dataResponse.ready #= true
+        sample(dut)
+        assert(!dut.io.dataResponse.valid.toBoolean)
+      }
+  }
+
   test("data bypass preview exactly covers direct and permitted DMW modes") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-address-translation-preview")
