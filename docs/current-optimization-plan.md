@@ -47,7 +47,11 @@ fully routed 和 bitstream 成功。正 WNS 不用于升频。
 - `MT01 @ 9838c9d`：LSQ 定向测试和完整 `cpu-check` 通过；perf20 相对 BT01
   20 项逐项精确相等，总周期 `5,306,558`、几何平均 `1.000000000x`。生成 RTL
   已确认 resident LQ payload CE 不再经过 completion 仲裁。
-- `MT02`：下一节点，尚未形成候选 RTL。
+- `MT02 @ e0e503c`：L1D MSHR/backpressure、dirty writeback 和 refill error 定向
+  测试及完整 `cpu-check` 通过；perf20 相对 MT01 20 项逐项精确相等，总周期
+  `5,306,558`、几何平均 `1.000000000x`。每个 MSHR 的窄 pending 位现已独立
+  资格化 L2 read request；cache/L2 路径效果待 R1 matching route。
+- `FT02`：下一节点，尚未形成候选 RTL。
 
 ## IPC 第 1 至第 3 轮
 
