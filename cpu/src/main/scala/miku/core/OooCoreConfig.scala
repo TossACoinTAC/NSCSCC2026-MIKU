@@ -92,6 +92,7 @@ final case class OooCoreConfig(
     enableDirectWakeupEchoSuppression: Boolean = true,
     enableDirectOnlyPortEchoSuppression: Boolean = true,
     enableMultiplyCompletionEchoSuppression: Boolean = false,
+    enableLsuRegisteredWakeSelectDecoupling: Boolean = true,
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,

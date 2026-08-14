@@ -326,12 +326,16 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   // qualified writeback data; MUL, DIV and LSU keep the registered ROB wakeup.
   val earlyWakeupValid = Bits(config.writebackWidth bits)
   val earlyWakeupPdst = Vec(UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
+  val fastSelectWakeupValid = Bits(config.writebackWidth bits)
+  val fastSelectWakeupPdst = Vec(UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
   for (write <- 0 until config.writebackWidth) {
     if (write < config.executionWidth && write != loadStorePort) {
       // IQ flush has priority over wakeup state updates, so this is a candidate
       // event and deliberately excludes the global flush signal from select.
       val registeredWake = rob.io.completionWakeupCandidateValid(write)
       val directWake = io.directWakeupValid(write) && io.directWakeupPdst(write) =/= 0
+      fastSelectWakeupValid(write) := directWake
+      fastSelectWakeupPdst(write) := io.directWakeupPdst(write)
       val suppressDirectOnlyEcho = config.enableDirectOnlyPortEchoSuppression &&
         directOnlyCompletionPorts.contains(write)
       val selectedRegisteredWake = if (suppressDirectOnlyEcho) {
@@ -371,6 +375,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
       } else {
         False
       }
+      fastSelectWakeupValid(write) := loadWake
+      fastSelectWakeupPdst(write) := io.loadWakeupPdst
       val selectedRegisteredWake = if (
         config.enableDirectWakeupEchoSuppression && config.enableLoadCompletionEarlyWakeup
       ) {
@@ -404,6 +410,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     } else {
       earlyWakeupValid(write) := rob.io.completionWakeupCandidateValid(write)
       earlyWakeupPdst(write) := rob.io.completionWakeupPdst(write)
+      fastSelectWakeupValid(write) := False
+      fastSelectWakeupPdst(write) := 0
     }
   }
 
@@ -499,6 +507,17 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     issueQueues(port).io.wakeupValid := earlyWakeupValid
     for (write <- 0 until config.writebackWidth) {
       issueQueues(port).io.wakeupPdst(write) := earlyWakeupPdst(write)
+    }
+    if (port == loadStorePort && config.enableLsuRegisteredWakeSelectDecoupling) {
+      issueQueues(port).io.selectWakeupValid := fastSelectWakeupValid
+      for (write <- 0 until config.writebackWidth) {
+        issueQueues(port).io.selectWakeupPdst(write) := fastSelectWakeupPdst(write)
+      }
+    } else {
+      issueQueues(port).io.selectWakeupValid := earlyWakeupValid
+      for (write <- 0 until config.writebackWidth) {
+        issueQueues(port).io.selectWakeupPdst(write) := earlyWakeupPdst(write)
+      }
     }
   }
 

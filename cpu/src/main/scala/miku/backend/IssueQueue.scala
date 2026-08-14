@@ -286,6 +286,10 @@ final class IssueQueue(
 
     val wakeupValid = in Bits (config.writebackWidth bits)
     val wakeupPdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
+    // Persistent wakeup updates source-ready state. Select wakeup is the
+    // latency bypass allowed to make an entry eligible in the same cycle.
+    val selectWakeupValid = in Bits (config.writebackWidth bits)
+    val selectWakeupPdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
 
     val issueValid = out Bool ()
     val issue = out(RenamedMicroOp(config))
@@ -311,16 +315,32 @@ final class IssueQueue(
 
   val wakeupSlot1 = Bits(physicalSlotCount bits)
   val wakeupSlot2 = Bits(physicalSlotCount bits)
+  val selectWakeupSlot1 = Bits(physicalSlotCount bits)
+  val selectWakeupSlot2 = Bits(physicalSlotCount bits)
   val readySlot = Bits(physicalSlotCount bits)
   for (slot <- 0 until physicalSlotCount) {
     wakeupSlot1(slot) := False
     wakeupSlot2(slot) := False
+    selectWakeupSlot1(slot) := False
+    selectWakeupSlot2(slot) := False
     for (write <- 0 until config.writebackWidth) {
       when(io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc1) {
         wakeupSlot1(slot) := True
       }
       when(io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc2) {
         wakeupSlot2(slot) := True
+      }
+      when(
+        io.selectWakeupValid(write) &&
+          io.selectWakeupPdst(write) === payloadSlots(slot).psrc1
+      ) {
+        selectWakeupSlot1(slot) := True
+      }
+      when(
+        io.selectWakeupValid(write) &&
+          io.selectWakeupPdst(write) === payloadSlots(slot).psrc2
+      ) {
+        selectWakeupSlot2(slot) := True
       }
     }
     val storeDataIsDecoupled =
@@ -330,8 +350,8 @@ final class IssueQueue(
         False
       }
     readySlot(slot) := slotOccupied(slot) &&
-      (payloadSlots(slot).source1Ready || wakeupSlot1(slot)) &&
-      (storeDataIsDecoupled || payloadSlots(slot).source2Ready || wakeupSlot2(slot)) &&
+      (payloadSlots(slot).source1Ready || selectWakeupSlot1(slot)) &&
+      (storeDataIsDecoupled || payloadSlots(slot).source2Ready || selectWakeupSlot2(slot)) &&
       (!(if (portHasSystem) payloadSlots(slot).system.serializing else False) ||
         payloadSlots(slot).robPointer === io.robHeadPointer)
   }

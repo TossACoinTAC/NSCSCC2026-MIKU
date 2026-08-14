@@ -792,6 +792,91 @@ class OooBackendDispatchSpec extends AnyFunSuite {
       }
   }
 
+  test("LSU select keeps direct wake latency while deferring registered-only wake") {
+    def measure(testConfig: OooCoreConfig, label: String, direct: Boolean, seed: Int): Int = {
+      var consumerIssueCycle = -1
+      SimConfig.withVerilator
+        .workspacePath(
+          s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-backend-lsu-select-$label"
+        )
+        .compile(new OooBackendDispatchProbe(testConfig))
+        .doSim(s"ooo-backend-lsu-select-$label", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearControl(dut)
+          dut.io.issueReady #= 0xf
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          dut.clockDomain.waitSampling()
+
+          val producerPc = BigInt("1c000000", 16)
+          val consumerPc = producerPc + 4
+          dut.io.inputValid #= 3
+          dut.io.pc(0) #= producerPc
+          dut.io.instruction(0) #= BigInt("0280040d", 16) // addi.w r13,r0,1
+          dut.io.pc(1) #= consumerPc
+          dut.io.instruction(1) #= BigInt("288001ae", 16) // ld.w r14,r13,0
+          dut.clockDomain.waitSampling()
+          dut.io.inputValid #= 0
+
+          var producerPdst = BigInt(0)
+          var producerRobPointer = BigInt(0)
+          for (_ <- 0 until 16 if producerPdst == 0) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            val producerPort = (0 until testConfig.executionWidth).find { port =>
+              (dut.io.issueValid.toBigInt & (BigInt(1) << port)) != 0 &&
+              dut.io.issuePc(port).toBigInt == producerPc
+            }
+            producerPort.foreach { port =>
+              producerPdst = dut.io.issuePdst(port).toBigInt
+              producerRobPointer = dut.io.issueRobPointer(port).toBigInt
+            }
+          }
+          assert(producerPdst != 0)
+          assert(dut.io.loadStoreIssueOccupancy.toBigInt != 0)
+
+          val result = BigInt("12345000", 16)
+          dut.io.completionValid #= 1
+          dut.io.completionLane #= 0
+          dut.io.completionRobPointer #= producerRobPointer
+          dut.io.completionPdst #= producerPdst
+          dut.io.completionWritesPdst #= true
+          dut.io.completionData #= result
+          dut.io.directWakeupValid #= direct
+          dut.io.directWakeupPdst #= producerPdst
+          dut.clockDomain.waitSampling()
+          dut.io.completionValid #= 0
+          dut.io.directWakeupValid #= false
+
+          for (cycle <- 1 to 6 if consumerIssueCycle < 0) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            if (
+              (dut.io.issueValid.toBigInt & (BigInt(1) << loadStorePort)) != 0 &&
+              dut.io.issuePc(loadStorePort).toBigInt == consumerPc
+            ) {
+              consumerIssueCycle = cycle
+              assert(dut.io.issueSource1(loadStorePort).toBigInt == result)
+            }
+          }
+          assert(consumerIssueCycle > 0)
+        }
+      consumerIssueCycle
+    }
+
+    val legacyConfig = config.copy(enableLsuRegisteredWakeSelectDecoupling = false)
+    val decoupledConfig = config.copy(enableLsuRegisteredWakeSelectDecoupling = true)
+    val legacyDirect = measure(legacyConfig, "legacy-direct", direct = true, 0x4c80)
+    val decoupledDirect = measure(decoupledConfig, "decoupled-direct", direct = true, 0x4c81)
+    val legacyRegistered = measure(legacyConfig, "legacy-registered", direct = false, 0x4c82)
+    val decoupledRegistered =
+      measure(decoupledConfig, "decoupled-registered", direct = false, 0x4c83)
+
+    assert(decoupledDirect == legacyDirect)
+    assert(decoupledRegistered == legacyRegistered + 1)
+  }
+
   test("a direct-only completion port keeps resident and later consumers live") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-direct-only-echo")
