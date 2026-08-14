@@ -32,7 +32,7 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 
 当前默认启用的主要候选包括 F01/H03 frontend turnover、B03-full、L05、L08、W02、H01、Q01，以及本轮新增的 E02、FT01、FT02、FT03 与 BT02；E01、W01、L07 默认关闭。当前 RTL 已通过完整 `make cpu-check`（39 suites、213 tests）、perf20 20/20，以及 matching func58 seeds `240/255/141` 的完整测试。
 
-本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。FT02 的逐项变化已单独记录，不能把累计收益拆分给其他候选。R1 matching 100 MHz direct full 已产生 fully-routed bitstream，hold `+0.050 ns` 且 DRC 0 error/critical warning，但 setup `-0.466 ns`，因此仍归档为 candidate。相对上一份 direct full 的 setup `-0.552 ns` 改善 `0.086 ns`；CPU LUT `76,873 -> 77,789`、FF `39,941 -> 40,083`。最新 top-50 全为 IQ payload CE，平均 route 占比 `83.52%`。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
+本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。FT02 的逐项变化已单独记录，不能把累计收益拆分给其他候选。BT02 matching 100 MHz direct full 已产生 fully-routed bitstream，hold `+0.053 ns` 且 DRC 0 error/critical warning，但 setup `-0.678 ns`，因此仍归档为 candidate。相对 BT02 前一次 direct full，器件总 LUT `90,221 -> 86,159`、寄存器 `54,233 -> 53,633`、slice `27,096 -> 26,856`，BRAM `56.5 -> 68.5`；旧的 IQ payload CE 路径族已从 top-50 消失，当前 top-50 为 LSQ 22、frontend 10、IQ 7、predictor 6、ROB/CSR 5 条。该次 WNS 比前次 `-0.466 ns` 更负，既说明仍未闭合，也暴露了此前被 IQ 路径遮蔽的 LSQ 到 ATU 路径；单次 route 不能独立证明全部差值都由 BT02 逻辑确定性造成。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
 
 ## 3. 候选总表
 
@@ -106,21 +106,21 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | MT02 | L1 miss 到 L2 lookup 请求资格局部化 | 每个 MSHR 以窄 `readRequestPending` 驱动 L2 仲裁，地址和 critical beat 继续来自已注册 payload，缩短 miss-state 到仲裁的控制锥 | 同拍置位不得增加一拍；多个 MSHR 等待、handshake 清除、writeback 后重入及仲裁顺序必须保持 | L1D MSHR/backpressure/多 miss 测试、完整 perf20 A/B、cache/L2 top-N | 已实现并纳入 R1 | `e0e503c` 的 L1D MSHR/backpressure、dirty writeback、refill error 定向测试及完整 `cpu-check` 通过；perf20 `5,306,558 -> 5,306,558`，20 项逐项精确相等、几何平均 `1.000000000x`；R1 matching top-50 未再出现 cache/L2。 |
 | FT02 | 前端预测更新反馈解耦 | translation response 接受时形成窄 turnover token，使下一次翻译和 predictor speculative update 不再依赖 L1I tag-hit 回授 | token 必须完整携带 next PC、GHR、RAS、link 和预测上下文；不能改变热命中 fetch-group 启动间隔，也不能在 translation cancel/redirect 后留下状态 | frontend/predictor correction、RAS、redirect 测试、完整 perf20 A/B、predictor top-N | 已实现；R1 性能候选 | `bcce5fe` 的 OooFrontend 23 项定向测试、完整 `cpu-check` 和 perf20 通过；相对 MT02 总周期 `5,306,558 -> 5,299,059`（`-0.141316%`），几何平均 `1.006239125x`。bitcount `-7.87691%`、dhrystone `-2.55075%`、fireye_D1 `-1.61731%`，fireye_B2 `+0.75767%`、fireye_I2 `+0.38345%`；逐项变化见 `build/reports/comparisons/R1-FT02.json`。R1 matching top-50 未再出现 frontend/predictor。 |
 | FT03 | L1I response 到 frontend enqueue 去控制化 | 四 lane payload 固定位置写入，taken prefix、valid lane count 与 tail 可见性独立控制，减少 predecode/target 对宽 payload CE 的影响 | 被截断 lane 可写无效槽但绝不能可见；组内 taken、buffer wrap、redirect kill 和 decode 可见周期必须保持 | frontend buffer/taken-prefix/wrap/redirect 测试、完整 perf20 A/B、frontend top-N | 已实现并纳入 R1 | `e14957a` 的 OooFrontend 23 项定向测试和完整 `cpu-check` 通过；perf20 `5,299,059 -> 5,299,059`，20 项逐项精确相等、几何平均 `1.000000000x`；R1 matching top-50 未再出现 frontend。 |
-| BT02 | IQ 固定 payload 物理槽与窄年龄索引 | resident payload 只在 enqueue 时写固定空闲槽，发射后只压缩 3-bit 年龄顺序索引；`issueReady`、wakeup/select 和 recovery 不再控制全部宽 payload 的 CE | 年龄顺序、空闲槽回收、同拍 enqueue/dequeue、wakeup、flush 和 LSU 注册输出必须保持原语义；额外 indirection mux 可能转移读取路径压力 | IssueQueue 随机/flush/compaction 测试、完整门禁、perf20 A/B、IQ top-50、LUT/FF | 已实现并纳入 R1；待 matching route | `26bfef9` 的 IssueQueue 10 项定向测试和完整 `cpu-check`（39 suites、213 tests）通过；perf20 相对 R1 首批组合 `5,299,059 -> 5,299,059`，20 项逐项精确相等、几何平均 `1.000000000x`，func58 seeds `240/255/141` 均通过。原始进入证据为 top-50 全部由 `privilegedRedirectPending` 经 issue-ready/wakeup/select/compaction 到 IQ payload CE，最差 `-0.466 ns`、平均 route `83.52%`；matching direct full 尚待验证。 |
+| BT02 | IQ 固定 payload 物理槽与窄年龄索引 | resident payload 只在 enqueue 时写固定空闲槽，发射后只压缩 3-bit 年龄顺序索引；`issueReady`、wakeup/select 和 recovery 不再控制全部宽 payload 的 CE | 年龄顺序、空闲槽回收、同拍 enqueue/dequeue、wakeup、flush 和 LSU 注册输出必须保持原语义；额外 indirection mux 可能转移读取路径压力 | IssueQueue 随机/flush/compaction 测试、完整门禁、perf20 A/B、IQ top-50、LUT/FF | 已实现并保留；matching route 已完成，R1 尚未闭合 | `26bfef9` 的 IssueQueue 10 项定向测试和完整 `cpu-check`（39 suites、213 tests）通过；perf20 相对 R1 首批组合 `5,299,059 -> 5,299,059`，20 项逐项精确相等、几何平均 `1.000000000x`，func58 seeds `240/255/141` 均通过。matching direct full 中旧 IQ payload CE 路径族从 top-50 消失，器件总 LUT 减少 4,062、寄存器减少 600、slice 减少 240，同时增加 12 BRAM；setup/hold 为 `-0.678/+0.053 ns`，新的主导族为 22 条 LSQ 到 ATU 路径。候选实现了目标结构变化，但尚未形成时序闭合里程碑。 |
 
 ## 4. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
 
-当前 P1 正确性 gate 已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。R1 首批五项已完成完整门禁、perf20 20/20、func58 三 seed 和 matching direct full implementation；setup 从旧基线 `-0.552 ns` 改善到 `-0.466 ns`，但仍未闭合。BT02 已完成 RTL、完整门禁、perf20 和 matching func58，当前只缺 direct full 实现证据，因此仍不能晋级稳定竞赛 milestone。
+当前 P1 正确性 gate 已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。R1 首批五项和 BT02 均已完成完整门禁、perf20 20/20、func58 三 seed 和 matching direct full implementation。BT02 达成了 IQ 存储结构和目标路径族的替换，但最新 direct full setup 为 `-0.678 ns`，R1 仍不能晋级稳定竞赛 milestone。
 
-1. 本轮周期从 5,543,953 降至 5,299,059，减少 244,894（-4.417317%）；当前 full run 的 setup 为 -0.466 ns，hold/DRC/route/bitstream 完整。
+1. 本轮周期从 5,543,953 降至 5,299,059，减少 244,894（-4.417317%）；当前 full run 的 setup 为 -0.678 ns，hold/DRC/route/bitstream 完整。
 2. P02 post-route 仅用于判断物理随机性和提取最新 top-N 路径；其结果无论是否闭合都不能晋级 Stable_Backup 或正式竞赛产物。
 3. 下一份正式 bitstream 必须从 matching RTL 直接执行一次 full implementation，并由该 run 自身满足 setup/hold、DRC、route 和 bitstream 门禁。
 4. 下一轮 IPC 候选仍优先从前端持续供给、分支训练/恢复和已量化的 load-use 暴露中选择；ROB/PRF 扩容因当前占用证据降为低优先级。
 5. 候选设计阶段同时控制寄存边界、宽 mux、高扇出和跨模块控制；任何后续 RTL 修改必须重新运行受影响 suite、完整门禁、perf20 和 func58。
-6. BT02 的软件周期逐项精确相等；下一份 direct full 将以 IQ top-50 是否消失、setup/hold、资源和 route 占比判定其时序价值。
+6. BT02 的软件周期逐项精确相等，matching route 已证明旧 IQ payload CE 路径族消失并降低 LUT；下一步依据新暴露的 LSQ 到 ATU 路径设计局部、周期透明的候选。
 
 ## 5. 详细说明的维护边界
 
@@ -132,8 +132,8 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 - 当前实验冻结：`build/reports/experiments/R1-BT02/experiment-manifest.json`。
 - 当前 perf20：`build/sim/runs/cpu_148536b4e8d4_chiplab_c398d274812f/clean-perf20_model_bd7a84936a83_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`。
 - 当前 func58：`build/sim/runs/cpu_148536b4e8d4_chiplab_c398d274812f/clean-func58_model_84262e640148_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
-- 当前 full implementation candidate：`Post_Impl_Bundles/cpu_c3527e7a0a89_chiplab_c398d274812f_perf_100mhz_20260814-123424/manifest.json`。
-- 当前 direct full top-50 分类：`build/reports/timing/R1-direct-top50.json`。
+- 当前 full implementation candidate：`Post_Impl_Bundles/cpu_b22bc0cb3a1f_chiplab_c398d274812f_perf_100mhz_20260814-142700/manifest.json`。
+- 当前 direct full top-50 分类：`build/reports/timing/R1-BT02-direct-top50.json`。
 - 首轮 post-route exploration：`Post_Impl_Bundles/cpu_013db4902e57_chiplab_c398d274812f_perf_postroute_100mhz_20260814-081307/manifest.json`。
 - 第二轮 post-route exploration：`Post_Impl_Bundles/cpu_013db4902e57_chiplab_c398d274812f_perf_postroute_100mhz_20260814-082453/manifest.json`。
 - 历史不可变实现与板测证据：`Stable_Backup/` 内各候选 manifest；其中旧 post-route 条目按当前合同只作历史路径证据。
