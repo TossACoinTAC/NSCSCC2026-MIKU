@@ -26,7 +26,7 @@
    LSU/cache、memory/AXI、DIV 和 predictor 只使用同一 baseline 的 paired A/B；
    `make experiment-compare` 同时输出逐项变化、总周期和归一化几何平均。几何平均用于轮次
    晋级，逐项表负责暴露回退，两者都必须保留。
-7. **实现验证**：性能候选使用 100 MHz clean SoC full implementation；功能里程碑补做
+7. **实现验证**：性能候选按实验清单声明的目标频率执行 clean SoC full implementation；功能里程碑补做
    function implementation。保存 DRC、setup/hold WNS/TNS、top failing endpoints、
    LUT/FF/BRAM/DSP、requested/actual clock 和 bitstream hash。若 full route 已 fully routed、
    hold/DRC/bitstream 完整，只有 setup 小幅未闭合且路径以物理布线为主，才进入条件子阶段
@@ -153,7 +153,7 @@ RTL、generation manifest 和 Chiplab 身份还会再次与当前 implementation
 post-route 结果只用于识别物理随机性、路径簇和下一轮 RTL/实现策略；正式竞赛 bitstream
 必须由对应 RTL 从头执行一次 full implementation，且该次 full run 自身满足全部门禁。
 
-## 四、当前优先级
+## 四、候选选择规则
 
 候选编号、当前状态、默认开关和可归因效果以
 [optimization-candidates.md](optimization-candidates.md) 为唯一总账；本文不维护第二份候选状态。
