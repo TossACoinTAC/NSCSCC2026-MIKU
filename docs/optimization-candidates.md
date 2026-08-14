@@ -1,6 +1,6 @@
 # MIKU 优化候选账本与实验状态
 
-最后同步：2026-08-14。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)。
+最后同步：2026-08-15。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)。
 
 ## 1. 状态与编号合同
 
@@ -30,9 +30,9 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 
 ## 2. 当前默认组合与本轮证据
 
-当前默认启用的主要候选包括 F01/H03 frontend turnover、B03-full、L05、L07、L08、W02、H01、Q01，以及本轮新增的 E02、FT01、FT02、FT03、BT02、MT03、BT03、WT01、FT04、MT04、FT05、WT02、FT06、MT05、WT04 与重新启用的 W01；BT04 和 WT03 作为已否决的可配置 A/B 结构保留，E01 默认关闭。WT04 节点已通过 Scala 门禁 39 suites/224 tests、Python 合同 56 项、perf20 20/20 和 func58 三 seed；最新 matching direct full 为 setup/hold `-0.589/+0.053 ns`，尚未形成时序里程碑。
+当前默认启用的主要候选包括 F01/H03 frontend turnover、B03-full、L05、L07、L08、W02、H01、Q01，以及 E02、FT01、FT02、FT03、BT02、MT03、BT03、WT01、FT04、MT04、FT05、WT02、FT06、MT05、WT04、PT01、AT01、RT01 与重新启用的 W01；BT04 和 WT03 作为已否决的可配置 A/B 结构保留，E01 默认关闭。R3 当前节点已通过 Scala 门禁 39 suites/225 tests、Python 合同 56 项、perf20 20/20 和 func58 random-AXI 三 seed；组合 direct full 尚未运行。最近 matching direct full 仍为 WT04 的 setup/hold `-0.589/+0.053 ns`，尚未形成时序里程碑。
 
-本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。L07 窄 Store completion 将其降至 `5,104,911`（增量 `-3.663820%`，几何平均 `1.038957091x`），BR01 再降至 `5,057,854`（增量 `-0.921799%`，几何平均 `1.009753745x`；相对原始 baseline 累计 `-8.768094%`），BT04 和 WT01 相对 BR01 均为 20 项逐项精确相等。各增量的逐项变化均单独记录，不能把累计收益拆分给其他候选。MT03+BT03 matching 100 MHz direct full 的 setup/hold 为 `-0.694/+0.053 ns`；L07+BR01+BT04 matching direct full 为 `-1.442/+0.050 ns`，因此 BT04 已否决。恢复 BT03 并加入 WT01 后，matching direct full 为 `-0.824/+0.056 ns`；WT01 将 recovery 驱动的 IQ 路径从 top-50 的 47 条降为 0 条，但 frontend、predictor、L1I 和 ATU 路径转为主导，R1 仍未闭合。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
+本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。L07 窄 Store completion 将其降至 `5,104,911`（增量 `-3.663820%`，几何平均 `1.038957091x`），BR01 再降至 `5,057,854`（增量 `-0.921799%`，几何平均 `1.009753745x`；相对原始 baseline 累计 `-8.768094%`），W01/FT06/MT05/WT04/PT01/AT01/RT01 节点为 `5,014,520`，逐项周期透明。R3 三候选已按线性顺序验证，尚未组合综合。各增量的逐项变化均单独记录，不能把累计收益拆分给其他候选。MT03+BT03 matching 100 MHz direct full 的 setup/hold 为 `-0.694/+0.053 ns`；L07+BR01+BT04 matching direct full 为 `-1.442/+0.050 ns`，因此 BT04 已否决。恢复 BT03 并加入 WT01 后，matching direct full 为 `-0.824/+0.056 ns`；WT01 将 recovery 驱动的 IQ 路径从 top-50 的 47 条降为 0 条，但 frontend、predictor、L1I 和 ATU 路径转为主导，R1 仍未闭合。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
 
 ## 3. 候选总表
 
@@ -46,6 +46,7 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | C06 | SUC Store 对年轻访存的程序顺序审计 | uncached Store 只在 ROB head 发出，但当前 Load order check 对地址已知且不重叠的 older Store 会放行；若该 Store 后来翻译为 SUC，年轻 uncached Load 乃至 cached Load 可能已先到 AXI。bridge 的“全局有序”只约束到达 bridge 的先后，不能恢复丢失的程序顺序 | LA32R r1p04 明确要求 SUC 访问严格按程序次序且当前访存彻底完成前不能开始下一访存；最保守修复会让 Load 等待 older Store 翻译，并在确认 SUC 后等其完成，可能降低 MLP | delayed older instruction + SUC Store A + younger SUC Load B 定向测试；扩展到 younger cached Load、不同地址、翻译未决、B backpressure、异常/flush/DBAR；记录请求到达 AXI 的实际顺序 | 已关闭 | MAT 未决和 SUC 顺序域已受定向门禁约束。 |
 | C07 | TLB mutation 与在途翻译取消协议 | `TLBWR/TLBFILL/INVTLB` 的 mutation 与 privileged redirect 同拍清空 ATU 的 I/D pending 和 response；frontend、LSQ、data-translation owner 的 flush 协议却都保留 drop/cancel token，明确等待旧 response 返回。若提交时存在已握手翻译，静态状态机会留下永久 pending 并阻止后续请求 | 这是跨模块协议的高置信度结构缺口，但尚未用系统级定向仿真复现；修复必须选择统一合同：mutation 返回带 generation 的 cancelled completion，或所有 owner 同拍显式撤销，不能让部分层等待、部分层丢包 | TLB mutation 与 I-side uTLB hit/main walk、D-side LSQ/CACOP translation 在每个拍点交叠；观察 `translationDropPending`、`translationCancelPending`、`translationOwnerValid`、后续 fetch/load 进展和 DiffTest | 已关闭 | translation completion/cancel 合同已贯通 ATU、Frontend 与 LSQ。 |
 | C08 | PS=21 大页物理地址拼接 | r1p04 的 `PS=21` entry 由 `VA[21]` 选择两个 2 MiB half，PA 应为 `{selected_PPN[19:9], VA[20:0]}`；当前实现是 `{PPN[19:10], VA[21:0]}`，把所选 PPN bit 9 替换成 VA 奇偶位。连续且 4 MiB 对齐的常见映射会掩盖问题，合法的非连续/反向 half 映射会错误 | 修正会改变当前大页行为，必须先确认 Linux/bootloader 实际 PS 与 PPN 编码，并同时核对 match、odd select、TLBRD/WR/FILL 和 INVTLB page compare；不能用常见连续 huge page 启动成功否定问题 | PS=21 的 PPN0.bit9=1/PPN1.bit9=0、不同高 PPN、奇偶 VA、ASID/global、权限/dirty/MAT、TLBRD round-trip、NEMU differential | 已关闭 | PS=21 使用所选 PPN[19:9] 与 VA[20:0] 拼接，非连续/反向 half 已覆盖。 |
+| C09 | Main TLB 复位有效位 | 32 个主 TLB entry 的 payload 未初始化且 `enabled` 未复位；Verilator 寄存器布局变化可暴露伪匹配，导致 PS=21 walker 合并错误 entry 并产生错误 PPN/invalid 异常 | 只需复位 qualification bit，不复位宽 payload；必须保证 TLBRD/搜索在软件写入前均观察到 disabled | 复位后逐项读取 32 个 entry 的 enabled 位，并回归 PS=21、TLB mutation、micro-TLB negative/positive 路径 | 已关闭 | `2bc5433` 仅复位 `enabled` 位并加入 32-entry 管理接口合同；ATU suite 10/10，之后完整门禁 39 suites/225 tests 通过。该修复不计性能收益，但阻断 AT01 的错误状态已消除。 |
 | T01 | 分区/局部化 early wakeup 与 IQ ready 网络 | 旧参考最差路径有 82.7% routing 和高扇出，说明减少跨 ROB/IQ 广播仍有机会提高 Fmax | 多一级寄存可能增加 dependent-use latency；复制比较逻辑会增加 LUT | 固定 c398 完整 SoC WNS、相关路径扇出/route delay、依赖链周期数、perf20 分项 | 讨论 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | W01 | 消除同 lane 的 registered/direct wakeup 冲突 | 每个执行 lane 的 ROB 注册唤醒优先于同拍 direct wake；连续单周期 GPR writer 会使后一条的早唤醒退化为下一拍注册唤醒。抑制已经成功 direct broadcast 的下一拍 registered echo，可把 wake lane 留给更年轻的 direct tag | 抑制协议若丢 tag 会永久死锁，且可能恶化完整 SoC 路由；首次 DIV、SC 和其他没有 direct broadcast 的变长完成必须保留 | 每 lane 冲突周期、resident/late consumer、依赖链 issue 间隔、IQ 比较器/LUT、完整 SoC WNS、perf20 分项 | 已重新验证并默认启用；待 matching route | `45512a6` 的完整门禁为 39 suites/222 tests、Python 合同 56 项；perf20 `5,056,868 -> 5,014,520`（`-0.837435%`），几何平均 `1.010598877x`，18 项改善、2 项不变、无退化。相对早期 `-0.102375%` 结果，本轮真实组合显示该候选已达到性能保留门槛；matching 物理影响待最终组合 direct full 交叉验证。 |
 | W02 | 注册 LSQ completion 的 load-use 提前唤醒 | 当前 load 在 LSQ completion 已注册后仍经 ROB 再注册一拍才唤醒 IQ；从已注册且充分校验的 load completion 提前广播 tag，下一拍可借 PRF write-through 取数，理论上缩短常见 load-use 一拍 | 必须证明 exception、flush/epoch、ROB 槽位重用、store forwarding、uncached response 下绝不假唤醒；LSQ 到全 IQ 的广播可能重建已切断的关键路径 | load completion 到 consumer issue 间隔、真实 load-use 数、ROB 校验失败/flush 重叠、L1 hit/miss 分类、WNS 与 perf20 | 已采用 | 历史独立 A/B 约 -1.219%；关闭后的 route 反而更差，当前保留。 |
@@ -122,19 +123,23 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | WT04 | LSU IQ 持久 wake 与同拍 select bypass 解耦 | 所有 registered completion wake 继续写入 LSU IQ resident/enqueue 的 source-ready；只有 ALU direct wake 与 load early wake 进入同拍 select bypass，切断 ROB staged tag 经比较/select 到宽 issue payload 的长锥 | CSR、DIV、SC、Multiply 等没有同拍 fast wake 的内存消费者可能晚一拍选择；不能丢 wake、死锁或破坏 enqueue/flush/backpressure，平均性能回退必须小于 0.5% | IssueQueue resident/enqueue/fast-bypass 测试、Backend completion/direct/load 测试、完整门禁、perf20 A/B、func58、matching IQ top-50/WNS | 已实现并默认启用；软件周期透明且物理目标达成，组合仍未闭合 | `8457b6f` 的 IssueQueue/Backend 开关 A/B 与完整 `cpu-check`（39 suites/224 tests）通过；fast direct/load wake 延迟不变，registered-only wake 持久化且最坏晚一拍选择。相对 W01+FT06+MT05，perf20 `5,014,520 -> 5,014,520`，20 项逐项精确相等、几何平均 `1.000000000x`；func58 seeds `240/255/141` 均为 58/58。matching direct full 为 setup/hold `-0.589/+0.053 ns`、setup TNS `-41.425 ns`、308 个失败 endpoint；DRC、fully-routed 和 bitstream 门禁完整。原先 38 条 ROB staged wake 到 LSU IQ 路径从 top-50 全部消失，新的 top-50 为 predictor 45、IQ 5，证明目标锥已切断，但本次整体 route 未闭合。冻结与物理证据分别见 `build/reports/experiments/R2-WT04/experiment-manifest.json`、`Post_Impl_Bundles/cpu_8457b6fc8b8a_chiplab_c398d274812f_perf_100mhz_20260815-013256/manifest.json`。 |
 | FT07 | redirect drain 同拍 replacement translation owner 安装 | redirect 后若旧 response 正在 drain，前端可在同一拍接受目标 PC 的新 translation request；owner 必须同步更新到新 PC，避免下一份有效 response 因仍与旧 owner 比较而被再次丢弃 | 必须区分 stale response 的消费和新 request 的接受；redirect 优先级、drop pending、cancel、重试及 correction PC 不能错配 | stale-drain+new-request 同拍负向测试、redirect/cancel/turnover 回归、完整门禁、perf20 A/B | 待失败测试确认的性能候选 | 静态审计发现可疑的额外 translation 重试；尚无动态失败证据和收益，先以定向测试确认。 |
 
+| PT01 | 四 lane earliest-taken predictor 选择树平衡化 | 将四 lane taken-prefix、target 和 branch type 的串行优先选择改为 lower/upper 两级平衡树；不改变 taken prefix、lane 优先级、RAS 或 translation 启动间隔，减少前端预测选择的组合深度 | 选择树的 tie-break、无 taken 默认值、target/type 配对和 call/return lane 语义必须完全保持；配置关闭时保留旧结构用于 A/B | OooFrontend 24 项、完整门禁、perf20 20/20、func58、predictor/BTB top-N、matching WNS | 已实现并默认启用；R3 候选，待组合实现 | `bc98e07`；source tree `ee02287d...`，发布 RTL hash `77c7aea1...`。OooFrontend 24/24、完整门禁 39 suites/211 tests；相对 WT04 `5,014,520 -> 5,014,520`，20 项精确相等，几何平均 `1.000000000x`。比较证据 `build/reports/comparisons/R3-PT01.json`。 |
+| AT01 | instruction direct/DMW response owner payload late select | 请求接受边界只保存 owner VA、DMW flags、MAT 和 physical segment；direct/DMW response 在可见侧从注册 owner 选择 PA/MAT，移除实时 accepted VA 到宽 response payload 的数据锥；paged/cancel 仍使用已有 completion payload | owner snapshot、TLB response、cancel/mutation 的优先级必须保持；不能增加 direct response 延迟或让 CSR/MAT 改变已握手响应 | ATU direct/DMW/backpressure/PS=21/cancel、完整门禁、perf20 20/20、func58、BTB-to-ATU top-N | 已实现并默认启用；R3 候选，待组合实现 | `11652b9`，依赖前置 C09 `2bc5433`；source tree `cb6cb9e...`。ATU suite 10/10，完整门禁 39 suites/225 tests；相对 PT01 `5,014,520 -> 5,014,520`，20 项精确相等，几何平均 `1.000000000x`。比较证据 `build/reports/comparisons/R3-AT01.json`。C09 由该候选暴露并已独立修复，不把 bug 修复收益归给 AT01。 |
+| RT01 | ROB retirement metadata state 化 | 将 `isLoad/isStore/isBranch/predictorType/loadQueueIndex/storeQueueIndex` 从宽 payload bank 移到已存在的 ROB state register；commit、LSQ 和 observer 直接读取窄热字段，减少 payload bank read/crossbar 对提交控制的参与 | allocate、flush、pointer wrap、同拍三发射和 commit lane 顺序必须保持；状态字段必须与 payload PC/exception 身份同一 ROB entry 对齐 | ROB wrap/reuse metadata 合同、完整门禁、perf20 20/20、ROB/CSR top-N、LUT/FF/BRAM、matching WNS | 已实现并默认启用；R3 候选，待组合实现 | `5646510`；新增 11 组三发射、33 entry wrap/reuse 合同；ROB suite 17/17，完整门禁 39 suites/225 tests。相对 AT01 `5,014,520 -> 5,014,520`，20 项精确相等，几何平均 `1.000000000x`。比较证据 `build/reports/comparisons/R3-RT01.json`。 |
+
 ## 4. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
 
-当前 P1 正确性 gate 已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。WT04 matching direct full 的 setup/hold 为 `-0.589/+0.053 ns`，top-50 中 predictor 占 45 条、IQ 占 5 条，仍不能晋级稳定竞赛 milestone。top-N 用于排序但不限制候选准入：能证明不增加拍数或具有受控小代价的候选，可与当前主导 predictor 路径候选进入同一线性验证批次。
+当前 P1 正确性 gate（含 C09）已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。WT04 matching direct full 的 setup/hold 为 `-0.589/+0.053 ns`，top-50 中 predictor 占 45 条、IQ 占 5 条，仍不能晋级稳定竞赛 milestone。PT01、AT01、RT01 已形成三个软件验证通过的周期透明候选；top-N 用于排序但不限制候选准入：能证明不增加拍数或具有受控小代价的候选，可与当前主导 predictor 路径候选进入同一线性验证批次。
 
-1. 本轮周期从 5,543,953 降至 WT04 节点的 5,014,520，减少 529,433（-9.549738%）；W01 相对 WT02 改善 `0.837435%`，FT06/MT05/WT04 逐项周期中性。最新 matching full setup/hold 为 `-0.589/+0.053 ns`，不满足里程碑门禁。
+1. 本轮周期从 5,543,953 降至当前 R3 节点的 5,014,520，减少 529,433（-9.549738%）；W01 相对 WT02 改善 `0.837435%`，FT06/MT05/WT04/PT01/AT01/RT01 逐项周期中性。最新已完成 matching full 仍为 WT04 的 setup/hold `-0.589/+0.053 ns`，R3 三候选尚未做组合实现，不满足里程碑门禁。
 2. P02 post-route 仅用于判断物理随机性和提取最新 top-N 路径；其结果无论是否闭合都不能晋级 Stable_Backup 或正式竞赛产物。
 3. 下一份正式 bitstream 必须从 matching RTL 直接执行一次 full implementation，并由该 run 自身满足 setup/hold、DRC、route 和 bitstream 门禁。
 4. 下一轮 IPC 候选仍优先从前端持续供给、分支训练/恢复和已量化的 load-use 暴露中选择；ROB/PRF 扩容因当前占用证据降为低优先级。
 5. 候选设计阶段同时控制寄存边界、宽 mux、高扇出和跨模块控制；任何后续 RTL 修改必须重新运行受影响 suite、完整门禁、perf20 和 func58。
-6. WT04 已通过 matching direct full，ROB staged wake 到 LSU IQ 的 38 条主导路径全部消失；新的路径墙为 BTB 输出到 ATU/PHT。下一轮先积累至少两个、通常两个至三个相对独立候选并逐个完成软件门禁，再做一次组合实现；不再以单个时序候选直接启动 Vivado。
+6. WT04 已通过 matching direct full，ROB staged wake 到 LSU IQ 的 38 条主导路径全部消失；新的路径墙为 BTB 输出到 ATU/PHT。R3 已积累 PT01、AT01、RT01 三个相对独立候选，并逐个完成定向测试、完整门禁和 perf20 A/B；下一步只对三者组合执行一次 direct full implementation，不再以单个时序候选直接启动 Vivado。
 
 ## 5. 详细说明的维护边界
 
@@ -143,9 +148,9 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 ## 6. 证据入口
 
 - 当前 RTL：`build/rtl/generation-manifest.json`。
-- 当前实验冻结：`build/reports/experiments/R2-WT04/experiment-manifest.json`。
-- 当前 perf20：`build/sim/runs/cpu_a6bd50b10c00_chiplab_c398d274812f/clean-perf20_model_3a92a428ae5d_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；WT04 相对 W01+FT06+MT05 的逐项比较为 `build/reports/comparisons/R2-WT04.json`，相对 WT02 的 W01 收益见 `build/reports/comparisons/R2-W01-reenabled.json`。
-- 当前 func58：`build/sim/runs/cpu_a6bd50b10c00_chiplab_c398d274812f/clean-func58_model_f51adf1d3182_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
+- 当前实验冻结：R3 三候选软件身份由 `R3-PT01`、`R3-AT01`、`R3-RT01` 比较证据及 matching func58 三 seed 锁定；组合 manifest 在文档状态提交后生成。
+- 当前 perf20：`build/sim/runs/cpu_9753ecebdfaf_chiplab_c398d274812f/clean-perf20_model_8b8166439cf0_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；R3 线性增量比较为 `build/reports/comparisons/R3-PT01.json`、`build/reports/comparisons/R3-AT01.json` 和 `build/reports/comparisons/R3-RT01.json`。
+- 当前 func58：`build/sim/runs/cpu_9753ecebdfaf_chiplab_c398d274812f/clean-func58_model_3797981d61e6_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`；random-AXI seeds `240/255/141` 均为 58/58。
 - 当前 instrumented perf20：`build/sim/runs/cpu_d6afe23f0dbe_chiplab_c398d274812f/instrumented-perf20_model_012e3c7fc04f_software_f6e7c20f71a4/ideal/matrix_168c541ab78a_perf20.csv`；汇总为 `build/reports/observations/R2-L07-perf20-v4.json`。
 - M01 v5 决策矩阵：`build/sim/runs/cpu_9bc200a9f6f6_chiplab_c398d274812f/instrumented-perf20_model_7b40bca59eea_software_f6e7c20f71a4/ideal/matrix_168c541ab78a_perf20.csv`；汇总为 `build/reports/observations/R2-M01-perf20-v5.json`。
 - 最新 full implementation candidate：`Post_Impl_Bundles/cpu_8457b6fc8b8a_chiplab_c398d274812f_perf_100mhz_20260815-013256/manifest.json`。

@@ -8,12 +8,12 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：当前 WT04 RTL 为 `5,014,520` cycles，20/20 pass；W01 相对 WT02
+- perf20：当前 R3 RTL 为 `5,014,520` cycles，20/20 pass；W01 相对 WT02
   减少 42,348 cycles（`-0.837435%`），几何平均加速 `1.010598877x`；BR01 相对 L07
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
   baseline `5,543,953` 累计 `-9.549738%`。
-- func58：当前 WT04 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
-- WT04 matching 100 MHz direct full implementation：setup `-0.589 ns`、hold `+0.053 ns`、
+- func58：当前 R3 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+- 最近已完成的 WT04 matching 100 MHz direct full implementation：setup `-0.589 ns`、hold `+0.053 ns`、
   setup TNS `-41.425 ns`、308 个失败 endpoint；DRC 0 error/critical warning、fully routed、
   bitstream 成功，但仍不是里程碑。placed utilization 为 87,360 LUT、54,225 FF、
   56.5 BRAM、8 DSP。
@@ -41,7 +41,7 @@
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 - `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
-  不再访问普通 Verilator 内部层级。当前 Scala 门禁为 39 suites / 224 tests，Python
+  不再访问普通 Verilator 内部层级。当前 Scala 门禁为 39 suites / 225 tests，Python
   合同为 56 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
   精确一致，全部计数器守恒 invariant 通过。`perf20-sim` 与 `func58-sim` 可通过
   `SIM_PROFILE=instrumented` 使用同一公开入口。
@@ -268,6 +268,15 @@ warning、fully routed、bitstream 成功。原先 38 条 ROB staged wake 到 LS
 全部消失，说明结构目标达成；top-50 同时转为 predictor 45 条、IQ 5 条，当前最差路径是 BTB
 bank 到 instruction ATU context。WT04 因软件周期透明且物理目标达成而继续保留，但本次未形成
 时序里程碑。
+
+R3 已积累三个时序候选并完成软件验证：`PT01 @ bc98e07` 将四 lane earliest-taken 选择改为
+平衡树；`AT01 @ 11652b9` 将 instruction direct/DMW PA/MAT 选择延后到注册 owner；
+`RT01 @ 5646510` 将 ROB 提交热 metadata 从 payload bank 移入 state。三者各自的定向测试、
+完整门禁均通过，当前门禁为 39 suites / 225 tests；三次 perf20 A/B 都是 20/20、总周期
+`5,014,520` 且逐项精确相等。AT01 暴露的 Main TLB 复位问题已由独立 `C09 @ 2bc5433`
+修复并回归，不能把正确性修复收益归给 AT01。比较证据为 `R3-PT01.json`、`R3-AT01.json`
+和 `R3-RT01.json`。R3 组合 func58 random-AXI seeds `240/255/141` 均为 58/58；
+matching direct full 尚未运行。
 
 下一轮时序工作不以单候选直接进入综合。先积累至少两个、通常两个至三个相对独立的候选，
 逐个完成定向测试、完整门禁和 perf20 A/B，再对最终组合只执行一次 direct full implementation。
