@@ -87,7 +87,7 @@ doctor:
 status:
 	@printf '%s\n' '== 根仓库 ==' && git status --short --branch
 	@for repo in chiplab nscscc-linux-kernel fpga-lab-agent; do \
-		if git -C "$$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then \
+		if test -e "$$repo/.git"; then \
 			printf '== %s ==\n' "$$repo"; git -C "$$repo" status --short --branch; \
 		else \
 			printf '== %s ==\n未初始化（运行 git submodule update --init）\n' "$$repo"; \

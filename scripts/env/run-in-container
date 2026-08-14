@@ -12,6 +12,16 @@ workdir=${CONTAINER_WORKDIR:-$workspace_root}
   exit 2
 }
 
+command -v docker >/dev/null 2>&1 || {
+  printf 'docker 不可用；请先运行 make doctor 并修复环境配置\n' >&2
+  exit 127
+}
+
+docker info >/dev/null 2>&1 || {
+  printf 'docker daemon 不可用；请先运行 make doctor 并修复环境配置\n' >&2
+  exit 125
+}
+
 host_uid=$(id -u)
 host_gid=$(id -g)
 docker run --rm --user 0 -v "$cache_volume:/cache" "$image" sh -ec \

@@ -69,3 +69,7 @@ Verilator runtime 默认最多两个，只有 `free -h` 的 `available` 和实�
 `linux-sim`、`soc-impl`、`soc-postroute-opt`、`wave` 和分模块 `clean-*`。
 `soc-postroute-opt` 仅生成探索证据。禁止直接调用系统 SBT、
 Verilator 或 ad hoc 工具路径绕过 Docker 锁。
+
+
+# 工作流约定
+必须将监视、阅读文件等简单任务交由默认模型subagent负责；将略难的任务分给terra subagent负责，sol主模型只负责调度和关键决策判断。

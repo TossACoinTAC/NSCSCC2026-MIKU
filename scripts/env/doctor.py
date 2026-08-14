@@ -12,7 +12,10 @@ import sys
 
 
 def run(*argv: str, cwd: Path | None = None) -> tuple[int, str]:
-    result = subprocess.run(argv, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    try:
+        result = subprocess.run(argv, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    except OSError as error:
+        return 127, str(error)
     return result.returncode, result.stdout.strip()
 
 
@@ -43,12 +46,24 @@ def main() -> int:
     failures = 0
 
     print(f"[信息] 工作区 {root}")
+    command_paths: dict[str, str | None] = {}
     for command in ("git", "docker", "make"):
         path = shutil.which(command)
+        command_paths[command] = path
         if path:
             print(f"[通过] {command}: {path}")
         else:
             print(f"[失败] 缺少命令: {command}")
+            failures += 1
+
+    docker_ready = False
+    if command_paths["docker"]:
+        code, payload = run("docker", "version", "--format", "{{.Server.Version}}")
+        docker_ready = code == 0 and bool(payload)
+        if docker_ready:
+            print(f"[通过] Docker daemon: {payload}")
+        else:
+            print(f"[失败] Docker daemon 不可用: {payload or 'unknown error'}")
             failures += 1
 
     if not (root / "cpu/build.sbt").is_file():
@@ -85,8 +100,8 @@ def main() -> int:
         failures += int(needed and not match)
 
     image = os.environ.get("DOCKER_IMAGE", "nscscc-dev:ubuntu24.04-v1")
-    code, _ = run("docker", "image", "inspect", image)
-    print(f"[{'通过' if code == 0 else '警告'}] Docker 镜像: {image}")
+    image_ok = docker_ready and run("docker", "image", "inspect", image)[0] == 0
+    print(f"[{'通过' if image_ok else '警告'}] Docker 镜像: {image}")
 
     vivado = Path(os.environ.get("VIVADO", "/opt/Xilinx/Vivado/2023.2/bin/vivado"))
     vivado_ok = vivado.is_file() and os.access(vivado, os.X_OK)

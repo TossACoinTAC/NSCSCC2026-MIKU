@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import shutil
 import subprocess
+import sys
+import tempfile
 import unittest
 
 
@@ -15,8 +19,15 @@ class RepositoryContractTest(unittest.TestCase):
         names = {item["name"] for item in document["repositories"]}
         self.assertEqual(names, {"chiplab", "linux-kernel", "fpga-lab-agent"})
         self.assertNotIn("submission", names)
-        self.assertTrue((ROOT / "Post_Impl_Bundles").is_dir())
-        self.assertTrue((ROOT / "Stable_Backup").is_dir())
+        for directory in ("Post_Impl_Bundles", "Stable_Backup"):
+            path = ROOT / directory
+            self.assertTrue(not path.exists() or path.is_dir())
+            ignored = subprocess.run(
+                ["git", "check-ignore", "--quiet", "--no-index", f"{directory}/evidence"],
+                cwd=ROOT,
+                check=False,
+            )
+            self.assertEqual(ignored.returncode, 0, f"{directory} must remain protected from root Git")
 
     def test_runtime_repositories_are_submodules(self) -> None:
         gitmodules = (ROOT / ".gitmodules").read_text(encoding="utf-8")
@@ -60,6 +71,54 @@ class RepositoryContractTest(unittest.TestCase):
             stderr=subprocess.STDOUT,
         )
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_doctor_reports_a_missing_docker_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executable_dir = Path(directory)
+            for command in ("git", "make"):
+                source = shutil.which(command)
+                self.assertIsNotNone(source)
+                (executable_dir / command).symlink_to(source)
+            environment = os.environ.copy()
+            environment["PATH"] = str(executable_dir)
+            environment["WORKSPACE_ROOT"] = str(ROOT)
+            result = subprocess.run(
+                [sys.executable, "scripts/env/doctor.py"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("[失败] 缺少命令: docker", result.stdout)
+        self.assertNotIn("Traceback", result.stdout)
+
+    def test_doctor_rejects_a_cli_without_a_daemon(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executable_dir = Path(directory)
+            for command in ("git", "make"):
+                source = shutil.which(command)
+                self.assertIsNotNone(source)
+                (executable_dir / command).symlink_to(source)
+            docker = executable_dir / "docker"
+            docker.write_text("#!/bin/sh\nprintf '%s\\n' 'daemon unavailable' >&2\nexit 1\n")
+            docker.chmod(0o755)
+            environment = os.environ.copy()
+            environment["PATH"] = str(executable_dir)
+            environment["WORKSPACE_ROOT"] = str(ROOT)
+            result = subprocess.run(
+                [sys.executable, "scripts/env/doctor.py"],
+                cwd=ROOT,
+                env=environment,
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+            )
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("[失败] Docker daemon 不可用: daemon unavailable", result.stdout)
 
 
 if __name__ == "__main__":

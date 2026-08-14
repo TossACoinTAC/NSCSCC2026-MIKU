@@ -58,13 +58,15 @@ using Root = Vsimu_top___024root;
 #define CLUSTER(name) SYS(NSCC_JOIN(backend__DOT__backend__DOT__, name))
 #define BACKEND(name) SYS(NSCC_JOIN(backend__DOT__backend__DOT__backend__DOT__, name))
 #define ROB(name) BACKEND(NSCC_JOIN(rob__DOT__, name))
-#define LSQ(name) CLUSTER(NSCC_JOIN(loadStoreQueue__DOT__, name))
-#define LSQ_IO(name) CLUSTER(NSCC_JOIN(loadStoreQueue_io_, name))
+#define LSQ(name) CLUSTER(NSCC_JOIN(loadStoreQueue_1__DOT__, name))
+#define LSQ_IO(name) CLUSTER(NSCC_JOIN(loadStoreQueue_1_io_, name))
 #define ATU(name) CORE(NSCC_JOIN(systemArea_addressTranslation__DOT__, name))
 #define ATU_TLB(name) ATU(NSCC_JOIN(area_tlb__DOT__, name))
 #define ISSUE(q, name) BACKEND(NSCC_JOIN(issueQueues_##q##__DOT__, name))
 #define ISSUE_COUNT(q) BACKEND(issueQueues_##q##__DOT__count)
 #define ISSUE_ENTRY(q, e, name) BACKEND(issueQueues_##q##__DOT__queue_##e##_##name)
+#define DISPATCH_WINDOW(name) BACKEND(NSCC_JOIN(dispatchWindow_1_io_, name))
+#define PREDICTOR_UPDATE_QUEUE(name) SYS(NSCC_JOIN(predictorUpdateQueue_1__DOT__, name))
 #define ISSUE_ROW(q, name) { \
     static_cast<std::uint8_t>(ISSUE_ENTRY(q, 0, name)), \
     static_cast<std::uint8_t>(ISSUE_ENTRY(q, 1, name)), \
@@ -462,7 +464,7 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
     snapshot.issue_fire = static_cast<std::uint8_t>(
         snapshot.issue_operand_valid & CLUSTER(execution_io_issueReady) & 0xfU);
     snapshot.dispatch_valid = static_cast<std::uint8_t>(
-        popcount8(static_cast<std::uint8_t>(BACKEND(dispatchWindow_io_outputValid) & 0x7U)));
+        popcount8(static_cast<std::uint8_t>(DISPATCH_WINDOW(outputValid) & 0x7U)));
     const std::uint8_t dispatch_port_valid =
         static_cast<std::uint8_t>(BACKEND(router_io_portValid) & 0xfU);
     const std::uint8_t dispatch_port_ready =
@@ -471,7 +473,7 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
 
     snapshot.committed_branch_mask = static_cast<std::uint8_t>(SYS(committedBranch) & 0x7U);
     snapshot.predictor_update_valid =
-        SYS(predictorUpdateQueue__DOT__count) != 0 &&
+        PREDICTOR_UPDATE_QUEUE(count) != 0 &&
         !SYS(frontend__DOT__targetPredictor__DOT__invalidating);
     const std::uint8_t staged_branch_valid = static_cast<std::uint8_t>(
         ROB(stagedCompletionValid) & ROB(stagedCompletionCurrent) & 0x1fU);
@@ -508,7 +510,7 @@ PerfMonitor::CycleSnapshot PerfMonitor::capture_snapshot() {
     // Restricting this to lane 0 avoids attributing prefix stalls from older
     // lanes to SDQ backpressure.
     const std::uint8_t dispatch_valid =
-        static_cast<std::uint8_t>(BACKEND(dispatchWindow_io_outputValid) & 0x7U);
+        static_cast<std::uint8_t>(DISPATCH_WINDOW(outputValid) & 0x7U);
     const bool iq3_enqueue_ready = static_cast<bool>(ISSUE(3, enqueueReadyReg));
     const bool p3_ready = (BACKEND(router_io_portReady) & (1U << 3)) != 0;
     snapshot.d01_oldest_load_candidate = !snapshot.recovery &&
