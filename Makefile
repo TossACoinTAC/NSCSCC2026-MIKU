@@ -32,6 +32,13 @@ SIM_ALLOW_THREE ?= 0
 SIM_LANE_PEAK_MB ?=
 SIM_REBUILD ?= 0
 PERF_CPU_MHZ ?= 100
+SOC_ARCHIVE_CLASS ?= auto
+SOC_BUILD_KIND ?= perf
+SOC_BUILD_DIR ?= $(BUILD_ROOT)/chiplab-$(SOC_BUILD_KIND)
+SOC_IMPL_DIR ?=
+SOC_IMPL_STAGE ?= full
+POST_ROUTE_INPUT_DCP ?= $(BUILD_ROOT)/chiplab-perf/fpga/nscscc-team/run_vivado/project/loongson.runs/impl_1/soc_top_routed.dcp
+POST_ROUTE_OUTPUT ?= $(BUILD_ROOT)/vivado/postroute-$(shell date +%Y%m%d-%H%M%S)
 CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
 PERF20_TIME_LIMIT ?= 600000000
 FUNC58_TIME_LIMIT ?= 30000000
@@ -41,9 +48,9 @@ FUNC58_WORKLOADS := func58
 CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_CACHE_VOLUME=$(DOCKER_CACHE_VOLUME) $(ROOT_DIR)/scripts/env/run-in-container
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-.PHONY: help doctor status ide-setup env-build toolchain-check \
+.PHONY: help doctor status ide-setup env-build toolchain-check docs-check \
   cpu-test cpu-test-all cpu-generate cpu-check cpu-locked-gates \
-  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-timing \
+  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
 help:
@@ -53,6 +60,7 @@ help:
 		'  make status             显示根仓库及受支持子仓库状态' \
 		'  make ide-setup          生成指向 cpu/build.sbt 的 BSP 配置' \
 		'  make env-build          构建锁定 CPU/仿真工具镜像' \
+		'  make docs-check         验证文档入口与候选账本结构' \
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
 		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
 		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
@@ -63,10 +71,13 @@ help:
 		'  make perf20-sim         完整 perf20（包含 stringsearch）' \
 		'  make linux-sim          Linux 软件仿真入口' \
 		'  make soc-impl           Vivado 宿主机完整 SoC 实现' \
+		'  make soc-postroute-opt  复用 routed DCP 做时序探索（非竞赛产物）' \
+		'  make soc-archive        校验并归档当前完整 SoC 实现' \
 		'  make wave WAVE=...      用宿主机 Surfer 查看波形' \
 		'  make clean              清理可再生构建输出，保留 IDE 状态' \
 		'  make clean-all          额外清理显式 IDE 状态' '' \
 		'路径覆盖：VIVADO_HOME VIVADO SURFER DOCKER_IMAGE JOBS SIM_LANES' \
+		'实现归档：SOC_ARCHIVE_CLASS=auto|candidate|stable SOC_BUILD_KIND=perf|func' \
 		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项'
 
 doctor:
@@ -91,6 +102,9 @@ env-build:
 
 toolchain-check: env-build
 	@$(CONTAINER_RUN) sh -ec 'java -version; sbt --version; verilator --version; yosys -V; loongarch32r-linux-gnusf-gcc --version | head -n 1'
+
+docs-check:
+	@python3 scripts/common/check_docs.py
 
 cpu-test:
 	@test -n "$(strip $(CPU_TEST))" || { printf 'CPU_TEST 必须是完整 suite 名称\n' >&2; exit 2; }
@@ -131,7 +145,7 @@ cpu-locked-gates: cpu-generate
 		--ports "$(CPU_DIR)/reference/core-top.ports.json" --rtl "$(BUILD_ROOT)/rtl/mycpu_top.v" \
 		--out-dir "$(BUILD_ROOT)/gates/yosys" --yosys /usr/bin/yosys
 
-cpu-check: cpu-test-all cpu-generate cpu-locked-gates
+cpu-check: cpu-test-all cpu-generate cpu-locked-gates docs-check
 	@$(CONTAINER_RUN) python3 -I -m unittest discover \
 		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
 
@@ -181,10 +195,31 @@ wave:
 soc-impl: cpu-generate
 	@VIVADO="$(VIVADO)" PERF_CPU_MHZ="$(PERF_CPU_MHZ)" \
 		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-perf"
+	@$(MAKE) soc-archive SOC_BUILD_KIND=perf SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
 
 soc-func: cpu-generate
 	@VIVADO="$(VIVADO)" PERF_CPU_MHZ=32.726797 \
 		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-func"
+	@$(MAKE) soc-archive SOC_BUILD_KIND=func PERF_CPU_MHZ=32.726797 SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
+
+soc-postroute-opt:
+	@VIVADO="$(VIVADO)" scripts/vivado/post_route_opt.sh \
+		"$(ROOT_DIR)" "$(POST_ROUTE_INPUT_DCP)" "$(POST_ROUTE_OUTPUT)" \
+		"$(SOC_BUILD_KIND)" "$(PERF_CPU_MHZ)"
+	@$(MAKE) soc-archive SOC_BUILD_KIND="$(SOC_BUILD_KIND)" \
+		SOC_BUILD_DIR="$(BUILD_ROOT)/chiplab-$(SOC_BUILD_KIND)" \
+		SOC_IMPL_DIR="$(POST_ROUTE_OUTPUT)" SOC_IMPL_STAGE=postroute \
+		SOC_ARCHIVE_CLASS=candidate PERF_CPU_MHZ="$(PERF_CPU_MHZ)"
+
+soc-archive:
+	@case "$(SOC_BUILD_KIND)" in perf|func) ;; *) \
+		printf 'SOC_BUILD_KIND 必须是 perf 或 func\n' >&2; exit 2 ;; esac
+	@python3 scripts/vivado/archive.py --root "$(ROOT_DIR)" \
+		--build-dir "$(SOC_BUILD_DIR)" \
+		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
+		--kind "$(SOC_BUILD_KIND)" --requested-mhz "$(PERF_CPU_MHZ)" \
+		--class "$(SOC_ARCHIVE_CLASS)" --stage "$(SOC_IMPL_STAGE)" \
+		$(if $(strip $(SOC_IMPL_DIR)),--impl-dir "$(SOC_IMPL_DIR)",)
 
 soc-timing:
 	@find "$(BUILD_ROOT)" -name timing_summary.rpt -print | sort | tail -1 | xargs -r rg -n "WNS|TNS|Slack|Timing"

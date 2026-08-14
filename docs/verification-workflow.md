@@ -24,9 +24,13 @@
 6. **性能归因**：保存每项 cycles、end reason、模型 hash 和 seed。对前端、后端、
    LSU/cache、memory/AXI、DIV 和 predictor 只使用同一 baseline 的 paired A/B；
    不用几何平均掩盖单项退化。
-7. **实现验证**：性能候选使用 100 MHz clean SoC implementation；功能里程碑补做
+7. **实现验证**：性能候选使用 100 MHz clean SoC full implementation；功能里程碑补做
    function implementation。保存 DRC、setup/hold WNS/TNS、top failing endpoints、
-   LUT/FF/BRAM/DSP、requested/actual clock 和 bitstream hash。
+   LUT/FF/BRAM/DSP、requested/actual clock 和 bitstream hash。若 full route 已 fully routed、
+   hold/DRC/bitstream 完整，只有 setup 小幅未闭合且路径以物理布线为主，才进入条件子阶段
+   `make soc-postroute-opt`；它必须复用同一 DCP/RTL/时钟身份，并重新完成 timing、DRC、
+   route status 和探索证据归档。post-route 不改变 DUT 周期证据，也不是每轮必跑阶段；
+   它产生的 DCP/bitstream 只用于分析物理收敛空间，不能成为正式竞赛产物。
 8. **板测交接**：只把本地 gates、仿真和 matching Vivado 产物交给团队板流；记录
    LabAgent job、UART/VIO、结果和 artifact hash。板卡队列冲突是基础设施结果，不能
    当作 DUT 通过或失败。
@@ -50,9 +54,10 @@ CPU 修改
        |-> 完整 perf20 seeds
        `-> Linux/随机 AXI 窗口
   -> 结果汇总与候选比较
-  -> 一次 matching Vivado implementation
-  -> 时序/资源记录
-  -> 板测交接
+  -> 一次 matching Vivado full implementation
+       |-> full RTL-to-bit 时序/DRC/资源签核与自动归档 -> 板测交接
+       `-> [条件] 同网表 post-route physical exploration
+            `-> 路径信息反馈给下一轮 RTL/实现策略
 ```
 
 同一轮可以累积多个高优先级、相互独立的候选，再做一次综合；但每项仍保留独立
@@ -109,7 +114,27 @@ harness 可构建，不能替代运行验证；超时首先与软件启动成本
 model hash。每个候选 manifest 至少包含 CPU source、RTL、software、clock、功能结果、
 实现报告和对应 hash。旧实现或旧 Chiplab 的 WNS 只能作为历史参考。
 
+完整 SoC 实现成功返回后由 `make soc-archive` 校验并归档。默认 `auto` 分类只允许从当前
+RTL 直接执行一次完整 implementation（`implementation_stage=full`），并同时满足 setup/hold
+非负、routed DRC 0 error/critical warning、fully routed 和 bitstream 完整的实现进入
+`Stable_Backup/`；其余已产生完整报告的实现进入 `Post_Impl_Bundles/`。归档身份来自
+`build/rtl/generation-manifest.json`，并再次核对根发布 RTL 与 Vivado staging RTL 的哈希，
+不能用归档时的文档 HEAD 冒充生成 RTL 的源码提交。归档采用临时目录加原子改名；同一
+实现再次归档时，先核对 RTL 与 bitstream hash，再幂等补录新增的 top-N、route status 或
+资源报告，不覆盖身份不同的证据。
+
+`make soc-postroute-opt` 复用现有 fully-routed DCP 执行 `AggressiveExplore`，不重新生成 RTL、
+不改变周期结果。它把输出写入独立的 `build/vivado/postroute-*`，重新生成 setup/hold、限定
+`cpu_clk` 的 top-50、DRC、route status、资源、DCP 和探索用 bitstream。归档器无条件将
+`implementation_stage=postroute` 标为 `competition_eligible=false` 并放入
+`Post_Impl_Bundles/`；即使 slack 非负，也不能进入 `Stable_Backup/` 或作为竞赛 sign-off。
+post-route 结果只用于识别物理随机性、路径簇和下一轮 RTL/实现策略；正式竞赛 bitstream
+必须由对应 RTL 从头执行一次 full implementation，且该次 full run 自身满足全部门禁。
+
 ## 四、当前优先级
+
+候选编号、当前状态、默认开关和可归因效果以
+[optimization-candidates.md](optimization-candidates.md) 为唯一总账；本文不维护第二份候选状态。
 
 Linux 正确性和已稳定的 cache/TLB/AXI 语义是硬门槛。发现新的取消/完成、epoch、
 forwarding、dirty writeback 或 uncached ordering 问题时，即使只来自一个定向测试，也

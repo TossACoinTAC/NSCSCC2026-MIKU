@@ -32,7 +32,10 @@ LabAgent 并保存可追溯结果。
 修改前先检查根仓库和目标仓库的 branch、HEAD、dirty 状态。保留用户已有
 改动，不用 reset、checkout 或宽范围删除来“整理”工作树。每个性能候选
 都要记录源码树 hash、生成 RTL hash、软件 hash、seed、周期、频率、资源和
-setup/hold WNS/TNS；不能把旧 RTL 的时序或性能证据带到新 RTL。
+setup/hold WNS/TNS；不能把旧 RTL 的时序或性能证据带到新 RTL。后布线物理
+优化只用于探索路径与物理收敛空间，其 DCP 和 bitstream 不具备正式竞赛产物资格；
+正式 bitstream 必须由 matching RTL 从头执行一次完整 implementation，并由该次 run
+自身满足功能、时钟、setup/hold、DRC 和 fully-routed 门禁。
 
 SpinalHDL 是 RTL 唯一来源，禁止手改生成的 `build/rtl/mycpu_top.v`。公开
 `core_top`、AXI、debug/commit、reset 和 `TLBNUM=32` 接口保持兼容。Vivado
@@ -63,5 +66,6 @@ Verilator runtime 默认最多两个，只有 `free -h` 的 `available` 和实�
 
 使用根 `Makefile`：`doctor`、`status`、`ide-setup`、`cpu-test`、`cpu-check`、
 `cpu-generate`、`sim-prepare`、`sim-matrix`、`func58-sim`、`perf20-sim`、
-`linux-sim`、`soc-impl`、`wave` 和分模块 `clean-*`。禁止直接调用系统 SBT、
+`linux-sim`、`soc-impl`、`soc-postroute-opt`、`wave` 和分模块 `clean-*`。
+`soc-postroute-opt` 仅生成探索证据。禁止直接调用系统 SBT、
 Verilator 或 ad hoc 工具路径绕过 Docker 锁。

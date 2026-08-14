@@ -52,4 +52,8 @@ fi
   "$vivado" -mode batch -source bit.tcl -tclargs "$mode" "$mhz"
 )
 
+impl_dir="$run_dir/project/loongson.runs/impl_1"
+"$vivado" -mode batch -source "$workspace/scripts/vivado/report_impl.tcl" \
+  -tclargs "$impl_dir/soc_top_routed.dcp" "$impl_dir"
+
 printf 'Vivado 完成: mode=%s requested_mhz=%s build=%s\n' "$mode" "$mhz" "$build_dir"
