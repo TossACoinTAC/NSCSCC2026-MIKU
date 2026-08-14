@@ -633,11 +633,12 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
       (decoded.isLoad || decoded.isStore)
     val isBarrier = ExecutionUnitType.isBarrier(decoded.fuType)
     val direct = !isMultiply && !isDivide && !usesAgu && !isBarrier
+    val portAvailable = Bool()
     if (port == dividePort) {
       // The divider result and direct ALU result share this writeback lane.
       // Hold a direct issue for one cycle when an older divide completes so
       // the mux below cannot silently discard the direct completion.
-      io.issueReady(port) := !io.flush && Mux(
+      portAvailable := Mux(
         isDivide,
         divider.io.ready,
         !divider.io.completionValid
@@ -647,21 +648,30 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
         // The router can only send real Loads/Stores to this lane. PRELD uses
         // an ALU lane, so completion arbitration cannot feed back into LSU
         // issue readiness.
-        io.issueReady(port) := !io.flush && io.aguReady
+        portAvailable := io.aguReady
       } else {
-        io.issueReady(port) := !io.flush && Mux(
+        portAvailable := Mux(
           usesAgu,
           io.aguReady,
           !io.loadStoreCompletionValid
         )
       }
     } else if (port == csrPort) {
-      io.issueReady(port) := !io.flush && barrierPortAvailable
+      portAvailable := barrierPortAvailable
     } else {
-      io.issueReady(port) := !io.flush
+      portAvailable := True
     }
+    io.issueReady(port) := !io.flush && portAvailable
 
     val fire = io.issueValid(port) && io.issueReady(port)
+    // A recovery clears every IQ before any wakeup mutation becomes visible.
+    // Keep the recovery signal out of the wide wakeup/select cone while the
+    // architectural completion path remains qualified by the real fire.
+    val wakeCandidate = if (config.enableFlushDecoupledDirectWakeup) {
+      io.issueValid(port) && portAvailable
+    } else {
+      fire
+    }
     val systemReadResult = Bits(config.xlen bits)
     systemReadResult := io.systemReadData
     when(decoded.systemOperation === SystemOperation.counterId) { systemReadResult := io.timerId }
@@ -712,18 +722,18 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
     directCompletion(port).branchTaken := branchTaken
     directCompletion(port).branchTarget := resolvedTarget
     directCompletion(port).branchMispredict := branchMispredict
-    // Only one-cycle operations and the fixed-latency multiplier may wake when
-    // the issue port accepts them. Keep flush out of this narrow event: IQ
-    // flush has priority over ready-bit updates. The shared DIV lane still
-    // suppresses a direct wake while its older divide completion owns the lane.
+    // Only one-cycle operations and the fixed-latency multiplier may wake.
+    // During recovery this is an invisible candidate: IQ flush has priority
+    // over ready bits, enqueue and output visibility. The shared DIV lane still
+    // suppresses a candidate while its older divide completion owns the lane.
     val singleCycleWake = if (port == dividePort) {
-      fire && direct && !divider.io.completionValid &&
+      wakeCandidate && direct && !divider.io.completionValid &&
       directCompletion(port).writesPdst
     } else {
-      fire && direct && directCompletion(port).writesPdst
+      wakeCandidate && direct && directCompletion(port).writesPdst
     }
     val fixedLatencyWake = if (port == multiplyPort) {
-      fire && (direct || isMultiply) && directCompletion(port).writesPdst
+      wakeCandidate && (direct || isMultiply) && directCompletion(port).writesPdst
     } else {
       singleCycleWake
     }

@@ -731,6 +731,49 @@ class OooExecutionClusterSpec extends AnyFunSuite {
       }
   }
 
+  test("recovery can be removed from the direct wake candidate without accepting work") {
+    for ((decoupled, name, seed) <- Seq(
+        (false, "fire-qualified", 0x4c69),
+        (true, "flush-decoupled", 0x4c6a)
+      )) {
+      val testConfig = config.copy(enableFlushDecoupledDirectWakeup = decoupled)
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-execution-cluster-wake-$name"
+        )
+        .compile(new OooDivideCompletionCollisionProbe(testConfig))
+        .doSim(s"ooo-execution-cluster-wake-$name", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          dut.io.instruction #= BigInt("039b658c", 16) // ori r12, r12, imm
+          dut.io.source1 #= 0
+          dut.io.source2 #= 0
+          dut.io.robPointer #= 6
+          dut.io.recoveryEpoch #= 0
+          dut.io.pdst #= 11
+          dut.io.issueValid #= true
+          dut.io.flush #= true
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          sleep(1)
+
+          assert(!dut.io.issueReady.toBoolean)
+          assert(!dut.io.completionValid.toBoolean)
+          assert(dut.io.directWakeupValid.toBoolean == decoupled)
+
+          dut.clockDomain.waitSampling()
+          dut.io.flush #= false
+          sleep(1)
+          assert(dut.io.issueReady.toBoolean)
+          assert(dut.io.directWakeupValid.toBoolean)
+          assert(dut.io.directWakeupPdst.toBigInt == 11)
+          assert(dut.io.completionValid.toBoolean)
+          assert(dut.io.completionRobPointer.toBigInt == 6)
+        }
+    }
+  }
+
   test("the active divider implements all DIV/MOD modes and flushes every iteration") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-execution-cluster")
