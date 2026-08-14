@@ -230,9 +230,11 @@ matching route 交叉验证，不按 IPC 候选的 `0.5%` 门槛宣称收益。�
 `stagedPdst_1` 驱动 LSU IQ 输出 payload，说明下一批应优先处理 divider 共享 lane 的重复
 wake echo，同时允许有严格 owner/context 等价证明的非 top-N 周期透明候选一并验证。
 
-下一批候选按线性节点验证，不枚举组合：优先重新启用并复核只抑制真实 direct-wake echo
-的 `W01`，它保留首次 DIV、SC 和其他变长完成；另行评估 multiplier 独立 writeback lane 的
-重复 echo。前端 translation response VA 与已注册 translation owner PC、ATU instruction
+下一批候选按线性节点验证，不枚举组合。`W01 @ 45512a6` 已重新启用并完成验证：首次
+DIV、SC 和其他变长完成继续保留，完整 perf20 从 `5,056,868` 降至 `5,014,520`
+（`-0.837435%`），18 项改善、2 项不变、无退化；其 matching 物理影响留给本批最终 direct
+full 交叉验证。当前正在单独评估 multiplier 独立 writeback lane 的重复 echo。前端
+translation response VA 与已注册 translation owner PC、ATU instruction
 response identity 与已注册 context 是两个不增加拍数即可去掉实时输入依赖的候选，即使未
 进入当前 top-50，也按周期透明合同进入本批。redirect drain 同拍接收新 translation 时的
 owner 安装问题单列为性能候选，必须先用定向失败测试确认机会与正确语义。
