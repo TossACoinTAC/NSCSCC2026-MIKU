@@ -1365,10 +1365,15 @@ class LoadStoreQueueSpec extends AnyFunSuite {
   }
 
   test("a single older covering store forwards to a younger load") {
-    SimConfig.withVerilator
-      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-lsq")
-      .compile(new LoadStoreQueueProbe(config))
-      .doSim("ooo-lsq-store-forwarding", 0x4c52) { dut =>
+    for (banked <- Seq(false, true)) {
+      val testConfig = config.copy(enableBankedLoadForwardCompletion = banked)
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-lsq-forward-$banked"
+        )
+        .compile(new LoadStoreQueueProbe(testConfig))
+        .doSim(s"ooo-lsq-store-forwarding-$banked", if (banked) 0x4c53 else 0x4c52) { dut =>
         dut.clockDomain.forkStimulus(period = 10)
         clearInputs(dut)
         dut.clockDomain.assertReset()
@@ -1413,6 +1418,7 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         assert(dut.io.loadWakeupRecoveryEpoch.toBigInt == 0)
         assert(!dut.io.dataRequestValid.toBoolean)
       }
+    }
   }
 
   test("an older Store completion wins a collision with younger Load forwarding") {

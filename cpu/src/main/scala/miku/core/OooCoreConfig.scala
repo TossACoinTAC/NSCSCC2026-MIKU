@@ -95,6 +95,7 @@ final case class OooCoreConfig(
     enableLsuRegisteredWakeSelectDecoupling: Boolean = true,
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableBalancedIssueSelection: Boolean = true,
+    enableBankedLoadForwardCompletion: Boolean = true,
     enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,
     enableBranchHeadCompletionBypass: Boolean = true,

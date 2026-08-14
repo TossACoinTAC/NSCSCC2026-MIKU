@@ -627,7 +627,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   aguFire := io.aguValid && io.aguReady
   val aguExceptionCapture = aguFire && aguMisaligned
 
-  val generatedCompletionValid = responseAccepted || forwardFire ||
+  val generatedCompletionValid = responseAccepted ||
+    (if (config.enableBankedLoadForwardCompletion) False else forwardFire) ||
     storeCompletionFire || translationCompletionFire || aguExceptionCompletionReady
   val generatedCompletion = Completion(config)
   val generatedCompletionIsLoad = Bool()
@@ -666,21 +667,23 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       generatedCompletion.exception.badVAddr := responseLoadVirtualAddress
     }
   }.elsewhen(forwardFire) {
-    generatedCompletionIsLoad := True
-    generatedCompletion.robPointer := scheduledLoad.robPointer
-    generatedCompletion.recoveryEpoch := scheduledLoad.recoveryEpoch
-    generatedCompletion.pdst := scheduledLoad.pdst
-    generatedCompletion.writesPdst := scheduledLoad.writesPdst
-    generatedCompletion.data := formatLoad(
-      formatStore(
-        stores(forwardingId).writeData,
-        stores(forwardingId).virtualAddress,
-        stores(forwardingId).size
-      ),
-      scheduledLoad.virtualAddress,
-      scheduledLoad.size,
-      scheduledLoad.signExtend
-    )
+    if (!config.enableBankedLoadForwardCompletion) {
+      generatedCompletionIsLoad := True
+      generatedCompletion.robPointer := scheduledLoad.robPointer
+      generatedCompletion.recoveryEpoch := scheduledLoad.recoveryEpoch
+      generatedCompletion.pdst := scheduledLoad.pdst
+      generatedCompletion.writesPdst := scheduledLoad.writesPdst
+      generatedCompletion.data := formatLoad(
+        formatStore(
+          stores(forwardingId).writeData,
+          stores(forwardingId).virtualAddress,
+          stores(forwardingId).size
+        ),
+        scheduledLoad.virtualAddress,
+        scheduledLoad.size,
+        scheduledLoad.signExtend
+      )
+    }
   }.elsewhen(storeCompletionFire) {
     generatedCompletion.robPointer := headStore.robPointer
     generatedCompletion.recoveryEpoch := headStore.recoveryEpoch
@@ -738,6 +741,67 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       responseLoadPhysicalAddress(31 downto 1).asBits ## responseLoadUncached.asBits
   }
 
+  val bankedForwardCompletionValid = Bool()
+  val bankedForwardCompletion = Completion(config)
+  val bankedForwardWakeupEpochCurrent = Bool()
+  if (config.enableBankedLoadForwardCompletion) {
+    val valid = RegInit(False)
+    val selectedStore = Reg(Bits(config.storeQueueEntries bits)) init (0)
+    val robPointer = Reg(UInt(config.robPointerWidth bits)) init (0)
+    val recoveryEpoch = Reg(UInt(config.recoveryEpochWidth bits)) init (0)
+    val pdst = Reg(UInt(config.physicalRegIndexWidth bits)) init (0)
+    val writesPdst = RegInit(False)
+    val epochCurrent = RegInit(False)
+    val dataBanks = Vec.fill(config.storeQueueEntries)(Reg(Bits(config.xlen bits)))
+
+    selectedStore := forwardingStore
+    robPointer := scheduledLoad.robPointer
+    recoveryEpoch := scheduledLoad.recoveryEpoch
+    pdst := scheduledLoad.pdst
+    writesPdst := scheduledLoad.writesPdst
+    epochCurrent := scheduledLoad.recoveryEpoch === io.currentRecoveryEpoch
+    for (entry <- 0 until config.storeQueueEntries) {
+      dataBanks(entry) := formatLoad(
+        formatStore(
+          stores(entry).writeData,
+          stores(entry).virtualAddress,
+          stores(entry).size
+        ),
+        scheduledLoad.virtualAddress,
+        scheduledLoad.size,
+        scheduledLoad.signExtend
+      )
+    }
+    when(io.flush) {
+      valid := False
+    }.otherwise {
+      valid := forwardFire
+    }
+
+    bankedForwardCompletionValid := valid
+    bankedForwardCompletion.robPointer := robPointer
+    bankedForwardCompletion.recoveryEpoch := recoveryEpoch
+    bankedForwardCompletion.pdst := pdst
+    bankedForwardCompletion.writesPdst := writesPdst
+    bankedForwardCompletion.data := dataBanks(OHToUInt(selectedStore))
+    bankedForwardCompletion.sideEffectData := 0
+    bankedForwardCompletion.exception.valid := False
+    bankedForwardCompletion.exception.ecode := 0
+    bankedForwardCompletion.exception.esubcode := 0
+    bankedForwardCompletion.exception.badVAddrValid := False
+    bankedForwardCompletion.exception.badVAddr := 0
+    bankedForwardCompletion.exception.tlbRefill := False
+    bankedForwardCompletion.branchResolved := False
+    bankedForwardCompletion.branchTaken := False
+    bankedForwardCompletion.branchTarget := 0
+    bankedForwardCompletion.branchMispredict := False
+    bankedForwardWakeupEpochCurrent := epochCurrent
+  } else {
+    bankedForwardCompletionValid := False
+    bankedForwardWakeupEpochCurrent := False
+    clearCompletion(bankedForwardCompletion)
+  }
+
   val completionValid = RegInit(False)
   val completion = Reg(Completion(config))
   val completionLoadWakeup = RegInit(False)
@@ -754,7 +818,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // Keep the direct path compact: ordinary Stores have no destination data or
   // exception payload. Any exceptional, SC, uncached, or collision case keeps
   // using the fully registered completion path below.
-  val fastStoreCompletionValid = fastStoreCompletionCandidate && !completionValid
+  val fastStoreCompletionValid = fastStoreCompletionCandidate && !completionValid &&
+    !bankedForwardCompletionValid
   val fastStoreCompletionRobPointer = Mux(
     translatedFastStore,
     translationOwnerRobPointer,
@@ -822,15 +887,25 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     // from being replicated onto every completion payload register.
     completion := generatedCompletion
   }
-  io.completionValid := completionValid
+  io.completionValid := completionValid || bankedForwardCompletionValid
   io.completion := completion
+  when(bankedForwardCompletionValid) {
+    io.completion := bankedForwardCompletion
+  }
   io.storeCompletionBypassValid := fastStoreCompletionValid
   io.storeCompletionBypass.robPointer := fastStoreCompletionRobPointer
   io.storeCompletionBypass.recoveryEpoch := fastStoreCompletionRecoveryEpoch
-  io.loadWakeupValid := completionValid && completionLoadWakeup
+  io.loadWakeupValid := (completionValid && completionLoadWakeup) ||
+    (bankedForwardCompletionValid && bankedForwardCompletion.writesPdst &&
+      bankedForwardCompletion.pdst =/= 0)
   io.loadWakeupPdst := completion.pdst
   io.loadWakeupRecoveryEpoch := completion.recoveryEpoch
   io.loadWakeupEpochCurrent := completionLoadWakeupEpochCurrent
+  when(bankedForwardCompletionValid) {
+    io.loadWakeupPdst := bankedForwardCompletion.pdst
+    io.loadWakeupRecoveryEpoch := bankedForwardCompletion.recoveryEpoch
+    io.loadWakeupEpochCurrent := bankedForwardWakeupEpochCurrent
+  }
 
   loadReleaseValid := B(0, config.commitWidth bits)
   storeReleaseValid := B(0, config.commitWidth bits)
