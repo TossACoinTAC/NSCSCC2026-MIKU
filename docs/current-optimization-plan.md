@@ -8,10 +8,13 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：`5,306,558` cycles，20/20 pass。
-- func58：random-AXI seeds `240/255/141` 通过。
-- 100 MHz direct full implementation：setup `-0.552 ns`、hold `+0.018 ns`、DRC
-  0 error/critical warning、fully routed、bitstream 成功。
+- perf20：`5,299,059` cycles，20/20 pass。
+- func58：R1 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58 通过。
+- R1 matching 100 MHz direct full implementation：setup `-0.466 ns`、hold `+0.050 ns`、DRC
+  0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
+- 相对上一份 direct full，setup 改善 `0.086 ns`；CPU 层次 LUT `76,873 -> 77,789`
+  （`+916`）、FF `39,941 -> 40,083`（`+142`）。最新 setup top-50 全部属于 IQ，
+  平均 route 占比 `83.52%`，说明下一步应继续切断 IQ 宽 payload 的资格控制锥。
 - post-route `-0.055 ns` 只用于识别路径族，不是正式产物。
 
 本阶段固定 100 MHz，不做升频探索。先让 direct full implementation 闭合，再把正 WNS
@@ -58,8 +61,13 @@ fully routed 和 bitstream 成功。正 WNS 不用于升频。
   平均性能门槛和 direct implementation 判定。
 - `FT03 @ e14957a`：OooFrontend 定向 23 项和完整 `cpu-check` 通过；taken 后的年轻
   lane 只写入不可见槽位，`count/tail` 继续定义唯一可见前缀。perf20 相对 FT02 20 项
-  逐项精确相等，总周期 `5,299,059`、几何平均 `1.000000000x`。R1 RTL 节点已完成，
-  下一步运行最终 func58 三 seed 和一次 direct full implementation。
+  逐项精确相等，总周期 `5,299,059`、几何平均 `1.000000000x`。
+- R1 首批组合的 func58 seeds `240/255/141` 均为 58/58；direct full 为 setup
+  `-0.466 ns`、hold `+0.050 ns`、fully routed、DRC 0 error/critical warning 且 bitstream
+  成功。该结果比旧 direct full 改善 `0.086 ns`，但尚未满足 setup 门禁，不能晋级。
+- 下一增量为 `BT02`：固定 IQ 宽 payload 的物理槽，只压缩窄年龄索引，消除
+  `issueReady/redirect -> queue payload CE`。完成定向、完整门禁和 perf20 后，再执行下一次
+  direct full；允许小于 `0.5%` 的平均性能回退，但必须记录并和时序收益交叉验证。
 
 ## IPC 第 1 至第 3 轮
 
