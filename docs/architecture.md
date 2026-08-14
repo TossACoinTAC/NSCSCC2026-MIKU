@@ -2,9 +2,10 @@
 
 ## 1. 目的与边界
 
-本文是 `cpu/` 当前乱序核的持续学习记录，也是性能优化候选账本。它记录
-已经由 RTL 或实现报告支持的事实、教学讨论采用的假设，以及仍需实验验证的优化
-方向。它不是 RTL 规格；当前可执行门禁、测试影响清单和工具锁分别见
+本文是 `cpu/` 当前乱序核的持续学习记录。候选编号、状态、实测效果和下一轮优先级由
+[optimization-candidates.md](optimization-candidates.md) 单独维护；本文只保留已经由 RTL 或
+实现报告支持的事实、教学讨论采用的假设及机制推导。它不是 RTL 规格；当前可执行门禁、
+测试影响清单和工具锁分别见
 `Makefile`、`cpu/tests/manifest.yml` 与 `cpu/reference/manifest.lock`。历史验证状态已原样
 保存在 `docs/archive/nscscc-cpu-final-docs/refactor/status.yml`，仅用于解释旧候选。
 
@@ -23,7 +24,8 @@ reset 接口名称不受这次内部命名规范化影响。
   gap 项；这使它们从教学假设变成当前 RTL 事实；
 - 当前证据仍只到 Linux 5.14 early console/memory initialization，没有 shell，因此不能
   把局部语义闭环或无 DiffTest mismatch 扩大成 Linux 验收完成；
-- 本文新发现的 `C01-C08` 是在 gap audit 之外的二次静态审计问题，仍需定向证明或修复。
+- 在 gap audit 之外发现的 `C01-C08` 已完成定向修复或协议证明；其长期回归责任见
+  [optimization-candidates.md](optimization-candidates.md)。
 
 本次 2nd pass 的语义审计区间为 CPU
 `d9bab16ef46540eb3348b0781afc4d0949f28adc..6bbca9b330ba8d886c888e2804f70b95be18e4cd`，
@@ -48,15 +50,15 @@ T = cycle_count / f_cpu
 
 | 项目 | 当前证据 |
 | --- | --- |
-| CPU checkout | `dev/ECHO`；2nd-pass 语义终点 `6bbca9b...`；本次证据快照观察到的后续提交截至 `872bbd4...`，均未改变 Scala/生成 RTL 语义 |
-| 当前 RTL 身份 | source `60fba481888a...`；implementation change `6bbca9b330ba...`；generated RTL SHA-256 `137657aa0c59...` |
+| CPU checkout | `dev/ECHO`；当前候选 RTL 源码冻结于 `013db4902e57...`，其后只整理文档与 harness |
+| 当前 RTL 身份 | CPU source tree SHA-256 `36a07dccff81...`；raw RTL `048e5e0974e9...`；published RTL `9939004de078...` |
 | 固定 Chiplab | `c398d274812f164d387146fa7d8f612a4a1296d9`（官方 `nscscc2026`） |
-| 当前本地 perf 实现 | CPU source `60fba481...` + Chiplab `c398d274...`，实际 100 MHz；setup/hold 闭合并生成 bitstream；归档已标记 stable，但 44 ps 仍不是稳定的超频余量 |
-| 同平台历史实现 | CPU `8594150f...` + Chiplab `c398d274...`，100 MHz，setup `-0.225 ns`；只作前一网表参考 |
-| 更早参考实现 | CPU `d9bab16e...` + 已淘汰 Chiplab `68c20a5...`，不能作为当前 CI 时序证据 |
+| 当前本地 perf 实现 | matching 100 MHz full implementation 已完成：setup `-0.552 ns` / `-116.580 ns`、hold `+0.018 ns` / `0 ns`、DRC 0 error/critical warning、fully routed、bitstream 成功；因 setup 未闭合，只归档为 candidate |
+| 历史物理优化参考 | `627aca6... + c398d274...` 的同网表 post-route 曾得到 setup `+0.009 ns`、hold `+0.012 ns`、DRC 0 和探索用 bitstream；按当前合同只作路径参考，不是正式竞赛产物 |
+| 更早参考实现 | `60fba481... + c398d274...` 的 setup `+0.044 ns` 及 `d9bab16... + 68c20a5...` 均为历史网表证据 |
 | 器件 / 工具 | `xc7a200tfbg676-2` / Vivado 2023.2 |
-| Linux 状态 | clean official-equivalent Verilator 到 24,999,995 cycles 无 mismatch；已有 Linux 5.14 early console/memory initialization；没有 shell |
-| 当前候选板测 | matching RTL 已通过团队板 func58 58/58 和 perf20 20/20；这不是 official CI，也没有 Linux shell 板测证据 |
+| Linux 状态 | 历史候选已有 Linux 5.14 early console/memory initialization；当前 RTL 本轮未重跑 Linux，且仍没有 shell 验收 |
+| 当前候选板测 | 板侧服务器暂不可用；当前 RTL 没有 matching 板测证据 |
 
 ### 2.2 宽度与容量
 
@@ -65,10 +67,10 @@ T = cycle_count / f_cpu
 | Fetch / decode / rename / dispatch | 4 / 3 / 3 / 3 |
 | Issue / writeback / commit | 4 / 5 / 3 |
 | 物理寄存器 / ROB | 64 / 32 |
-| Instruction buffer / dispatch queue | 8 / 8 |
+| Instruction buffer / dispatch queue | 16 / 8 |
 | 每端口 IQ | 8，共 4 个独立队列 |
 | LDQ / STQ / store-data queue | 8 / 8 / 8 |
-| L1I / L1D | 各 8 KiB，2-way，64 sets，64 B line |
+| L1I / L1D | 各 16 KiB，2-way，128 sets，64 B line |
 | 共享 L2 | 64 KiB，2-way，512 sets，64 B line |
 | MSHR | 4 |
 | TLB | 32 entries |
@@ -84,18 +86,32 @@ T = cycle_count / f_cpu
 
 ### 2.3 完整 SoC 时序与资源
 
-下表区分当前固定平台实现、同平台上一候选和旧平台参考。三者的 CPU、system、DDR
-目标时钟均为 100、100、200 MHz，但 WNS、布局和关键路径不能互相继承。
+当前候选的 matching 100 MHz full implementation 已完成。CPU、system、DDR 实际时钟为
+100、100、200 MHz；bitstream 与 fully-routed DCP 均已产生，hold 和 DRC 通过，但 setup
+未闭合，因此它是可分析的 candidate，不是稳定 milestone。完整报告归档在
+`Post_Impl_Bundles/cpu_013db4902e57_chiplab_c398d274812f_perf_100mhz_20260814-071827/`。
 
-| 指标 | `60fba481 + c398d274` 当前 | `8594150 + c398d274` 历史 | `d9bab16 + 68c20a5` 旧参考 |
+| 指标 | 当前 `013db490 + c398d274` full impl | `60fba481 + c398d274` 历史 | `8594150 + c398d274` 历史 |
 | --- | ---: | ---: | ---: |
-| Setup WNS / TNS | `+0.044 ns` / `0 ns` | `-0.225 ns` / `-12.096 ns` | `+0.062 ns` / `0 ns` |
-| Setup failing endpoints | 0 | 190 | 0 |
-| Hold WHS / THS | `+0.050 ns` / `0 ns` | `+0.053 ns` / `0 ns` | `+0.054 ns` / `0 ns` |
-| Placed LUT / FF | 88,967 / 53,697 | 未归档 | 87,266 / 52,955 |
-| BRAM tile / DSP | 65.5 / 8 | 未归档 | 68.5 / 8 |
+| Setup WNS / TNS | `-0.552 ns` / `-116.580 ns` | `+0.044 ns` / `0 ns` | `-0.225 ns` / `-12.096 ns` |
+| Setup failing endpoints | 890 | 0 | 190 |
+| Hold WNS / TNS | `+0.018 ns` / `0 ns` | `+0.050 ns` / `0 ns` | `+0.053 ns` / `0 ns` |
+| Placed LUT / FF | 89,320 / 54,073 | 88,967 / 53,697 | 未归档 |
+| Slice / BRAM tile / DSP | 27,218 / 56.5 / 8 | 27,171 / 65.5 / 8 | 未归档 |
 
-当前固定 `c398` 实现的最差 setup 路径位于 `cpu_clk` 域，从已注册的 L1I
+当前最差 CPU setup 路径从 BTB bank BRAM 输出经过 tag hit、下一取指预测、speculative RAS
+选择与 instruction ATU 的 DMW/MAT 判定，到 `instructionResponse_uncached` 寄存器；数据路径
+10.442 ns，其中逻辑 4.272 ns、布线 6.170 ns，共 15 级逻辑。其后的 top-N 同时包含 L1I
+tag BRAM 到 data BRAM enable、PHT 地址和前端 response/next-lookup 的路径，说明当前 setup
+退化是前端命中回授路径簇，不是旧 RAS `+4` 加法器的单一孤立路径。FT01 已消除目标结构且
+周期中性，但单独不足以让这份网表闭合。首轮同网表 `AggressiveExplore` post-route 把
+setup WNS/TNS 改善到 `-0.125/-4.616 ns`；第二次有界 pass 从首轮 DCP 进一步得到
+`-0.055/-1.050 ns`，hold 均保持正值。最终 top-N 包含 translation PC 到 PHT 地址、BTB
+到 ATU、LSQ load 地址 CE、redirect 到 IQ CE，以及 L1I predecode 到 frontend enqueue，
+形成跨前端、后端和访存的多路径宽墙。结果已分别归档为探索 candidate；post-route 即使
+闭合也只用于路径分析，正式竞赛产物必须从 matching RTL 直接完成一次 full implementation。
+
+历史 `60fba481 + c398` 实现的最差 setup 路径位于 `cpu_clk` 域，从已注册的 L1I
 `responseValid` 经 response/prediction/prefix/tail 逻辑，到 frontend 8-entry buffer 的
 动态写 clock-enable。最差 data path 为 9.550 ns，其中逻辑 2.164 ns、布线 7.386 ns；
 CPU top 10 setup path 有 9 条属于这一族。44 ps 小于常见布局布线波动，证明的是这一次
@@ -109,9 +125,9 @@ CPU top 10 setup path 有 9 条属于这一族。44 ps 小于常见布局布线�
 旧平台参考的最差路径从 ROB `stagedPdst_1_reg[3]` 到 Issue Queue 3 的
 `predictedTarget` 发射寄存器，数据路径 9.448 ns，逻辑 1.635 ns、布线 7.813 ns，
 并有 108、72、445 的高扇出网络。它仍能证明调度广播和物理局部性值得研究，但
-不能作为当前 100 MHz 闭合证据；当前闭合结论只来自 matching 的 `60fba481...` 归档。
+不能作为当前 100 MHz 闭合证据；`60fba481...` 的闭合结论也只属于其 matching 历史归档。
 
-当前资源显示 LUT 使用 66.49%，但 slice occupancy 已到 81.23%；FF/BRAM/DSP 余量仍较大。
+该历史资源显示 LUT 使用 66.49%，但 slice occupancy 已到 81.23%；FF/BRAM/DSP 余量仍较大。
 余量适合寄存器复制、流水切级、存储映射和 DSP 化实验；资源占用率本身不决定 Fmax，
 继续增加 LUT 还可能加重 packing 与 route 拥塞。
 
@@ -137,15 +153,14 @@ Standalone 最差路径是 P2 乘法输入到结果寄存器，数据路径 9.46
 
 ### 2.5 当前功能与周期证据
 
-| 层级 | 当前 `60fba481...` 证据 | 结论边界 |
+| 层级 | 当前候选证据 | 结论边界 |
 | --- | --- | --- |
-| 本地 gates | Scala 38 suites / 161 tests，Python 364 tests；port、lint、Yosys、publication 全通过 | 结构与现有定向合同通过，不证明 Linux shell |
-| Chiplab func | `func_lab19` 与 `func_advance` 各 3 seeds 通过 | 功能仿真证据，不用于 perf score |
-| Chiplab perf20 | 20/20；总计 83,234,731 cycles；比 immediate baseline 多 53 cycles（0.000064%） | 说明系统语义修复几乎没有改变该套件周期；没有 instruction count，不能据此算 IPC |
-| Linux clean Verilator | 24,999,995 cycles / 13,924,596 instructions，约 0.556984 IPC，无 mismatch | official-equivalent harness 的受限时间窗 |
-| Linux patched random AXI | 3 seeds 均跑到 99,999,995 cycles，约 0.416926--0.416960 IPC，无 mismatch | patched-harness 抗背压证据，不是 clean CI 或 shell 验收 |
-| 完整 SoC | 100 MHz bitstream；setup `+0.044 ns`、hold `+0.050 ns`、DRC 0 error | 本地 performance implementation 通过；44 ps 不可跨 RTL 继承 |
-| 团队板 | func58 58/58；perf20 20/20，100 MHz 下 selected `soc_count=79,537,915` | matching 候选板测通过；不等于 official CI 或 Linux shell 验收 |
+| 本地 gates | Scala/Verilator 39 suites / 213 tests；Python、port、lint、Yosys、publication 全通过 | 结构与现有定向合同通过，不证明 Linux shell |
+| Chiplab func58 | random-AXI seeds `240/255/141` 全部通过 | matching RTL 的功能仿真保险，不用于 perf score |
+| Chiplab perf20 | 20/20；总计 `5,306,558` cycles | 相对本轮原始 baseline `5,543,953` 为 `-4.282053%`；详细单项归因见候选总账 |
+| Linux | 本轮未重跑 | 历史 Linux 无 mismatch 不能跨 RTL 继承 |
+| 完整 SoC | full implementation setup `-0.552 ns`；首轮同网表 post-route setup `-0.125 ns`；两者 hold `+0.018 ns`、DRC 0 error/critical warning、fully routed、bitstream 成功 | full run 因 setup 未闭合为 candidate；post-route 永远仅作物理探索，不具备竞赛产物资格 |
+| 团队板 | 板侧服务器暂不可用 | 本轮边界止于完整 SoC 实现 |
 
 ## 3. 全局心智模型
 
@@ -170,7 +185,7 @@ Standalone 最差路径是 P2 乘法输入到结果寄存器，数据路径 9.46
 
 因此，ROB 同时处在三条关键链路上：容量窗口、精确状态边界、completion 到
 wakeup/commit 的广播网络。它占旧参考 standalone CPU LUT 的 37.3%，并曾是完整
-SoC 最差路径的源头；当前 `60fba481 + c398` 的首要时序问题已转到 L1I response 到
+SoC 最差路径的源头；历史 `60fba481 + c398` 的首要时序问题曾转到 L1I response 到
 frontend dynamic enqueue，ROB/IQ 网络保留为可能再次浮现的路径族，而非当前 WNS。
 
 ## 4. 分阶段学习路线
@@ -188,146 +203,17 @@ frontend dynamic enqueue，ROB/IQ 网络保留为可能再次浮现的路径族�
 11. **FPGA 物理实现**：LUT/BRAM/DSP 映射、高扇出、布线、拥塞和完整 SoC timing。
 12. **优化决策**：用计数器与实验把前端、后端、内存、频率瓶颈分开归因。
 
-## 5. 优化候选账本
+## 5. 优化候选与实验状态
 
-状态含义：`讨论` 表示机制值得继续分析；`待测量` 表示没有数据时不能开始改 RTL；
-`待实验` 表示已有明确实验变量；`采纳/否决` 必须有完整证据。
-后续发现的潜在正确性问题统一使用 `Cxx` 编号，并自动成为性能实验之前的 blocking
-test gate；只有定向测试证明风险不存在，或修复后完成相应回归，才恢复性能候选排序。
-性能候选从设计开始就要同时约束周期收益与时序压力，优先采用已有寄存边界、局部控制、
-窄选择和低扇出的等价结构；这部分是候选实现本身，不另设综合前 RTL 修改阶段。能够
-脱离性能候选独立启用、独立 A/B 和独立保留的时序优化作为普通候选进入完整验证链。
-已有通用候选保留 `Txx` 编号，新候选可使用短领域前缀，例如前端 `FTxx`、后端 `BTxx`、
-访存 `MTxx`。任何新 RTL 都必须重新完成相应测试和性能归因，不能继承修改前的证据。
-
-本表也为历史上已经实现、但早期没有单独编号的内存优化补充回溯编号 `L06-L09`。
-这些编号只用于统一候选账本和归因，不改变原始提交、生成 RTL 或既有实验的身份；
-“已实现”不等于当前 HEAD 已完成 Linux、完整 SoC 时序或板测验收。
-更早的 `f415597` direct/DMW data translation 与 `d1022ff` load-use latency
-属于现有 `L05`/`W02` 的前身和合并实现，不另建重复候选。
-
-2nd pass 特别区分“已闭环 gap”和“仍开放 Cxx”。DBAR/IBAR memory epoch、CACOP 三层
-维护、CPUCFG cache geometry、64-byte LL/SC reservation、uncached Store 等待 AXI B、
-AXI response ID 检查、cached/uncached response collision 和 timer reset 已有当前提交与测试
-证据，不再列为开放缺口。它们没有自动关闭 C01-C08：例如 uncached Store 本身能精确等待
-B response，并不能证明一个更年轻的访存在它确定为 SUC 之前绝不会先发出。
-
-| ID | 方向 | 价值机制 | 主要代价或风险 | 决策所需指标 | 状态 |
-| --- | --- | --- | --- | --- | --- |
-| C01 | P0 accept-before-wakeup 正确性审计 | P0 在 barrier state 非 idle 时可对 operand slot 施加 backpressure；当前 direct-wakeup predicate 显式使用 `issueValid`，未合入该端口的 `issueReady`。若未接受的 producer 提前唤醒跨端口 consumer，后者可能读取旧 PRF 数据 | 这是潜在功能错误，不允许用性能收益或低事件率接受；测试需覆盖长 barrier、跨端口依赖、flush/exception 交叠及 source-data 检查 | 定向 Verilator 时序、consumer 实际 operand、producer accept 周期、所有现有 DiffTest/系统回归 | **最高优先级：待定向测试** |
-| C02 | 活动 OoO DIV 算术与中止协议证明 | 当前 `OooExecutionClusterSpec` 覆盖 DIV-return/ALU completion 仲裁，但未找到直接针对活动 `DivideUnit` 的四种 DIV/MOD signed/unsigned 随机算术、除零、overflow、逐周期 flush 和 exactly-once completion 测试；历史旧 divider differential harness 不是该单元的当前证明 | 这是验证缺口，不等价于已发现算术 bug；但 E01/E03 会改变最敏感的迭代和接受协议，不能在未锁定当前行为前优化 | 独立数学模型 differential、边界/随机 operand、每个迭代点 flush、completion pulse/ROB/epoch/pdst、重启及现有 DiffTest | **最高优先级：待补证明** |
-| C03 | ROB entry-complete 的 epoch/wraparound 审计 | wakeup 使用已注册的 current-epoch 资格，但 `stagedCompletionMatches` 只比较 valid、ROB index、entry valid/incomplete 和 pointer generation，未合入 `stagedCompletionCurrent`；若旧 completion 在 flush 后延迟到 6-bit ROB pointer 完整绕回，理论上可能命中新 entry | 正常 DIV/LSQ/barrier 都应在源头 drop 旧事务，因此这不是已确认的系统 bug；但 recovery epoch 已存在却未参与最终 complete，需证明端到端延迟上界或直接加门控 | ROB 定向测试：flush、分配跨 64 pointer、注入旧 epoch/同 pointer completion；并覆盖 wakeup、entry.complete、commit 和所有实际 completion source | **最高优先级：待定向测试** |
-| C04 | LSQ 虚拟别名顺序审计 | 当前 older-store overlap/forwarding 使用虚拟地址比较，而 L1D 按物理地址访问；Load 发出前没有对所有更老 Store 做物理地址别名检查，也未找到事后 memory-order violation replay。不同 VA 映射同一 PA 时，年轻 Load 可能绕过未提交老 Store并读到旧值 | Linux 可建立同一物理页的多个虚拟映射，因此不能把“无 synonym”当成默认软件合同；修复若等待所有老 Store 翻译会降低 MLP，若做物理 CAM/replay 会增加 LSQ 路径与恢复复杂度 | 两 VA 同 PA 的 store->load 定向测试，覆盖 byte mask、页内 offset、TLB/DMW、未知地址/翻译、cache hit/miss、flush；同时审计物理 compare 或 replay 证明 | **最高优先级：待定向测试** |
-| C05 | Cache refill/writeback error containment | L1I/L1D/L2 会累计 line-read error，却仍在 refill 完成后把 line 安装为 valid；之后的 cache hit 不再携带该错误。cached line write 的 AXI B error 仅有仿真 assertion，综合硬件没有保留 dirty line、重试或上报路径 | 官方 DDR 正常运行可能从不返回 error，因此这先是总线合同与故障语义审计；若 error 可达，缓存 poisoned line 或丢失 dirty victim 都是高破坏性功能问题 | 各 beat 注入 RRESP error 后首次/后续访问、line valid/dirty、跨 L1/L2 refill；cached writeback BRESP error、backpressure、maintenance 与恢复；确认平台 error 合同 | **最高优先级：待合同与定向测试** |
-| C06 | SUC Store 对年轻访存的程序顺序审计 | uncached Store 只在 ROB head 发出，但当前 Load order check 对地址已知且不重叠的 older Store 会放行；若该 Store 后来翻译为 SUC，年轻 uncached Load 乃至 cached Load 可能已先到 AXI。bridge 的“全局有序”只约束到达 bridge 的先后，不能恢复丢失的程序顺序 | LA32R r1p04 明确要求 SUC 访问严格按程序次序且当前访存彻底完成前不能开始下一访存；最保守修复会让 Load 等待 older Store 翻译，并在确认 SUC 后等其完成，可能降低 MLP | delayed older instruction + SUC Store A + younger SUC Load B 定向测试；扩展到 younger cached Load、不同地址、翻译未决、B backpressure、异常/flush/DBAR；记录请求到达 AXI 的实际顺序 | **最高优先级：待定向测试** |
-| C07 | TLB mutation 与在途翻译取消协议 | `TLBWR/TLBFILL/INVTLB` 的 mutation 与 privileged redirect 同拍清空 ATU 的 I/D pending 和 response；frontend、LSQ、data-translation owner 的 flush 协议却都保留 drop/cancel token，明确等待旧 response 返回。若提交时存在已握手翻译，静态状态机会留下永久 pending 并阻止后续请求 | 这是跨模块协议的高置信度结构缺口，但尚未用系统级定向仿真复现；修复必须选择统一合同：mutation 返回带 generation 的 cancelled completion，或所有 owner 同拍显式撤销，不能让部分层等待、部分层丢包 | TLB mutation 与 I-side uTLB hit/main walk、D-side LSQ/CACOP translation 在每个拍点交叠；观察 `translationDropPending`、`translationCancelPending`、`translationOwnerValid`、后续 fetch/load 进展和 DiffTest | **最高优先级：待定向复现/修复** |
-| C08 | PS=21 大页物理地址拼接 | r1p04 的 `PS=21` entry 由 `VA[21]` 选择两个 2 MiB half，PA 应为 `{selected_PPN[19:9], VA[20:0]}`；当前实现是 `{PPN[19:10], VA[21:0]}`，把所选 PPN bit 9 替换成 VA 奇偶位。连续且 4 MiB 对齐的常见映射会掩盖问题，合法的非连续/反向 half 映射会错误 | 修正会改变当前大页行为，必须先确认 Linux/bootloader 实际 PS 与 PPN 编码，并同时核对 match、odd select、TLBRD/WR/FILL 和 INVTLB page compare；不能用常见连续 huge page 启动成功否定问题 | PS=21 的 PPN0.bit9=1/PPN1.bit9=0、不同高 PPN、奇偶 VA、ASID/global、权限/dirty/MAT、TLBRD round-trip、NEMU differential | **最高优先级：待定向复现/修复** |
-| T01 | 分区/局部化 early wakeup 与 IQ ready 网络 | 旧参考最差路径有 82.7% routing 和高扇出，说明减少跨 ROB/IQ 广播仍有机会提高 Fmax | 多一级寄存可能增加 dependent-use latency；复制比较逻辑会增加 LUT | 固定 c398 完整 SoC WNS、相关路径扇出/route delay、依赖链周期数、perf20 分项 | 讨论 |
-| W01 | 消除同 lane 的 registered/direct wakeup 冲突 | 每个执行 lane 的 ROB 注册唤醒优先于同拍 direct wake；连续单周期 GPR writer 会使后一条的早唤醒退化为下一拍注册唤醒。保留两条 tag、抑制已成功早播的回声或增加有界 deferred wake 可恢复 dependent-use 提前量 | 增加 wakeup lane 会把当前 320 个常驻 IQ 源比较继续放大；抑制/延迟协议若丢 tag 会永久死锁，且可能恶化完整 SoC 路由 | 每 lane 冲突周期、被覆盖 direct tag 的等待消费者数、依赖链 issue 间隔、IQ 比较器/LUT、完整 SoC WNS、perf20 分项 | 待测量 |
-| W02 | 注册 LSQ completion 的 load-use 提前唤醒 | 当前 load 在 LSQ completion 已注册后仍经 ROB 再注册一拍才唤醒 IQ；从已注册且充分校验的 load completion 提前广播 tag，下一拍可借 PRF write-through 取数，理论上缩短常见 load-use 一拍 | 必须证明 exception、flush/epoch、ROB 槽位重用、store forwarding、uncached response 下绝不假唤醒；LSQ 到全 IQ 的广播可能重建已切断的关键路径 | load completion 到 consumer issue 间隔、真实 load-use 数、ROB 校验失败/flush 重叠、L1 hit/miss 分类、WNS 与 perf20 | 待测量 |
-| I01 | 改善 IQ 注册 enqueue credit 的满边界 turnaround | 当前 8-entry IQ 用上一拍 `count < 7` 生成 ready；接近满载时即使同拍 issue，也可能多保留空位或延迟重新接收，降低 dispatch 吞吐 | lookahead dequeue 会重新形成 select-to-dispatch ready 组合路径；需要 skid/credit 协议保持时序隔离和绝不溢出 | 各 IQ 在 count 6/7/8 时的 blocked enqueue、同拍 dequeue 事件、dispatch window occupancy、LUT/WNS、perf20 | 待测量 |
-| T02 | 拆分 ROB 的 hot state 与 cold payload，研究 bank/存储映射 | ROB 占 CPU LUT 37.3%，同时位于关键控制路径；把 done/exception/pdst 等热字段与宽 payload 分离可能降低 LUT 和布线 | 3-wide allocate/commit、5-wide completion 使普通 BRAM 端口不足；错误 banking 会制造冲突或更深 mux | 层次 LUT、BRAM、ROB 路径、冲突率、commit stall、完整 SoC WNS | 讨论 |
-| T03 | 乘法流水边界与 FPGA DSP 映射重审 | standalone 最差路径为 2 DSP + 8 CARRY4；合理切级可能释放第二条 Fmax 上限 | MUL latency 增加会降低依赖链 IPC；writeback/early wakeup 时刻必须同步 | MUL latency/throughput、依赖链测试、DSP/LUT、standalone 与 SoC WNS、perf20 | 待实验 |
-| E01 | 除法 early-out / radix 优化 | 当前迭代除法器无论除数为 0、`+/-1`、2 的幂还是普通数都执行 32 次 quotient step；特殊数 early-out、按有效位跳步或 radix-4 可降低长延迟 producer 对 P1 IQ 和 ROB head 的占用 | 除法可能很少，复杂前导零/符号逻辑会增加 LUT 和启动路径；全流水除法器面积更高且未必提高有效 IPC | DIV 动态数、操作数分类、DIV issue-to-completion、P1 等待和 ROB-head-blocked 周期、LUT/WNS、perf20 分项 | 待测量 |
-| E02 | ROB 头部 staged-completion 到 commit bypass | completion 输入先注册，下一拍写 PRF/匹配 ROB，再下一拍 `entry.complete` 才参与 commit；若 head 正在等这一个结果，安全旁路可理论上少一个空提交周期，并缩短 commit-time branch recovery | 会把 5 路 completion 身份、异常、branch 和 side-effect 数据拉入三路顺序提交/stop 链；错误旁路会破坏精确异常，且可能恶化 ROB/commit 时序 | head-only completion bubble、按 FU 分类、branch resolve-to-redirect、serializing 等待、ROB/commit WNS、完整回归 | 待测量 |
-| E03 | P1 DIV reservation 与 FU-available select | P1 的 ALU 在 divider busy 时仍可工作，但第二条 DIV 可提前进入两级 issue/operand pipeline 并停在 execution 入口，阻止 younger ALU 使用空闲数据通路；在 IQ dequeue 时预留唯一 DIV credit，或分离 DIV wait slot，可消除这种结构性 HOL blocking | 仅把当前 `divider.ready` 接入 IQ 不够，第一条 DIV 启动前已有两拍 lookahead；credit/flush/release 若错会重复启动或永久饿死，per-entry FU mask 也可能加重 select 时序 | DIV credit 占用、blocked DIV 在 operand slot 的周期、其后 ready ALU 数、P1 lost-issue 周期、依赖结果、IQ/SoC WNS | 待测量 |
-| E04 | 基于 trace replay 的执行端口能力重配 | 当前三个 ALU-capable port 加单 LSU 与三宽 commit 总体匹配，但 branch/MUL 只在 P2、DIV 只在 P1、router 又偏向最低编号；离线 replay 可量化 occupancy-aware routing、复制 branch capability、P3 兼容 ALU、第二 MUL/DIV/AGU 的独立收益上界 | 复制 FU 往往连带 PRF 读口、IQ、completion lane、LSQ/cache 端口和布线；P3 正处于参考 wakeup critical path，盲目增加能力可能降低 Fmax | 每 FU demand/端口冲突、各 IQ ready/occupancy、理论 maximum matching、4-issue 饱和率、结构变体 replay cycles、资源与完整 SoC WNS | 待测量 |
-| L01 | 多 Store、逐字节 Store-to-Load forwarding | 当前只在恰好一个 older Store 完整覆盖 Load mask 时转发；多个覆盖 Store或多个部分 Store会阻塞到它们排空。按每个 byte 选择程序顺序最近的 older Store，可让常见 byte/halfword 拼接和连续覆盖提前完成 | 8 STQ x 4 byte 的年龄比较、优先选择与数据 mux 可能重建历史 LSQ critical cone；必须处理同一字中 cache 数据与 Store bytes 合并、异常和虚拟/物理别名 | forwardingCount、partial-overlap blocked 周期、blocked load 到 store drain 的延迟、按 byte 最近 producer、LSQ WNS/LUT、memory differential | 待测量 |
-| L02 | 跳过被 Store 阻塞的最老未发 Load | scheduler 只选择最老的 pending Load；若它因未知 Store 地址/数据或部分重叠阻塞，更年轻且与所有老 Store无冲突的 Load也不能发出。ready-load select 可增加 memory-level parallelism | 需要对多个 LDQ candidate 同时做年龄与 8 STQ disambiguation，组合成本近似成倍；异常仍可乱序完成但必须保持 ROB 精确提交，uncached/LL/barrier 不可被错误放宽 | oldest-load-blocked 且 younger-safe-ready 周期、可提前请求数、MSHR 空闲、miss overlap、LSQ select WNS/LUT、perf20 分项 | 待测量 |
-| L03 | LDQ/STQ/SDQ 按饱和证据扩容 | 当前三者均为 8 entries，长 cache miss、Store drain 或 Store-data 依赖可能先于 32-entry ROB 阻塞 rename；适度扩到 16 可提升 MLP 和窗口利用 | LSQ 是寄存器加关联年龄/地址比较，不会因为 BRAM 余量而廉价扩容；STQ 加倍会直接扩大 forwarding/order cone，pointer 也贯穿 allocator、uop 和测试 | LQ/STQ/SDQ full stall、occupancy 分布、ROB 非满但 LSQ 满周期、MSHR occupancy、层次 LUT/FF、完整 SoC WNS 与 cycles | 待测量 |
-| L04 | 按 ROB 年龄仲裁 Load/Store 翻译 | Store lookahead 当前只在最老 Load 不需要翻译时运行；Load translation 持续有请求时，地址已知的老 Store 仍可能直到 ROB head 才获得 request/response。比较最老待翻译 Load 与 Store 的 ROB pointer，优先翻译程序序更老者，可把 Store 的两拍翻译移到提交前，同时保留单个 D-side translation owner | Load 通常位于依赖链上，放弃固定 Load 优先可能增加 load-use latency；ROB 年龄比较、flush/cancel owner 和 SC/exception 身份必须保持，且不能把共享 ATU ready 拉进 LSQ 的旧关键路径 | head Store translation request/response 周期、被 Store 抢占的 Load 数及额外等待、两者 ROB 年龄差、head-incomplete 总量、perf20 分项、LSQ/ATU WNS | **高潜力：建立 age-aware A/B** |
-| L05 | Direct/DMW 地址预翻译快路径 | 官方 perf20 启动后使用 `DA=0, PG=1`，但普通代码/数据地址命中 cacheable DMW0，不查 TLB；当前 ATU 仍让这类访问经过注册的 translation request/response。对运行时确认的 direct/DMW hit 在 AGU/LSQ 已有寄存边界提前形成 PA/MAT，按选择的落点可从常见 cached Load/Store 前端路径移除约一至两拍并释放 D-side translation owner | 必须按架构模式动态判定，不能按 `RUN_PERF_TEST`、PC 或 benchmark 地址硬编码；PA、MAT、PLV、`DisableCache`、CRMD/DMW 提交切换、flush 和 C04 物理别名合同都要一致。只加 Load 快路而不加 Store，仍可能被 `unknownOlderStore` 阻塞；把组合 PA 直接拉到 L1D 又可能撤销现有 LSQ timing cut | perf20 各项 direct/DMW/TLB/SUC 访问数、AGU-to-translation-response 与 AGU-to-L1D-request、未知老 Store 阻塞、cache hit load-use、每项 cycles、LSQ/ATU LUT/route 与 matching SoC WNS | **中高潜力：perf20 trace 后做时序感知 A/B** |
-| L06 | 已选 Load translation/physical payload 寄存切分（`e5212e3`） | 在 `scheduledLoad` 边界寄存 selected Load 的 `PA/MAT/translationDone` 与身份，后续顺序检查、forwarding 和 cache request 直接使用该 payload，移除动态 `loadHead` 宽地址 mux；主要目标是切断 LSQ 时序路径，周期结果为中性 | 增加宽状态寄存器和 LQ slot/translation response 的身份对齐；AGU 同拍写入、flush、recovery epoch、slot 回收和异常响应不能错配，也不能给正常 address-to-translation 路径引入额外周期 | selected-load 到 translation/cache request 的延迟、LSQ scheduled-load top-N 的 logic/route、LQ reuse/flush 定向测试、19 项 cycles、matching SoC WNS/资源 | **已实现：周期中性，待当前 matching route 复核** |
-| L07 | 普通 cached Store completion bypass（`c36c650`/`acb90a3`） | 对无异常、非 SC、非 uncached 的普通 Store 绕过完整注册 completion 路径，直接产生无 `pdst` 的 ROB completion；异常、SC、uncached、flush 和碰撞情况继续走注册路径，目标是减少 Store 到 ROB head 的等待并隔离 forwarding 深锥 | 直达 completion 必须与 Load response/forwarding 同拍仲裁，保持 ROB pointer/epoch 精确匹配、exactly-once completion 和异常语义；若 Store 与年轻 Load 同拍可完成，优先级不能丢失 forwarding 或破坏年龄顺序 | Store completion 来源与 head-incomplete 周期、Store/Load completion collision、重复/漏 completion、C04/C05/C06 回归、19 项 paired cycles 与 LSQ/ROB WNS | **实验完成：独立周期收益未证实，作为组合配套路径保留** |
-| L08 | Store translation lookahead（`b6d30a0`/`bf93145`） | 当单一 ATU owner 空闲、head Store 与最老待翻译 Load 都不占用 owner 时，预翻译最老的已知地址 pending Store，使 Store 在到达 ROB head 前完成翻译；Store 的顺序、数据和提交条件仍由 LSQ 保持 | 不能让 lookahead 的 Store 挤掉更老 Load，且必须保留 translation cancel、recovery epoch、SC/exception、C04 物理 alias 和 C06 SUC 顺序；年轻 Load 可能因 owner 被推迟 | head Store translation request/response fire、Load 额外等待、Linux Store-translation 桶、ATU owner occupancy、19 项 cycles、random AXI 与 matching LSQ/ATU WNS | **已实现：周期收益保留，需当前 Linux/route matching 复核** |
-| L09 | Store completion 与 Load forwarding 仲裁切分（`d09862e`） | 在 cache response 之后优先完成更老的 Store，再允许年轻 Load forwarding；将深层 overlap/forwarding predicate 从 Store 直达 completion 路径移出，降低 LSQ 到 ROB 的布线与逻辑压力 | 同拍 Store/Load completion 必须保持年龄顺序，forwarding 不能丢失或重复；优先 Store 可能增加 Load 等待，且需要覆盖 partial overlap、异常、flush、C04/C06 和 cache response collision | Store/forwarding collision 与额外 Load 等待、forwarding correctness、head-incomplete 分类、LSQ critical path route/WNS、代表及 19 项 cycles、完整 SoC timing | **stable 组合已采用：以时序收益为主，单项周期代价需单独记录** |
-| U01 | 已证明 MMIO PA 的 uncached alias-maintenance 快路径 | 当前每个 uncached Store 在发 AXI 前都串行执行 L1D、L2 同物理行 writeback-invalidate。若固定设备 PA 范围由平台/软件合同保证永远不能以 CC 映射，则这些 tag lookup 与全层次停顿没有可写回对象，可直接进入 SUC drain | 现有测试明确要求“可能存在 cached alias”时先写回脏数据；快路径只能用于有可执行地址合同的设备窗口，uncached DDR alias 仍走完整维护。错误分类会造成脏数据丢失或设备/CPU 观察不一致 | uncached Store 按 PA 分类、L1/L2 maintenance cycles、alias hit/dirty 次数、MMIO 合同、Linux 映射、cycles/WNS 与保留 alias 测试 | 待合同与测量 |
-| U02 | 退休后的单项 SUC write token | Store 在 ROB head 且确认无异常后转入不可撤销 token，允许 ROB 先退休它和后续纯计算；token 收到 B 前继续阻止所有年轻访存、DBAR 和需要内存的异常处理，从而保持 SUC 顺序。它隐藏的是 B 延迟后的独立计算，不提高连续 MMIO 的总线吞吐 | 当前 RTL 把 BRESP error 映射为该 Store 的精确 ADEM；退休后才到的错误无法再精确归因。r1p04 不要求把 AXI BRESP 映射为 ADEM，但必须先固定官方 SoC 的 error/fault 合同。interrupt、flush 和关机 drain 也必须保留 token | uncached Store head-blocked 周期、其后可退休的非访存数、首次年轻访存距离、BRESP error 可达性、interrupt/flush/DBAR、总 cycles 与 token occupancy | 待合同与测量 |
-| U03 | SUC pending 时提前封锁新的 cached AXI 接收并排空旧事务 | bridge 只有在 `busIdle` 时才更新 `uncachedWait`；uncached 请求若在多个 cached line read 活跃时到达，新 cached 请求仍可能延长 drain。尽早锁存 SUC pending、停止接收新的 demand refill，待既有和 maintenance writeback 完成后立即给 SUC，可缩短 ROB-head stall并形成清楚的顺序点 | 必须区分已在途 older work、uncached write 前置 alias writeback 和真正的 younger cached request；过早封锁会损失 MLP，错误封锁可能死锁 maintenance | pending-to-bus-idle、pending 后新接收 cached AR 数、活跃 AXI ID、maintenance writeback、uncached 等待分解、公平性、perf20/Linux cycles | 待测量 |
-| H01 | 将 L2 的 L1D writeback 接收策略改为真正 write-back | 当前每次 dirty L1D eviction 到 L2 后都执行 64 B DDR write-through，再以 clean line 安装；若 L2 保持 dirty ownership，只有 L2 victim/maintenance 时才写 DDR，可显著减少 store-heavy 外存流量 | 必须重证 DBAR/IBAR/CACOP、uncached alias、dirty victim、AXI error 和最终可见性；单核无 coherent DMA 的平台假设要明确，dirty bit/eviction 已有但当前普通路径不使用 | L1D dirty eviction 数、其中 L2 hit/miss、可省 DDR line writes/bytes、write-blocked read 周期、perf20 分项、WNS 与维护测试 | 待测量 |
-| H02 | L1I/L1D/L2 set-count 容量 sweep | 8 KiB 2-way L1I/L1D 可能产生明显 capacity/conflict miss；在当前 512-bit x 64-set BRAM 映射下，增加 L1 sets 可能利用已经因宽度产生的 BRAM 深度空洞，成本低于直觉 | 更大 cache 会增加 index/tag、初始化/maintenance 时间和布局跨度；没有 miss 分类时无法判断收益，4-way 会额外扩大 way mux 与 predecode 路径 | I/D/L2 hit/miss/merge、set conflict、working-set reuse distance、综合 BRAM/LUT、place route、各 benchmark cycles | 待测量 |
-| H03 | L1 hit pipeline 每拍接受一个 lookup | 当前 L1I 和 L1D controller 都在同步 RAM lookup pending 时拒绝新 lookup，普通 hit 启动间隔约 2 拍；上下文流水或一项 skid 可提高 hit throughput，L1I 需与 F01 的翻译/请求上下文一起设计 | 单独改 cache 可能仍被 frontend translation 或单 LSU 限制；同拍 response、新 request、miss、kill、store hit 和 maintenance 会增加控制复杂度，也可能扩大 tag/ready 路径 | 连续 hit request 间隔、L1 request-ready stall、frontend empty/P3 stall、hit/miss转换、LUT/WNS、周期数 | 待测量 |
-| H07 | VIPT-style L1 翻译与 array lookup 并行 | 历史已验证候选的 L1I/L1D 为 2-way、64-set、64-B line，set index 为 VA/PA `[11:6]`，完全位于最小 4 KiB 页内；可以在 uTLB 翻译同时按 VA 读取 set，PA/MAT/权限返回后再做 physical-tag compare。2026-08-05 读取的实验 HEAD 已改为 128 sets，该候选不能再直接套用 | 需要把 early VA-index read 与 late PA tag、异常、SUC discard、redirect generation、Store 权限/写入和 CACOP Hit 对齐；128 sets 使用 VA bit 12，它越出 4 KiB page offset，会产生 synonym/set 不一致，除非恢复 64 sets、增加 associativity、page coloring 或 alias 处理 | 热 uTLB+L1 hit request-to-response、translation/L1 overlap、无效或 SUC speculative read 数、synonym differential、BRAM inference、LUT/FF、完整 SoC WNS 与 cycles | **条件潜力：先固定 cache geometry** |
-| H04 | 将 full-line cache array 改为窄 bank/顺序 victim 读取 | 当前每 way 同步读完整 512-bit line，8 KiB L1 也因 512-bit BRAM 端口宽度消耗与 64 KiB L2 近似的 BRAM primitive，并形成宽数据布线；按 fetch group/word/beat banking 可提高 BRAM 深度利用率并缩短命中数据路径 | dirty victim、line install、CACOP 和 L2 hit stream 需要多拍 gather/scatter 或独立 line buffer；bank conflict 与额外状态机会增加 miss/maintenance latency | 层次 RAMB/LUT/route、hit latency/II、victim gather 周期、refill/install冲突、容量扩展后的完整 SoC WNS/cycles | 讨论 |
-| H05 | AXI cached read 与 line write 并发/写缓冲 | bridge 支持四个 cached read ID，但 line write 只在整个 bus idle 时启动，写进行期间也阻止新 cached read；dirty eviction 或当前 L2 write-through 会把读 miss 串行化 | AXI R/W 通道虽独立，DDR controller 内部排序、DBAR/IBAR idle、uncached traffic、公平性和 write response error 都要保持；增加 buffer 占 FF/BRAM | read blocked by write、write waiting for active reads、AR/AW/W/R/B 利用率、DDR bytes、barrier drain、WNS/cycles | 待测量 |
-| H06 | 低侵入式 instruction next-line / data stream prefetch | 在 demand miss 到来前利用空闲 global MSHR 把下一 instruction line 或高置信度 data stream 拉入 L2/L1，可隐藏 DDR latency；I-side顺序流通常比通用 data predictor 更容易建立准确性 | 当前 L1I 只有一个 miss context，直接预取到 L1 会阻塞 demand；错误路径、跳转和短 working set 会污染 2-way cache并占四个全局 ID/AXI 带宽。需支持 demand priority、drop 和节流 | demand miss 地址序列、prefetch accuracy/coverage/timeliness、污染 eviction、MSHR/AXI占用、被预取阻塞的 demand、cycles/WNS | 待测量 |
-| M01 | 建立瓶颈计数器矩阵后再决定扩宽/扩容 | 4/3/3/3/4/5/3 的非对称宽度可能是合理的 burst 设计，也可能在不同负载下形成前后端瓶颈；仅凭宽度不能判断 | 计数器本身会占资源并可能扰动时序，应支持可关闭或仿真专用路径 | fetch/decode/rename/dispatch/issue/commit 利用率，ROB/IQ/LSQ 满，分支与 cache stall 周期 | **合同已定义，待仿真实现** |
-| B01 | Execute-time 分支恢复并只 squash younger 状态 | 当前误预测要等分支到 commit 才 redirect；若分支前有 cache miss、DIV 或其他未完成指令，提前恢复可隐藏这段等待并避免继续执行错误路径 | 需要恢复 speculative RAT/FreeList、回退 ROB tail、选择性保留 IQ/LSQ/SDQ/执行中 older 状态，并解决旧 completion 与重用槽位别名；当前 setup 虽已闭合但只有 44 ps，恢复广播仍可能形成新的高扇出路径 | 每次误预测的 resolve-to-redirect 周期、resolve 时 older 未完成数、错误路径分配/执行数、MPKI、分项 cycle count、LUT/FF 和完整 SoC WNS | 待测量 |
-| F01 | 流水化 fetch-group 启动并增加前端请求上下文解耦 | 当前只有一个 I-side ATU context、一个 translated-request slot 和一个 L1I request context。热 uTLB 的 request 到 response 本身是一拍，但 response 先落 ATU 寄存器、再落 frontend translated slot、下一拍才发 L1I；静态逐拍推导的最短相邻 translation accept 间隔约 4 拍，即满 16 B group 也只有约 1 inst/cycle 的启动上限 | 多上下文需要精确的 PC/prediction/translation 配对、redirect kill/drain 和 buffer credit；应先消除 C07，再用小 FIFO/valid-ready pipeline 逐级提高 II，不能把 uTLB 比较、预测和 L1I ready 合成一条长组合路径 | 连续热 uTLB+L1I hit 的 translation/cache request accept 时间戳、每 group 各级 II、frontend empty、decode starvation、IPC、LUT/FF、完整 SoC WNS | **高潜力：先测量并修 C07** |
-| V01 | I/D micro-TLB 容量与替换策略 sweep | 当前 I/D 各 4 项；一项 `PS=12` 双页 entry 覆盖相邻 8 KiB，两个 half 都有效时每侧理论最大覆盖 32 KiB，但只能同时保存 4 个 VPPN pair，half 稀疏或工作集跨越更多 pair 时有效覆盖更低。主 TLB hit 仍需共享 walker 扫描。8/16 项或小型组相联结构可能显著降低 Linux text/data 工作集的 micro miss | 全相联扩容会增加 VPPN/ASID 比较、结果合并、FF 与布线；当前 TLB 已约占 standalone CPU 3,584 LUT，不能因 BRAM 余量就假设免费。容量提升也无法解决 F01 的热命中 II | I/D micro hit/miss、工作集 VPPN pair 数、有效 half 数、RR eviction 后短期重访、main-walk cycles、TLB 层次 LUT/FF/WNS、perf20/Linux cycles | 待测量 |
-| V02 | 主 TLB walker 带宽与 I/D 解耦 | 当前 I/D micro miss 共享一个每拍 4 项的 walker，单次最多扫描 8 slice，并发 I/D miss 会串行。8 项/拍、独立 I/D walker 或同 VPN 合并可降低稀有但长的翻译停顿 | 比较器和 entry mux 增加可能重新制造历史上已经消除的 TLB-to-exception 长路径；在 micro miss 很少时收益低，且双 walker 必须处理 mutation、相同 entry 多命中和公平性 | I/D 同时 walk 次数、排队等待、命中 slice 分布、每次 exposed stall、比较器/LUT/route、完整 SoC WNS 与 cycles | 待测量 |
-| B02 | 分支预测索引与容量优化 | 当前为 4-bank BTB/PHT、8-bit GHR、8-entry RAS；predictor 层次资源较小。降低 MPKI 会同时避免错误路径工作和较晚的 commit-time 恢复罚时 | 增大/复杂化 predictor 会增加 lookup 延迟和 BRAM；错误 speculative-history 恢复会破坏预测状态 | branch/BTB/PHT/indirect/return 分类命中率、MPKI、每次罚时、alias、predictor timing/resource | 待测量 |
-| B03 | 保留三宽退休中的全部 branch training | 原实现同拍最多退休三条却只保留一路 update；B03-min 先保证 recovery branch 被训练，B03-full 再用 8-entry、三入一出 FIFO 保留全部退休分支，并在 flush/recovery 前按程序顺序折叠 architectural GHR/RAS | FIFO head/write mux、capacity-to-commit 反馈及三路 GHR/RAS fold 会增加 predictor/ROB 附近的逻辑和布线；首次 route 前已把 retirement fold 输入寄存切分 | 19 项 standalone perf20、同拍多分支/flush/恢复测试、FIFO occupancy、MPKI、predictor/ROB top-N WNS 与资源 | **B03-full 已保留：相对 F01 -11.882408%，待 matching route** |
-| K01 | 缩短 commit recovery 到 redirect 的注册一拍 | ROB 在周期 N 产生 recovery，core 在 N+1 才统一 redirect/flush；消除该拍可为每次 mispredict 固定省一拍 | 当前 FreeList release、predictor training、CSR/TLB 状态更新都依赖 N/N+1 的 post-commit 原子语义；同拍 flush 会把 ROB prefix 接入全核高扇出路径并可能丢退休副作用 | recovery 数、固定一拍占总 cycles、commit-to-redirect 时序、全核 flush fanout、精确异常/FreeList/LSQ 回归 | 待测量 |
-| K02 | FreeList 延迟释放的 exhaustion credit | 已退休 `oldPdst` 先注册、下一拍才回到 FreeList；当 freeCount 恰为 0 而本拍 commit 正在释放寄存器时，rename 可能多停一拍 | 当前寄存边界曾切断 ROB commit 到 FreeList 的完整 SoC 关键路径；lookahead credit 必须与 recovery 的 post-commit snapshot 一致，不能重复分配 | FreeList-only stall、`freeCount==0 && retiring writer` 周期、可消除 rename bubble、FreeList/ROB WNS、flush/WAW 随机测试 | 待测量 |
-| R01 | 将未使用的 rename 源规范化为 `p0/ready` | decoder 已产生 `source1Used/source2Used`，但当前 RAT、dispatch 和 IQ 仍把两个编码字段都当作依赖；立即数、PC 源等指令可能被无关未完成寄存器阻塞 | 必须逐类核对 store、branch、CSR、CACOP/InvTLB 等特殊编码，错误的 used 位会直接造成功能错误 | 假依赖事件/阻塞周期、按 opcode 分类、IQ occupancy、perf20 分项、wakeup 比较翻转、LUT/WNS、定向与 DiffTest | 待测量 |
-| FUS01 | 只融合无同步例外的整数指令对 | `ADDI/ANDI/XORI/SLTI[U]` 结果接 `BEQ/BNE r0` 可合并 ALU 与 branch，`LU12I.W + ORI` 是手册明确给出的常量装载对；F1 可减少 IQ/issue 工作并缩短真依赖，F2 才能进一步减少 ROB/中间 PRF 压力 | 固定 32-bit 编码意味着不减少取指字节；当前一条指令对应一个 ROB/commit/DiffTest 身份。真正压成一个复合 uop 需要第二 PC/指令、`archCount=2`、双退休/branch training 和精确中断合同，检测与宽 payload 还可能恶化前端/rename 时序 | 按模式的 retired adjacent-pair 数、eligible/fused 比例、producer-to-consumer exposed latency、decode/dispatch/IQ/ROB stall、每项 cycles、复合 payload LUT/route、matching SoC WNS | **中等潜力：先 trace/replay** |
-| R02 | ROB 与 PRF/FreeList 协同扩容 | 更大的 in-flight window 可能跨越 cache miss、DIV 等长延迟，找到更多独立指令；PRF 必须随最大在途 GPR writer 数增长 | 当前 ROB 被 memory-epoch proof 限制为 32；64-entry ROB 至少需要 96 个 physical register，而现配置的 2 次幂约束会推到 128。8R5W 异步 PRF 的 LUT/mux、地址位宽和布线成本可能显著降低 Fmax | ROB-full 周期、head-blocked 时 younger-ready 数、FreeList-only stall、在途 writer 分布、PRF/ROB/IQ LUT 与路径、perf20 cycles、完整 SoC WNS | 待测量 |
-| A01 | Rename 整组阻塞改为可接受最老 prefix | 当前 lane 2 因 LQ/STQ 等资源不足时，资源充足的 lane 0/1 也无法分配；接受最老 prefix 可减少队头阻塞 | Decode/Rename buffer 必须压缩并保留余项，同拍 RAT bypass、FreeList/ROB/LSQ 计数和异常边界都要按 accepted prefix 重证 | 各资源导致的 group stall、可接受 prefix 长度、被无关 younger lane 浪费的 uop-slot、LUT/WNS、随机握手测试 | 待测量 |
-| D01 | Load dispatch 与 SDQ fullness 解耦 | 当前 P3 `portReady` 同时要求 IQ 和 SDQ ready，因此 SDQ 满会阻止不需要 SDQ 的 load 进入 LSU IQ | Router 需要按输入 uop 类型判断 P3 credit，同时继续保证 store 对 IQ+SDQ 的双写原子性；不能形成 ready 组合环 | `P3 IQ ready && !SDQ ready && head is load` 周期、load dispatch stall、SDQ occupancy、perf20 cycles、router path WNS | 待测量 |
-| D02 | Capability-aware maximum-prefix dispatch matching | 当前三路 router 按 lane 贪心选择最低编号可用端口；flexible ALU 可能占用 younger CSR/DIV/branch/multiply 的唯一端口，使可行的三路匹配退化成两路 | 3x4 matching、occupancy-aware tie-break 会增加 router 控制深度和跨 IQ ready 路由，可能重新制造已切断的 dispatch 关键路径 | greedy prefix 与最大可行 prefix 差异次数、各 IQ occupancy/空闲 issue、opcode 组合、LUT/WNS、perf20 cycles | 待测量 |
-| Q01 | 缩窄 dispatch/IQ scheduling uop | Queue/Window/IQ 当前保存完整 `RenamedMicroOp`，包含许多只在 ROB commit 或特定 FU 使用的冷字段；按调度/端口保留必要字段可减少约 11k-LUT 调度存储与 compaction 布线 | 多种 payload 或 side table 增加接口和对齐验证；branch/CSR/LSU 所需字段不能遗漏，可能增加取回 mux | 各 bundle bit width、hierarchical LUT/FF、dispatch/IQ 路径、cycle count、完整 SoC WNS、所有 FU 定向测试 | 讨论 |
-| F02 | 切断 L2 refill 到 L1I response predecode 的组合/布线路径 | 同平台上一候选的最差路径位于此处，数据路径 10.328 ns、route 占 76.8%；当前 top-N 已不由它主导 | 增加 response 级可能改变 miss/critical-group 延迟；复制 predecode 会增加面积和拥塞 | 新候选 top-N 是否重新出现该族、I-miss hit/critical-group latency、perf20 分项 | **历史路径：条件触发** |
-| F03 | 缩短 L1I response 到 frontend buffer enqueue 的控制锥 | 当前 `60fba481 + c398` 100 MHz routed WNS 路径由已注册的 L1I `responseValid` 经 response/prediction/prefix/tail 逻辑到 8-entry frontend buffer 的动态写 CE；9/10 条最差 CPU setup path 属于该族，最差 route 占 77.3% | 单纯增加 response register 会增加前端延迟；banked/rotating buffer、局部 valid 复制或拆分 correction/learn 与 enqueue 时，必须保持四槽压缩、PC/prediction 配对、组内 taken 截断及 redirect kill | frontend top-10 setup、response-valid fanout、各段组合级数、buffer enqueue/empty 周期、branch correction、IPC、LUT/FF、完整 SoC WNS | **高优先级：当前 WNS 路径** |
-| FT01 | 按 fetch lane 构造 speculative RAS link address | 历史 matching route 中 `translationPc` 经预测选择和 32-bit `+4` 到 speculative RAS 的路径仅余 `+0.022 ns`；call link 只可能是 16-byte fetch group 内四个固定槽位的下一 PC，可由 group base 和 lane 构造，避免 selected branch PC 驱动完整加法链 | 必须覆盖 lane 0-3，尤其 lane 3 跨组；immediate/delayed speculative update、return、correction 和 flush 的地址语义必须不变。Vivado 也可能已共享或化简原加法器，真实收益只能由 matching route 证明 | 四 lane RAS 定向测试、生成 RTL 组合结构、完整 perf20 非退化、matching frontend top-N/WNS/LUT | **实现中：待完整回归与 matching route** |
-| P02 | Vivado strategy/seed 与物理优化 A/B | `Explore`、phys_opt、LUT combining、局部寄存器复制和不同实现 seed 可能在同一 RTL 上改变 route-dominated WNS；适合先判断结果是否受物理随机性主导 | strategy/seed 不能替代 RTL 时序修复，跨 seed 选择最好的单次结果会造成过拟合；必须保留完整报告、实现选项、DRC 和 bitstream hash | 同一 RTL/软件下多个 seed 的 WNS/TNS、top-path 族、congestion、runtime、资源、cycle/frequency 产品；禁止跨 RTL 借用 slack | 待实验 |
-| P01 | 物理感知的模块局部性、寄存器复制与必要的 floorplan 实验 | 完整 SoC 关键路径以 route delay 为主，说明逻辑等价的布局可能产生明显差异 | 过早固定 Pblock 会恶化全局拥塞并使结果依赖 seed；不能掩盖结构性广播问题 | congestion、SLR/clock-region 分布、跨区 nets、多个实现 seed 的 WNS 稳定性 | 讨论 |
-
-### 5.1 当前优先级判断
-
-**正确性 gate 覆盖下列全部性能优先级。** C01、C03、C04、C05、C06、C07、C08 的定向测试和 C02 的活动 DIV
-算术/flush 证明必须先于 W01/W02/F02/E01/E03 等性能候选；若复现错误，先修复并完成
-回归，再从修复后的新 RTL 重新建立 timing/cycle baseline。不得用旧 DCP 的 WNS 为
-正确性修复做接受或拒绝判断。
-
-1. 先补齐 M01 所需的仿真统计定义，不立即增加 RTL 计数器；可先从既有 trace、
-   Verilator 层次信号和测试平台采样获得数据。
-2. 当前固定平台首先研究 F03，并同时跟踪紧随其后的 L1D refill/response 宽 mux；F02
-   只有在新实现 top-N 重新出现 L2-to-L1I 路径时恢复高优先级。T01/T02 由旧路径和
-   standalone 层次成本支持，保留为后续路径族候选。
-3. T03 是潜在后续频率墙。只有 F03、当前 L1D 路径和 T01/T02 改善后，它才更可能成为完整 SoC
-   的主导路径。
-4. B01 具有较高的理论周期收益上限，但不能直接进入 RTL 实现；先用仿真统计确认
-   当前 commit-time 恢复实际浪费的周期，并优先设计不进入 wakeup/select 组合路径的
-   寄存式恢复协议。
-5. R01 是 Decode/Rename 阶段最小且可独立验证的周期候选；先用 trace 证明假依赖
-   确实造成阻塞，再做 `p0/ready` 对照实验，不能只凭静态代码直接宣称 IPC 收益。
-6. R02 只保留为 ROB/PRF/IQ/LSQ 联合窗口实验；当前 32-entry ROB 下单独把 64-entry
-   PRF 扩为 128 不增加可容纳的动态指令数，优先测量 FreeList 回收边界气泡。
-7. 分支预测、cache 容量/相联度、MSHR 数量和队列扩容将在对应章节讨论后加入；
-   在没有 miss、occupancy 和 stall 数据前，不把“加大结构”视为有效优化。
-8. Dispatch 阶段先统计 D01 的 load/SDQ 假耦合和 D02 的贪心匹配损失；A01 涉及完整
-   rename 握手重构，测量前不实施。Q01 只有在 bit-width/路径归因表明宽 payload 是
-   主要成本后才进入结构实验。
-9. Wakeup 阶段优先统计 W01。它可能让现有 early wakeup 在连续单周期 writer 下频繁失效，
-   同时修复手段会直接增加最敏感的 tag 广播网络。W02 和 I01 分别等待 load-use 与
-   IQ 满边界事件证明，不能仅因“理论可省一拍”就接入新组合路径。
-10. 执行阶段先按 FU 记录 accepted、busy、completion 和 ROB-head-blocked 周期。先完成
-    C02，再区分 E01 的 DIV latency、E03 的 P1 HOL blocking 和 E04 的静态端口冲突；E02
-    先计算可消除空提交周期的严格上界。T03 属于 cycles/Fmax 交换，必须同时修改 MUL 的
-    early-wakeup/result-forward 时刻并重跑完整 SoC 实现，不能凭 standalone DSP 路径单独采纳。
-11. 提交阶段先做 C03 pointer-wrap 定向测试，再统计 B03 被丢弃的 branch training、K01
-    recovery 固定一拍和 K02 FreeList exhaustion bubble。B03 可先用 trace 判断，K01/K02
-    都曾对应真实远端时序路径，未证明周期收益前不撤销现有寄存边界。
-12. 访存阶段先做 C04 虚拟别名与 C06 SUC 顺序定向测试。性能统计依次分出单 Store转发、多 Store/部分
-    覆盖阻塞、oldest-load HOL、LDQ/STQ/SDQ 满和 MSHR 满；L01/L02 都会扩大 8-entry
-    STQ 比较网络，L03 更会成倍增加它，必须在新的完整 SoC timing baseline 上逐项实验。
-    L05 与 W02 分别优化 load-to-use 的 translation 前半段和 completion/wakeup 后半段；两者
-    必须用 perf20 专属逐段时间戳评估，不能从 Linux M01 的 Store-dominated 结果外推。
-    Uncached Store 先按 U01/U02/U03 所列阶段计数；没有平台 error、地址属性和顺序合同前，
-    不允许用“posted write”直接跳过 B response。
-13. Cache 阶段先明确并验证 C05 的 AXI error 合同。当前时序实验优先处理 F03 的
-    L1I-response-to-frontend 边界和 L1D refill/response 宽 mux，F02 降为历史路径监控；
-    周期优化先统计 H01 可消除的 DDR write，再做 H02 set-count
-    sweep 和 H03 hit-throughput 上限。H04/H05 属于结构实验，只有 BRAM mapping 或总线
-    阻塞数据支持时才进入 RTL，不能把 MSHR 数量或 cache 容量直接按剩余资源拉满。
-14. 指令融合先按 FUS01 做退休 trace 和离线 replay。它不减少 32-bit 指令的取指流量，
-    若主要暴露瓶颈仍是前端 fetch/translation，单纯压缩后端 uop 几乎没有周期收益。只有
-    eligible pair 动态占比、依赖链等待或 ROB/IQ/dispatch exposed stall 显著时，才比较
-    “两 ROB entry/一执行项”和“单复合 ROB entry/两退休事件”两种原型；禁止先融合访存、
-    CSR、TLB、CACOP、LL/SC 或 barrier。
+候选编号、完整账本、当前状态、已测效果和下一轮优先级已迁移到
+[optimization-candidates.md](optimization-candidates.md)。本文件保留十二阶段微架构教学、
+机制推导和实例；候选状态只在总账维护，避免教学正文与实验进度形成两份冲突来源。
 
 ## 6. 讨论记录
+
+本章按记录日期保留理论推导和当时证据，文中的“当前”只指对应记录节点。候选在现行
+RTL 中的状态、默认开关和实测效果统一以 [optimization-candidates.md](optimization-candidates.md)
+为准；历史讨论不再承担状态总账职责。
 
 ### 2026-08-04：`d9bab16..6bbca9b` 全文 2nd pass
 
@@ -355,12 +241,12 @@ B response，并不能证明一个更年轻的访存在它确定为 SUC 之前�
 | 2. 前端 | predictor 和 frontend source 没有实质改造；当前 WNS 转为 F03，热翻译/取指 II 与 B02/B03 仍待计数器证明 |
 | 3. Decode/Rename | CACOP 从 LSU 类改路由到 barrier/P0，增加 CPUCFG geometry；R01、FreeList 边界和 R02 判断不变 |
 | 4. Allocation/Dispatch | memory epoch 进入 uop/分配原子条件；queue/window timing 门控简化；A01/D01/D02/Q01 仍未实现 |
-| 5. Wakeup/Select | 核心网络未重构，当前 top-10 已没有该族；C01 的 direct wake 仍用 `issueValid` 而非 `fire`，风险未关闭 |
-| 6. Execution/Completion | P0 增加 DBAR/IBAR/CACOP 多拍状态机；DIV 算法和 reservation/HOL 结构未变，C02/E01/E03 仍成立 |
-| 7. Commit/Recovery | 增加 memory epoch、精确系统 side effect 和 memory observation；branch 仍 commit-time 全恢复，C03/B01/B03/K01/K02 未关闭 |
-| 8. LSQ | uncached Store 改为 ROB-head 发出并等待匹配 B，LL/SC 粒度改为 cache line；C04 虚拟别名和 C06 SUC-before-classification 顺序仍开放 |
-| 9. Cache/AXI | 三层 CACOP、dirty writeback-invalidate、response ID/collision 获得覆盖；C05 的 cached refill/writeback error containment 仍开放 |
-| 10. MMU/CSR | timer、CPUCFG、TLB fault metadata 得到测试；层次 TLB只做 hit mux timing 改造，C07 mutation cancellation 与 C08 PS=21 拼接仍存在于当前源码 |
+| 5. Wakeup/Select | 该历史区间尚未关闭 C01；当前源码已改为 acceptance-qualified wakeup 并保留定向门禁 |
+| 6. Execution/Completion | 该历史区间尚未完成 C02；当前活动 DIV/MOD 算术、flush/restart 与 exactly-once completion 已形成门禁，E01 默认关闭 |
+| 7. Commit/Recovery | 该历史区间尚未关闭 C03/B03；当前 epoch/wraparound 已闭环，B03-full 已保留，B01/K01/K02 仍属开放性能方向 |
+| 8. LSQ | 该历史区间尚未关闭 C04/C06；当前 PA alias/forwarding 与 MAT/SUC 顺序已有定向修复和回归 |
+| 9. Cache/AXI | 该历史区间尚未关闭 C05；当前 refill/writeback error containment 已形成门禁 |
+| 10. MMU/CSR | 该历史区间尚未关闭 C07/C08；当前 translation cancel 和 PS=21 拼接已修复并覆盖 |
 | 11. FPGA | 新网表从旧候选 `-0.225 ns` 变为 `+0.044 ns`；WNS 转到 F03，slice occupancy 81.23%，频率余量仍很薄 |
 | 12. 决策实验 | M01 合同仍适用；所有 baseline key 改为 source/RTL hash/Chiplab 三元组，第一轮实际工作仍是 M0/M1 采样而非扩容 |
 
@@ -902,7 +788,7 @@ BRAM 余量为该方向提供了实现空间，但它不是收益证据。旧平
 87,266 Slice LUT（65.22%）、52,955 register（19.67%）、68.5/365 BRAM tile
 （18.77%）和 8/740 DSP（1.08%）；Slice 本身已经使用 79.47%。因此该器件真正紧张的
 仍是 LUT packing、slice 布局和 CPU 域布线，不能把剩余 BRAM 等价成“窗口可以免费
-翻倍”。当前 `60fba481 + c398` 虽有 `+0.044 ns` WNS，但 slice occupancy 已升至
+翻倍”。当时 `60fba481 + c398` 虽有 `+0.044 ns` WNS，但 slice occupancy 已升至
 81.23%，任何扩容仍必须同时证明周期收益和完整 SoC 时序；44 ps 不能视为可消费的稳定
 扩容预算。
 
@@ -1347,7 +1233,7 @@ setup slack 排名，最差 wakeup/select/compaction path 比全局 #2 **宽松 
 delay 与 slack 排名不完全一致，原因是 source/destination clock insertion、skew、setup
 和 CPR 不同，工程决策应以 slack 为主。
 
-2nd pass 的当前 `60fba481...` routed top 10 中已经没有 wakeup/select：9 条是 F03，另
+2nd pass 当时的 `60fba481...` routed top 10 中已经没有 wakeup/select：9 条是 F03，另
 1 条是 L1D refill/response。所以上述“违例 0.139 ns、top 50 有 34 条”只能回答旧 bit
 有多 critical，不能继续决定当前修改顺序。C01 是由 current RTL 静态谓词确认的正确性
 问题，仍保持最高测试优先级；T01/W01/Q01 则降为计数与新 top-N 再触发的性能候选。
@@ -2851,7 +2737,7 @@ predecode；代价主要是 I-miss early response增加一拍，而普通 hit不
 fetch group预先并行 predecode，再在近端选择，但 LUT和布线会增加。
 
 该旧网表只差约 0.225 ns 加必要 margin，局部寄存边界可能比大改 cache hierarchy更合适；
-route 占比很高，具体收益仍依赖 place/route。当前 `60fba481...` 已完成新的 100 MHz
+route 占比很高，具体收益仍依赖 place/route。当时 `60fba481...` 已完成新的 100 MHz
 implementation，F02 不在当前 top-10；当前 cache 相关次差路径是 L1D refill-mask 到
 response-data 的宽 mux，而全局 WNS 是 F03。F02 因此只作路径回归监控。
 
@@ -3407,7 +3293,7 @@ CPI = base-throughput CPI
 
 Fmax 分三层估计：
 
-1. 当前固定 `60fba481 + c398` 网表在一次 100 MHz Explore run 中得到 `+0.044 ns`；若只把这
+1. 当时固定 `60fba481 + c398` 网表在一次 100 MHz Explore run 中得到 `+0.044 ns`；若只把这
    44 ps 从 10 ns 周期中扣除，一阶等价约 100.4 MHz，但这个结果小于常见实现波动，不能
    当作已证明的超频空间。`8594150 + c398` 的 `-0.225 ns` 与一阶 97.8 MHz 只保留为
    同平台历史对照。
@@ -3833,9 +3719,9 @@ Verilator counter 无法证明 Fmax。正确性 gate 永远先于这个比值：
 随后才让最大 exposed opportunity 驱动一个独立 A/B。频率侧继续以 matching RTL 的完整
 SoC routed report 为准，与仿真 cycle 通过 `cycles/frequency` 合并决策。
 
-上述正确性 gate、M0-M6 阶梯、候选路由和完整 SoC 接受条件已经提取为 CPU 仓库中的
-`docs/verification-workflow.md`。本笔记继续保留理论推导和候选账本；该计划负责下一阶段
-的实际执行顺序与交付物。
+上述正确性 gate、M0-M6 阶梯、候选路由和完整 SoC 接受条件已经提取到
+`docs/verification-workflow.md`。本笔记继续保留理论推导；候选状态和效果只在
+`docs/optimization-candidates.md` 维护。
 
 ## 7. 证据索引
 
@@ -3856,11 +3742,12 @@ SoC routed report 为准，与仿真 cycle 通过 `cycles/frequency` 合并决�
 - 顶层数据流：`cpu/src/main/scala/miku/core/OooCore.scala`
 - 历史验证状态：`docs/archive/nscscc-cpu-final-docs/refactor/status.yml`；当前结果以候选清单为准。
 - 当前优化与测试合同：`docs/verification-workflow.md`
+- 当前候选状态与效果：`docs/optimization-candidates.md`
 - 本轮实现记录已随旧 CPU 仓库归档；迁移来源见 `docs/archive/migration-provenance.md`。
 - 同平台历史 timing-fail 产物已在稳定版确认后清理，不作为保留证据。
 - 当前稳定归档目录：`Stable_Backup/`（其中的具体候选以各自 `manifest.txt` 为准）。
 - Standalone 层次资源属于可再生输出，保存于 `build/vivado/`，不作为当前设计的固定证据。
-- 微架构框图：`docs/architecture.md`
+- 历史参考框图：`chiplab/IP/myCPU/doc/picture/框图.svg`；当前结构以本文和 Scala 源码为准
 - Decode：`cpu/src/main/scala/miku/frontend/WideDecode.scala`、
   `cpu/src/main/scala/miku/frontend/La32rDecoder.scala`
 - Rename 边界与 uop：`cpu/src/main/scala/miku/backend/DecodeRenameBuffer.scala`、

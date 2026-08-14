@@ -50,6 +50,17 @@ class RepositoryContractTest(unittest.TestCase):
         self.assertNotIn("CPU_SBT_TARGET", container_runner)
         self.assertIn("cpu/target/spinal-sim", container_runner)
 
+    def test_documentation_entry_points_and_candidate_ledger(self) -> None:
+        result = subprocess.run(
+            ["python3", "scripts/common/check_docs.py"],
+            cwd=ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
