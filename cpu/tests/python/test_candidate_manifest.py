@@ -130,6 +130,23 @@ class CandidateManifestTest(unittest.TestCase):
             )
             self.assertEqual(parse_utilization(report)["bram_tiles"], 56.5)
 
+    def test_zero_wns_is_not_a_stable_milestone(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            bitstream = Path(directory) / "soc_top.bit"
+            bitstream.write_bytes(b"bitstream")
+            clock = {
+                "setup_wns_ns": "0.000",
+                "hold_wns_ns": "0.020",
+                "actual_cpu_mhz": "100.000000",
+                "actual_sys_mhz": "100.000000",
+                "actual_ddr_mhz": "200.000000",
+            }
+            drc = {"errors": 0, "critical_warnings": 0, "fully_routed": True}
+            self.assertFalse(implementation_passes(clock, drc, bitstream, 100.0))
+            clock["setup_wns_ns"] = "0.010"
+            clock["hold_wns_ns"] = "0.000"
+            self.assertFalse(implementation_passes(clock, drc, bitstream, 100.0))
+
     def test_postroute_is_exploration_only(self) -> None:
         self.assertEqual(select_archive_class("postroute", "auto", True), "candidate")
         self.assertEqual(select_archive_class("postroute", "candidate", False), "candidate")

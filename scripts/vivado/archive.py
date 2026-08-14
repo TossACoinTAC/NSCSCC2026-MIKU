@@ -149,8 +149,8 @@ def implementation_passes(
     )
     return (
         clock_matches
-        and setup >= 0.0
-        and hold >= 0.0
+        and setup > 0.0
+        and hold > 0.0
         and drc["errors"] == 0
         and drc["critical_warnings"] == 0
         and drc["fully_routed"]
@@ -168,7 +168,7 @@ def select_archive_class(stage: str, requested: str, timing_pass: bool) -> str:
         return "candidate"
     if requested == "stable" and not timing_pass:
         raise ArchiveError(
-            "完整实现未同时满足 setup/hold、DRC、fully-routed 和 bitstream，拒绝 stable 归档"
+            "完整实现未同时满足正 setup/hold WNS、DRC、fully-routed 和 bitstream，拒绝 stable 归档"
         )
     if requested == "auto":
         return "stable" if timing_pass else "candidate"
