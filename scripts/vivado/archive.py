@@ -18,6 +18,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "experiment"))
 from common import (
     ExperimentError,
+    load_perf_matrix,
     load_json as load_experiment_json,
     validate_experiment_manifest,
 )
@@ -207,6 +208,29 @@ def artifact_record(path: Path) -> dict[str, int | str]:
     return {"sha256": sha256(path), "bytes": path.stat().st_size}
 
 
+def expand_evidence_files(root: Path, evidence: list[Path]) -> list[Path]:
+    """Add the run identity files required to reuse an explicit perf20 matrix."""
+    expanded: dict[Path, None] = {}
+    for source in evidence:
+        source = source.resolve()
+        expanded[source] = None
+        if not (source.name.startswith("matrix_") and source.name.endswith("_perf20.csv")):
+            continue
+        matrix = load_perf_matrix(source)
+        for run in matrix["runs"].values():
+            for filename in ("run-manifest.txt", "perf20-result.json"):
+                companion = (run / filename).resolve()
+                try:
+                    companion.relative_to(root)
+                except ValueError as error:
+                    raise ArchiveError(
+                        f"perf20 矩阵伴随证据越出工作区: {companion}"
+                    ) from error
+                require_file(companion)
+                expanded[companion] = None
+    return list(expanded)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
@@ -291,6 +315,7 @@ def main() -> int:
     experiment, evidence = load_experiment_evidence(
         root, args.experiment_manifest, generation, args.chiplab_commit
     )
+    evidence = expand_evidence_files(root, evidence)
     manifest: dict[str, Any] = {
         "schema_version": 2,
         "artifact_class": selected_class,

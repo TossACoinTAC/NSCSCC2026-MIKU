@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -11,6 +12,7 @@ from contracts import ContractError, validate_candidate_manifest
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts/vivado"))
 from archive import (
     ArchiveError,
+    expand_evidence_files,
     implementation_passes,
     load_experiment_evidence,
     parse_drc,
@@ -21,6 +23,47 @@ from archive import (
 
 
 class CandidateManifestTest(unittest.TestCase):
+    def test_archive_expands_explicit_perf20_matrix_for_reuse(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            matrix_root = root / "build/sim/run/ideal"
+            matrix_root.mkdir(parents=True)
+            matrix = matrix_root / "matrix_fixture_perf20.csv"
+            rows = ["benchmark,memory_mode,seed,cpu_cycles,verdict,result_path"]
+            expected = {matrix.resolve()}
+            for index in range(20):
+                benchmark = f"bench_{index:02d}"
+                lane_relative = f"perf20__{benchmark}/seed_0/limit_1ns"
+                lane = matrix_root / lane_relative
+                lane.mkdir(parents=True)
+                manifest = lane / "run-manifest.txt"
+                result = lane / "perf20-result.json"
+                manifest.write_text(
+                    "\n".join((
+                        f"cpu_commit={'a' * 40}",
+                        f"chiplab_commit={'b' * 40}",
+                        "profile=clean",
+                        "suite=perf20",
+                        "memory_mode=ideal",
+                        f"model_key={'c' * 64}",
+                        f"software_key={'d' * 64}",
+                    )) + "\n",
+                    encoding="utf-8",
+                )
+                result.write_text(
+                    json.dumps({"cpu_cycles": 1000 + index}), encoding="utf-8"
+                )
+                rows.append(
+                    f"{benchmark},ideal,0,{1000 + index},pass,{lane_relative}"
+                )
+                expected.update((manifest.resolve(), result.resolve()))
+            matrix.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+            self.assertEqual(set(expand_evidence_files(root, [matrix])), expected)
+            manifest.unlink()
+            with self.assertRaises(ValueError):
+                expand_evidence_files(root, [matrix])
+
     def test_hash_chain(self) -> None:
         validate_candidate_manifest({
             "schema_version": 1, "cpu_source_commit": "workspace:abc",

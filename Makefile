@@ -63,7 +63,7 @@ CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 .PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
-  cpu-test cpu-test-all cpu-generate cpu-check cpu-locked-gates \
+  cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
@@ -81,6 +81,7 @@ help:
 		'  make test-impact         按变更路径列出必须运行的测试' \
 		'  make perf-observation-summary 汇总 instrumented perf20 ROI' \
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
+		'  make cpu-contract-test 运行全部轻量 Python 合同测试' \
 		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
 		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
 		'  make sim                单个软件仿真（RUN_SOFTWARE 可覆盖）' \
@@ -159,6 +160,10 @@ cpu-test:
 cpu-test-all:
 	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch test'
 
+cpu-contract-test:
+	@$(CONTAINER_RUN) python3 -I -m unittest discover \
+		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
+
 cpu-generate:
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@rm -rf "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
@@ -190,9 +195,7 @@ cpu-locked-gates: cpu-generate
 		--ports "$(CPU_DIR)/reference/core-top.ports.json" --rtl "$(BUILD_ROOT)/rtl/mycpu_top.v" \
 		--out-dir "$(BUILD_ROOT)/gates/yosys" --yosys /usr/bin/yosys
 
-cpu-check: cpu-test-all cpu-generate cpu-locked-gates docs-check
-	@$(CONTAINER_RUN) python3 -I -m unittest discover \
-		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
+cpu-check: cpu-test-all cpu-generate cpu-locked-gates docs-check cpu-contract-test
 
 sim-prepare: cpu-generate
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/prepare" \

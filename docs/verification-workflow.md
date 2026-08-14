@@ -135,7 +135,10 @@ model hash。每个候选 manifest 至少包含 CPU source、RTL、software、cl
 
 完整 SoC 实现成功返回后由 `make soc-archive` 校验并归档。调用方必须传入
 `SOC_EXPERIMENT_MANIFEST`；归档器只复制该清单逐项列出且 hash 仍匹配的证据，不再扫描
-同一短 hash 目录并模糊收集矩阵。默认 `auto` 分类只允许从当前
+同一短 hash 目录并模糊收集矩阵。显式证据若是 perf20 矩阵，矩阵每行的安全相对
+`result_path` 视为该矩阵的结构化组成，只补录后续 A/B 所需的 `run-manifest.txt` 和
+`perf20-result.json`；归档后的 CSV 因此仍可直接交给 `experiment-compare`，不会连带复制
+未被矩阵引用的其他 run。默认 `auto` 分类只允许从当前
 RTL 直接执行一次完整 implementation（`implementation_stage=full`），并同时满足 setup/hold
 非负、routed DRC 0 error/critical warning、fully routed 和 bitstream 完整的实现进入
 `Stable_Backup/`；其余已产生完整报告的实现进入 `Post_Impl_Bundles/`。归档身份来自
