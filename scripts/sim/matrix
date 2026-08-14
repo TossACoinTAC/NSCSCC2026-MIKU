@@ -406,7 +406,7 @@ summary="$run_root/matrix_${matrix_id}_summary.txt"
 } > "$summary"
 if [[ $suite == perf20 ]]; then
   results_csv="$run_root/matrix_${matrix_id}_perf20.csv"
-  printf 'benchmark,memory_mode,seed,cpu_cycles,verdict\n' > "$results_csv"
+  printf 'benchmark,memory_mode,seed,cpu_cycles,verdict,result_path\n' > "$results_csv"
   for workload in "${workload_list[@]}"; do
     slug=${workload//\//__}
     for seed in "${seed_list[@]}"; do
@@ -416,8 +416,9 @@ if [[ $suite == perf20 ]]; then
       if [[ -f $lane_dir/perf20-result.json ]]; then
         cpu_cycles=$(sed -n 's/.*"cpu_cycles":\([0-9][0-9]*\).*/\1/p' "$lane_dir/perf20-result.json")
       fi
-      printf '%s,%s,%s,%s,%s\n' \
+      printf '%s,%s,%s,%s,%s,%s\n' \
         "${workload#perf20/}" "$memory_mode" "$seed" "$cpu_cycles" "$verdict" \
+        "${lane_dir#"$run_root/"}" \
         >> "$results_csv"
     done
   done

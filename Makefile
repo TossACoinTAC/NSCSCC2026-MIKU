@@ -47,6 +47,8 @@ COMPARE_ID ?= comparison-$(shell date +%Y%m%d-%H%M%S)
 COMPARE_OUT ?= $(BUILD_ROOT)/reports/comparisons/$(COMPARE_ID).json
 TIMING_REPORT ?=
 TIMING_OUT ?= $(BUILD_ROOT)/reports/timing/$(notdir $(basename $(TIMING_REPORT))).json
+PERF_OBSERVATION_MATRIX ?=
+PERF_OBSERVATION_OUT ?= $(BUILD_ROOT)/reports/observations/perf20-$(shell date +%Y%m%d-%H%M%S).json
 TEST_BASE ?= HEAD
 TEST_IMPACT_OUT ?= $(BUILD_ROOT)/reports/test-impact/$(shell date +%Y%m%d-%H%M%S).json
 POST_ROUTE_INPUT_DCP ?= $(BUILD_ROOT)/chiplab-perf/fpga/nscscc-team/run_vivado/project/loongson.runs/impl_1/soc_top_routed.dcp
@@ -60,7 +62,7 @@ FUNC58_WORKLOADS := func58
 CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_CACHE_VOLUME=$(DOCKER_CACHE_VOLUME) $(ROOT_DIR)/scripts/env/run-in-container
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-.PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact \
+.PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
@@ -77,6 +79,7 @@ help:
 		'  make experiment-compare 比较两组身份兼容的完整 perf20' \
 		'  make timing-analyze      自动归类 Vivado top timing paths' \
 		'  make test-impact         按变更路径列出必须运行的测试' \
+		'  make perf-observation-summary 汇总 instrumented perf20 ROI' \
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
 		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
 		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
@@ -138,6 +141,11 @@ experiment-compare:
 timing-analyze:
 	@test -n "$(strip $(TIMING_REPORT))" || { printf 'TIMING_REPORT 不能为空\n' >&2; exit 2; }
 	@python3 scripts/experiment/timing_analyze.py --report "$(TIMING_REPORT)" --out "$(TIMING_OUT)"
+
+perf-observation-summary:
+	@test -n "$(strip $(PERF_OBSERVATION_MATRIX))" || { printf 'PERF_OBSERVATION_MATRIX 不能为空\n' >&2; exit 2; }
+	@python3 scripts/experiment/perf_observation_summary.py \
+		--matrix "$(PERF_OBSERVATION_MATRIX)" --out "$(PERF_OBSERVATION_OUT)"
 
 test-impact:
 	@python3 scripts/experiment/test_impact.py --root "$(ROOT_DIR)" \

@@ -14,6 +14,9 @@ tests:
   - name: perf-observation
     path: tests/python/test_perf_observation_contract.py
     categories: [artifact, harness]
+  - name: perf-observation-summary
+    path: tests/python/test_perf_observation_summary.py
+    categories: [artifact, harness]
   - name: toolchain
     path: tests/python/test_toolchain_contract.py
     categories: [config, artifact]

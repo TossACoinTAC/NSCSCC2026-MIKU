@@ -27,25 +27,29 @@ BENCHMARKS = [f"bench_{index:02d}" for index in range(20)]
 
 
 def write_matrix(root: Path, name: str, *, software_key: str = "b" * 64,
-                 cycle_delta: int = 0, failing: bool = False) -> Path:
+                 cycle_delta: int = 0, failing: bool = False,
+                 explicit_paths: bool = False) -> Path:
     matrix_root = root / name / "ideal"
     matrix_root.mkdir(parents=True)
     matrix = matrix_root / "matrix_perf20.csv"
     with matrix.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(
-            stream,
-            fieldnames=("benchmark", "memory_mode", "seed", "cpu_cycles", "verdict"),
-        )
+        fields = ["benchmark", "memory_mode", "seed", "cpu_cycles", "verdict"]
+        if explicit_paths:
+            fields.append("result_path")
+        writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()
         for index, benchmark in enumerate(BENCHMARKS):
             cycles = 1000 + index * 10 + cycle_delta
-            writer.writerow({
+            row = {
                 "benchmark": benchmark,
                 "memory_mode": "ideal",
                 "seed": 0,
                 "cpu_cycles": cycles,
                 "verdict": "fail" if failing and index == 0 else "pass",
-            })
+            }
+            if explicit_paths:
+                row["result_path"] = f"perf20__{benchmark}/seed_0/limit_1ns"
+            writer.writerow(row)
             lane = matrix_root / f"perf20__{benchmark}" / "seed_0" / "limit_1ns"
             lane.mkdir(parents=True)
             (lane / "perf20-result.json").write_text(
@@ -93,6 +97,26 @@ class ExperimentContractTest(unittest.TestCase):
                 compare_perf_matrices(baseline, failing)
             with self.assertRaises(ExperimentError):
                 compare_perf_matrices(baseline, wrong_software)
+
+    def test_perf20_accepts_explicit_result_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            baseline = write_matrix(root, "baseline", explicit_paths=True)
+            same = write_matrix(root, "same", explicit_paths=True)
+            result = compare_perf_matrices(baseline, same)
+            self.assertTrue(result["summary"]["exactly_equal"])
+
+    def test_perf20_rejects_result_path_escape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            matrix = write_matrix(root, "baseline", explicit_paths=True)
+            text = matrix.read_text(encoding="utf-8")
+            matrix.write_text(
+                text.replace("perf20__bench_00/seed_0/limit_1ns", "../../escape", 1),
+                encoding="utf-8",
+            )
+            with self.assertRaises(ExperimentError):
+                compare_perf_matrices(matrix, matrix)
 
     def test_manifest_rejects_tampered_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

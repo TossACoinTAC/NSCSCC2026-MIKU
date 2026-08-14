@@ -167,11 +167,14 @@ def load_perf_matrix(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise ExperimentError(f"perf20 矩阵不存在: {path}")
     rows: dict[tuple[str, str, int], int] = {}
+    runs: dict[tuple[str, str, int], Path] = {}
     identities: list[dict[str, str]] = []
     with path.open(newline="", encoding="utf-8") as stream:
         reader = csv.DictReader(stream)
         required = {"benchmark", "memory_mode", "seed", "cpu_cycles", "verdict"}
-        if set(reader.fieldnames or ()) != required:
+        allowed = required | {"result_path"}
+        fields = set(reader.fieldnames or ())
+        if not required <= fields or not fields <= allowed:
             raise ExperimentError(f"perf20 矩阵列错误: {path}")
         for number, row in enumerate(reader, 2):
             if row["verdict"] != "pass":
@@ -187,7 +190,32 @@ def load_perf_matrix(path: Path) -> dict[str, Any]:
             if key in rows:
                 raise ExperimentError(f"perf20 矩阵 key 重复: {key}")
             rows[key] = cycles
-            _, identity = _matching_run(path, row["benchmark"], seed, cycles)
+            result_path = row.get("result_path", "")
+            if result_path:
+                lane = (path.parent / result_path).resolve()
+                try:
+                    lane.relative_to(path.parent.resolve())
+                except ValueError as error:
+                    raise ExperimentError(
+                        f"perf20 result_path 越出矩阵目录: {result_path}"
+                    ) from error
+                manifest = lane / "run-manifest.txt"
+                result_file = lane / "perf20-result.json"
+                if not manifest.is_file() or not result_file.is_file():
+                    raise ExperimentError(
+                        f"perf20 result_path 缺少结果或身份文件: {result_path}"
+                    )
+                if load_json(result_file).get("cpu_cycles") != cycles:
+                    raise ExperimentError(
+                        f"perf20 result_path 周期与矩阵不一致: {result_path}"
+                    )
+                identity = parse_key_values(manifest)
+            else:
+                manifest, identity = _matching_run(
+                    path, row["benchmark"], seed, cycles
+                )
+                lane = manifest.parent
+            runs[key] = lane
             identities.append(identity)
     if not rows:
         raise ExperimentError(f"perf20 矩阵为空: {path}")
@@ -199,7 +227,7 @@ def load_perf_matrix(path: Path) -> dict[str, Any]:
             raise ExperimentError(f"perf20 矩阵内部身份不一致: {path}")
     if reference["suite"] == "perf20" and len(rows) != 20:
         raise ExperimentError(f"完整 perf20 必须恰好包含 20 项，实际 {len(rows)} 项")
-    return {"path": path, "rows": rows, "identity": reference}
+    return {"path": path, "rows": rows, "runs": runs, "identity": reference}
 
 
 def compare_perf_matrices(baseline_path: Path, candidate_path: Path) -> dict[str, Any]:
