@@ -109,11 +109,14 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val translatedExceptionValid = RegInit(False)
   val translatedException = Reg(ExceptionMetadata())
   val cacheOutstanding = RegInit(False)
+  val cacheOwnerUncached = RegInit(False)
   val cacheDropPending = RegInit(False)
   val cacheResponseContextPending = RegInit(False)
   val predictionCorrectionFlushPending = RegInit(False)
   val predictionCorrectionNextPc =
     Reg(UInt(config.xlen bits)) init (U(config.resetVector, config.xlen bits))
+  val predictionCorrectionTranslationDrainPending = RegInit(False)
+  val predictionCorrectionUncachedDrainPending = RegInit(False)
   // Preload the single active owner before allocation.  Idle requests track nextFetchPc, while a
   // turnover response installs its predicted successor independently of translator ready.  This
   // preserves the acceptance timing cut without leaving a bank selector on every owner consumer.
@@ -405,17 +408,24 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   // from registered state; address matching qualifies acceptance without feeding the comparator
   // result back through every prediction lane.
   val responseSelectsPendingContext = cacheResponseContextPending
+  val activeCacheDropPending = if (config.enableDeferredFrontendCorrectionCleanup) {
+    cacheDropPending ||
+      (predictionCorrectionFlushPending && predictionCorrectionUncachedDrainPending)
+  } else {
+    cacheDropPending
+  }
   val responseUsesPendingContext = io.cacheResponseValid && responseSelectsPendingContext &&
     pendingCacheResponseMatches && !cachedCorrectionKillPending
   val responseUsesActiveContext = io.cacheResponseValid && !responseSelectsPendingContext &&
     cacheOutstanding && activeCacheResponseMatches
   val responseFire = !io.redirectValid &&
-    (responseUsesPendingContext || (responseUsesActiveContext && !cacheDropPending))
-  val droppedResponseFire = !io.redirectValid && responseUsesActiveContext && cacheDropPending
+    (responseUsesPendingContext || (responseUsesActiveContext && !activeCacheDropPending))
+  val droppedResponseFire = !io.redirectValid &&
+    responseUsesActiveContext && activeCacheDropPending
 
   val hitTurnoverContextAvailable = !cacheResponseContextPending || responseUsesPendingContext
   val earlyCachedResponsePending = if (config.enableFrontendCacheHitTurnover) {
-    io.cacheHitResponsePending && cacheOutstanding && !cacheDropPending &&
+    io.cacheHitResponsePending && cacheOutstanding && !activeCacheDropPending &&
       hitTurnoverContextAvailable && !io.redirectValid
   } else {
     False
@@ -427,10 +437,15 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     translatedUncached
   )
 
+  val correctionCleanupAllowsRequest = if (config.enableDeferredFrontendCorrectionCleanup) {
+    !predictionCorrectionFlushPending
+  } else {
+    True
+  }
   val cacheRequestBaseValid = (translatedRequestValid || translationResponseBypassValid) &&
     (!cacheOutstanding || responseFire || droppedResponseFire ||
       (earlyCachedResponsePending && !requestUncached)) && !io.redirectValid &&
-    cacheRequestCapacityAvailable
+    cacheRequestCapacityAvailable && correctionCleanupAllowsRequest
   io.cacheRequestValid := cacheRequestBaseValid && !requestUncached
   io.cacheUncachedRequestValid := cacheRequestBaseValid && requestUncached
   io.cacheRequest.virtualAddress := requestTranslationPc
@@ -468,8 +483,22 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   }
   targetPredictorLookupPc := translationRequestPc
   targetPredictor.io.lookupValid := translationRequestFire
-  correctionKillsCachedRequest := predictionCorrectionOnResponse &&
-    (cachedRequestFire || (responseUsesPendingContext && cacheOutstanding))
+  val correctionYoungerOwnerPresent = requestFire ||
+    (responseUsesPendingContext && cacheOutstanding)
+  val correctionYoungerOwnerUncached = Mux(
+    requestFire,
+    requestUncached,
+    cacheOwnerUncached
+  )
+  if (config.enableDeferredFrontendCorrectionCleanup) {
+    correctionKillsCachedRequest := predictionCorrectionOnResponse &&
+      correctionYoungerOwnerPresent && !correctionYoungerOwnerUncached
+  } else {
+    correctionKillsCachedRequest := predictionCorrectionOnResponse &&
+      (cachedRequestFire || (responseUsesPendingContext && cacheOutstanding))
+  }
+  val correctionCreatesUncachedDrain = predictionCorrectionOnResponse &&
+    correctionYoungerOwnerPresent && correctionYoungerOwnerUncached
   // The cache-array lookup is synchronous, so canceling the just-accepted wrong-path request on
   // the following cycle still prevents both a hit response and a miss allocation.  Registering
   // this pulse also keeps response predecode out of the L1I response-register enable cone.
@@ -810,9 +839,12 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     translatedRequestValid := False
     translatedExceptionValid := False
     cacheOutstanding := False
+    cacheOwnerUncached := False
     cacheDropPending := False
     cacheResponseContextPending := False
     predictionPendingValid := False
+    predictionCorrectionTranslationDrainPending := False
+    predictionCorrectionUncachedDrainPending := False
   }.otherwise {
     when(translationRequestFire) {
       translationOutstanding := True
@@ -854,6 +886,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     when(requestFire) {
       translatedRequestValid := False
       cacheOutstanding := True
+      cacheOwnerUncached := requestUncached
       cacheDropPending := False
       cachePc := requestTranslationPc
       cachePredictedTaken := requestPredictedTaken
@@ -872,24 +905,36 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       // A cached wrong-path handoff is accepted to keep response decode out of the L1I lookup
       // enable, then canceled at the L1 boundary.  Uncached AXI requests cannot be canceled and
       // therefore retain the response-drain protocol.
-      when(!responseUsesPendingContext) {
-        cacheOutstanding := requestFire && !correctionKillsCachedRequest
-        cacheDropPending := predictionCorrectionOnResponse && uncachedRequestFire
-      }.elsewhen(predictionCorrectionOnResponse) {
-        cacheOutstanding := requestFire && !correctionKillsCachedRequest
-        cacheDropPending := predictionCorrectionOnResponse && uncachedRequestFire
+      if (config.enableDeferredFrontendCorrectionCleanup) {
+        when(!responseUsesPendingContext) {
+          cacheOutstanding := requestFire
+        }
+        predictionCorrectionUncachedDrainPending := correctionCreatesUncachedDrain
+      } else {
+        when(!responseUsesPendingContext) {
+          cacheOutstanding := requestFire && !correctionKillsCachedRequest
+          cacheDropPending := predictionCorrectionOnResponse && uncachedRequestFire
+        }.elsewhen(predictionCorrectionOnResponse) {
+          cacheOutstanding := requestFire && !correctionKillsCachedRequest
+          cacheDropPending := predictionCorrectionOnResponse && uncachedRequestFire
+        }
       }
       when(responseUsesPendingContext) {
         cacheResponseContextPending := False
       }
       when(predictionCorrectionOnResponse) {
-        translatedRequestValid := False
-        translatedExceptionValid := False
-        translationOutstanding := False
-        translationDropPending :=
+        predictionCorrectionTranslationDrainPending :=
           translationRequestFire ||
             ((translationOutstanding || translationDropPending) && !translationResponseFire)
-        predictionPendingValid := False
+        if (!config.enableDeferredFrontendCorrectionCleanup) {
+          translatedRequestValid := False
+          translatedExceptionValid := False
+          translationOutstanding := False
+          translationDropPending :=
+            translationRequestFire ||
+              ((translationOutstanding || translationDropPending) && !translationResponseFire)
+          predictionPendingValid := False
+        }
       }
       for (lane <- 0 until config.fetchWidth) {
         when(responsePayloadWriteValid(lane)) {
@@ -925,13 +970,33 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     }
     when(cachedCorrectionKillPending) {
       cacheResponseContextPending := False
+      if (config.enableDeferredFrontendCorrectionCleanup) {
+        cacheOutstanding := False
+        cacheOwnerUncached := False
+      }
     }
     // The flush-pending cycle already blocks translationRequest.valid. Installing
     // the registered target here preserves the first corrected request cycle.
     when(predictionCorrectionFlushPending) {
       nextFetchPc := predictionCorrectionNextPc
+      if (config.enableDeferredFrontendCorrectionCleanup) {
+        translatedRequestValid := False
+        translatedExceptionValid := False
+        translationOutstanding := False
+        translationDropPending :=
+          predictionCorrectionTranslationDrainPending && !translationResponseFire
+        cacheDropPending :=
+          predictionCorrectionUncachedDrainPending && !droppedResponseFire
+        predictionPendingValid := False
+        predictionCorrectionTranslationDrainPending := False
+        predictionCorrectionUncachedDrainPending := False
+      }
     }
+    val correctionCleanupAllowsException =
+      if (config.enableDeferredFrontendCorrectionCleanup) !predictionCorrectionFlushPending
+      else True
     val translationExceptionCommit = !cacheOutstanding && !translatedRequestValid &&
+      correctionCleanupAllowsException &&
       !io.redirectValid && freeSlots =/= 0 &&
       (translatedExceptionValid || translationExceptionFire)
     when(translationExceptionCommit) {

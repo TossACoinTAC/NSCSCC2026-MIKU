@@ -107,6 +107,7 @@ final case class OooCoreConfig(
     enableBalancedFrontendPredictionSelect: Boolean = true,
     enableFrontendCacheHitTurnover: Boolean = true,
     enableSpeculativeInstructionArrayRead: Boolean = true,
+    enableDeferredFrontendCorrectionCleanup: Boolean = true,
     enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,
     enableL2WriteBack: Boolean = true,

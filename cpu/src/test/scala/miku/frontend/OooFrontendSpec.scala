@@ -942,10 +942,18 @@ class OooFrontendSpec extends AnyFunSuite {
   }
 
   test("a predicted branch drains a sequential translation accepted on the response edge") {
-    SimConfig.withVerilator
-      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-frontend")
-      .compile(new OooFrontend(config))
-      .doSim("ooo-frontend-same-cycle-prediction-translation", 0x4c67) { dut =>
+    for (deferred <- Seq(false, true)) {
+      val testConfig = config.copy(enableDeferredFrontendCorrectionCleanup = deferred)
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-frontend-correction-$deferred"
+        )
+        .compile(new OooFrontend(testConfig))
+        .doSim(
+          s"ooo-frontend-same-cycle-prediction-translation-$deferred",
+          if (deferred) 0x4c6f else 0x4c67
+        ) { dut =>
         dut.clockDomain.forkStimulus(period = 10)
         clearInputs(dut)
         dut.clockDomain.assertReset()
@@ -1001,6 +1009,7 @@ class OooFrontendSpec extends AnyFunSuite {
         assert(dut.io.translationRequest.valid.toBoolean)
         assert(dut.io.translationRequest.virtualAddress.toBigInt == branchTarget)
       }
+    }
   }
 
   test("FixBranch kills a stale cached handoff at its synchronous lookup response") {
@@ -1352,6 +1361,77 @@ class OooFrontendSpec extends AnyFunSuite {
 
         returnGroup(dut, branchTarget, firstRd = 9)
         assert(dut.io.occupancy.toBigInt == 5)
+      }
+  }
+
+  test("FixBranch drops an uncached handoff response arriving during recovery") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-frontend-uncached-recovery"
+      )
+      .compile(new OooFrontend(config))
+      .doSim("ooo-frontend-fix-branch-uncached-recovery-response", 0x4c70) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        val base = config.resetVector
+        val sequentialPc = base + config.fetchWidth * 4
+        val branchTarget = base + 4 + 0x40
+        acceptFetch(dut, base)
+
+        dut.io.translationRequest.ready #= true
+        sample(dut)
+        dut.io.translationRequest.ready #= false
+        dut.io.translationResponse.valid #= true
+        dut.io.translationResponse.virtualAddress #= sequentialPc
+        dut.io.translationResponse.physicalAddress #= sequentialPc
+        dut.io.translationResponse.uncached #= true
+        sample(dut)
+        dut.io.translationResponse.valid #= false
+        dut.io.translationResponse.uncached #= false
+
+        dut.io.cacheRequestReady #= true
+        dut.io.cacheResponseValid #= true
+        dut.io.cacheResponse.virtualAddress #= base
+        dut.io.cacheResponse.physicalAddress #= base
+        dut.io.cacheResponse.instructions(0) #= (BigInt("00100000", 16) | 1)
+        dut.io.cacheResponse.instructions(1) #= encodeDirectBranch(0x14, 0x40)
+        dut.io.cacheResponse.instructions(2) #= (BigInt("00100000", 16) | 3)
+        dut.io.cacheResponse.instructions(3) #= (BigInt("00100000", 16) | 4)
+        setBranchPredecode(
+          dut,
+          lane = 1,
+          branchType = 1,
+          target = branchTarget,
+          staticTaken = true
+        )
+        sleep(1)
+        assert(dut.io.cacheUncachedRequestValid.toBoolean)
+        sample(dut)
+
+        // The drain bit is still a correction-local token in this cycle.  A minimum-latency
+        // external response must be classified as stale before the persistent drop state exists.
+        clearPredecode(dut)
+        dut.io.cacheRequestReady #= false
+        dut.io.cacheResponse.virtualAddress #= sequentialPc
+        dut.io.cacheResponse.physicalAddress #= sequentialPc
+        for (lane <- 0 until config.fetchWidth) {
+          dut.io.cacheResponse.instructions(lane) #= (BigInt("00100000", 16) | (5 + lane))
+        }
+        sleep(1)
+        assert(!dut.io.translationRequest.valid.toBoolean)
+        sample(dut)
+        dut.io.cacheResponseValid #= false
+
+        assert(dut.io.occupancy.toBigInt == 2)
+        assert(dut.io.fetchPc.toBigInt == branchTarget)
+        assert(dut.io.translationRequest.valid.toBoolean)
+        assert(dut.io.translationRequest.virtualAddress.toBigInt == branchTarget)
       }
   }
 
