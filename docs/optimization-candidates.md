@@ -97,7 +97,20 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | P02 | Vivado strategy/seed 与物理优化 A/B | `Explore`、phys_opt、LUT combining、局部寄存器复制和不同实现 seed 可能在同一 RTL 上改变 route-dominated WNS；适合先判断结果是否受物理随机性主导 | strategy/seed 不能替代 RTL 时序修复，跨 seed 选择最好的单次结果会造成过拟合；必须保留完整报告、实现选项、DRC 和 bitstream hash | 同一 RTL/软件下多个 seed 的 WNS/TNS、top-path 族、congestion、runtime、资源、cycle/frequency 产品；禁止跨 RTL 借用 slack | 探索方法已验证 | 首轮将 setup WNS/TNS 从 `-0.552/-116.580 ns` 改善到 `-0.125/-4.616 ns`；第二轮从首轮 DCP 改善到 `-0.055/-1.050 ns`。hold 均为正，DRC 0 error/critical warning、fully routed、bitstream 成功。最终 top-N 为 PHT、BTB/ATU、LSQ、IQ 和 L1I/frontend 多路径宽墙；所有 post-route 结果均仅作探索。 |
 | P01 | 物理感知的模块局部性、寄存器复制与必要的 floorplan 实验 | 完整 SoC 关键路径以 route delay 为主，说明逻辑等价的布局可能产生明显差异 | 过早固定 Pblock 会恶化全局拥塞并使结果依赖 seed；不能掩盖结构性广播问题 | congestion、SLR/clock-region 分布、跨区 nets、多个实现 seed 的 WNS 稳定性 | 讨论 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 
+### R1 周期透明候选
+
+| ID | 方向 | 价值机制 | 主要代价或风险 | 决策所需指标 | 状态 | 已测效果 |
+| --- | --- | --- | --- | --- | --- | --- |
+| BT01 | IQ payload 与全局 redirect 解耦 | flush/redirect 只控制 occupancy 和输出可见性，宽 payload 由局部 next-state 更新，避免全局 redirect 进入所有 IQ payload CE | flush 当拍和下一拍不得发出旧 uop；无条件 payload 写会增加局部翻转，必须确认恢复延迟不变 | IssueQueue flush/compaction 定向测试、完整 perf20 A/B、IQ top-N、LUT/FF | R1 待实现 | 尚无；目标为周期透明，并用 matching route 判断 IQ 路径变化。 |
+| MT01 | LSQ translation owner 更新局部化 | resident LQ entry 的物理地址写入仅由已注册 owner tuple one-hot 资格化，把 scheduled-load 选择从宽 entry CE 中移开 | owner、ROB pointer、epoch、flush/cancel 与 slot reuse 必须严格匹配，不能增加 response-to-request 延迟 | LSQ translation/cancel/reuse 测试、完整 perf20 A/B、LSQ top-N | R1 待实现 | 尚无；目标为周期透明。 |
+| MT02 | L1 miss 到 L2 lookup 请求资格局部化 | 每个 MSHR 以窄 `readRequestPending` 驱动 L2 仲裁，地址和 critical beat 继续来自已注册 payload，缩短 miss-state 到仲裁的控制锥 | 同拍置位不得增加一拍；多个 MSHR 等待、handshake 清除、writeback 后重入及仲裁顺序必须保持 | L1D MSHR/backpressure/多 miss 测试、完整 perf20 A/B、cache/L2 top-N | R1 待实现 | 尚无；目标为周期透明。 |
+| FT02 | 前端预测更新反馈解耦 | translation response 接受时形成窄 turnover token，使下一次翻译和 predictor speculative update 不再依赖 L1I tag-hit 回授 | token 必须完整保存 next PC、GHR、RAS、link 和预测上下文；不能改变热命中 fetch-group 启动间隔 | frontend/predictor correction、RAS、redirect 测试、完整 perf20 A/B、predictor top-N | R1 待实现 | 尚无；目标为周期透明。 |
+| FT03 | L1I response 到 frontend enqueue 去控制化 | 四 lane payload 固定位置写入，taken prefix、valid lane count 与 tail 可见性独立控制，减少 predecode/target 对宽 payload CE 的影响 | 被截断 lane 可写无效槽但绝不能可见；组内 taken、buffer wrap、redirect kill 和 decode 可见周期必须保持 | frontend buffer/taken-prefix/wrap/redirect 测试、完整 perf20 A/B、frontend top-N | R1 待实现 | 尚无；目标为周期透明。 |
+
 ## 4. 当前优先级与下一步
+
+本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
+为准；本文件继续作为候选状态与实测效果的唯一总账。
 
 当前 P1 正确性 gate 已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。本轮 E02 + frontend history turnover + FT01 已完成完整门禁、perf20 20/20、func58 三 seed和 matching full implementation，按用户确定的边界在 setup 尚未闭合处收尾；它是保留进入下一轮的 performance candidate，不是稳定竞赛 milestone。
 

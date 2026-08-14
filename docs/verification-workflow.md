@@ -5,8 +5,9 @@
 
 ## 一、阶段顺序
 
-1. **冻结基线**：记录根仓库 HEAD、`cpu/` 内容 hash、Chiplab HEAD、dirty patch
-   hash、软件镜像 hash、Docker image/tool hash 和当前实现 manifest。
+1. **冻结基线**：先生成 matching RTL，再用 `make experiment-freeze` 记录根仓库 HEAD、
+   `cpu/` 内容 hash、Chiplab HEAD、dirty patch hash、Docker image/tool hash，以及显式列出的
+   软件仿真、比较和功能证据。冻结清单是归档输入，不靠目录名或短 hash 猜测证据。
 2. **变更分类与候选设计**：标为性能参数、内部结构、公开接口、RTL 生成文本、仿真
    harness 或工具环境变化。每一类声明预期不变量和观测指标。性能候选在设计和实现时
    同步检查寄存边界、组合锥、宽 mux、跨模块控制和高扇出，优先选择周期收益相同而
@@ -23,7 +24,8 @@
    三个 AXI seed；perf20 一次跑完整 20 项，包含 `stringsearch`。
 6. **性能归因**：保存每项 cycles、end reason、模型 hash 和 seed。对前端、后端、
    LSU/cache、memory/AXI、DIV 和 predictor 只使用同一 baseline 的 paired A/B；
-   不用几何平均掩盖单项退化。
+   `make experiment-compare` 同时输出逐项变化、总周期和归一化几何平均。几何平均用于轮次
+   晋级，逐项表负责暴露回退，两者都必须保留。
 7. **实现验证**：性能候选使用 100 MHz clean SoC full implementation；功能里程碑补做
    function implementation。保存 DRC、setup/hold WNS/TNS、top failing endpoints、
    LUT/FF/BRAM/DSP、requested/actual clock 和 bitstream hash。若 full route 已 fully routed、
@@ -70,6 +72,23 @@ CPU 修改
 该修改属于下一候选版本，必须重新运行受影响的定向测试、完整门禁和 perf20，不能直接
 沿用修改前的周期或 RTL hash。
 
+### 实验身份入口
+
+```text
+make test-impact TEST_BASE=<baseline-commit>
+make experiment-compare BASE_MATRIX=<baseline.csv> CANDIDATE_MATRIX=<candidate.csv> \
+  COMPARE_ID=<candidate-id>
+make experiment-freeze EXPERIMENT_ID=<round-id> \
+  EXPERIMENT_EVIDENCE="<perf20.csv> <comparison.json> <func58.csv>"
+make timing-analyze TIMING_REPORT=<cpu_setup_top50.rpt>
+make soc-impl SOC_EXPERIMENT_MANIFEST=<experiment-manifest.json>
+```
+
+`test-impact` 由 `cpu/tests/manifest.yml` 路由到版本化 path-to-suite 映射；它给出最低定向
+集合，不替代完整 `cpu-check`。比较器要求两组矩阵均为完整 20/20 pass，且 Chiplab、profile、
+suite、memory mode、software key 与 workload/seed 集合一致。模型和 CPU 身份允许不同，
+因为这正是 A/B 的变量。
+
 ### 仿真缓存合同
 
 `build/sim/cache/` 下的三层缓存分别承担不同身份：
@@ -114,12 +133,15 @@ harness 可构建，不能替代运行验证；超时首先与软件启动成本
 model hash。每个候选 manifest 至少包含 CPU source、RTL、software、clock、功能结果、
 实现报告和对应 hash。旧实现或旧 Chiplab 的 WNS 只能作为历史参考。
 
-完整 SoC 实现成功返回后由 `make soc-archive` 校验并归档。默认 `auto` 分类只允许从当前
+完整 SoC 实现成功返回后由 `make soc-archive` 校验并归档。调用方必须传入
+`SOC_EXPERIMENT_MANIFEST`；归档器只复制该清单逐项列出且 hash 仍匹配的证据，不再扫描
+同一短 hash 目录并模糊收集矩阵。默认 `auto` 分类只允许从当前
 RTL 直接执行一次完整 implementation（`implementation_stage=full`），并同时满足 setup/hold
 非负、routed DRC 0 error/critical warning、fully routed 和 bitstream 完整的实现进入
 `Stable_Backup/`；其余已产生完整报告的实现进入 `Post_Impl_Bundles/`。归档身份来自
 `build/rtl/generation-manifest.json`，并再次核对根发布 RTL 与 Vivado staging RTL 的哈希，
-不能用归档时的文档 HEAD 冒充生成 RTL 的源码提交。归档采用临时目录加原子改名；同一
+不能用归档时的文档 HEAD 冒充生成 RTL 的源码提交。实验清单中的源码树、raw/published
+RTL、generation manifest 和 Chiplab 身份还会再次与当前 implementation 输入核对。归档采用临时目录加原子改名；同一
 实现再次归档时，先核对 RTL 与 bitstream hash，再幂等补录新增的 top-N、route status 或
 资源报告，不覆盖身份不同的证据。
 
