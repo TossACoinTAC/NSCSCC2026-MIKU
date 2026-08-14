@@ -125,7 +125,7 @@ class PerfObservationSummaryTest(unittest.TestCase):
             self.assertEqual(raw["score_cycles"], 20000)
             self.assertEqual(raw["roi_cycles"], 19980)
             self.assertEqual(raw["retired_instructions"], 10000)
-            self.assertEqual(result["source_schema"], "miku-perf-observation-v4")
+            self.assertEqual(result["source_schema"], "miku-perf-observation-v5")
             self.assertEqual(
                 raw["rob_zero_retire_head_reason"]["incomplete"], 0
             )

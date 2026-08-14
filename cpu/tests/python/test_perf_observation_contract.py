@@ -24,7 +24,7 @@ OBSERVATION_SOURCES = (
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v4",
+        "schema_version": "miku-perf-observation-v5",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
         "roi": {
             "mode": "outermost-counter-read-pair",
@@ -96,11 +96,13 @@ def valid_document() -> dict:
             "recovery_matches": 0,
             "recovery_without_resolution": 0,
             "resolve_to_recovery_histogram": [0] * 8,
+            "head_completion_opportunity": 0,
+            "head_mispredict_opportunity": 0,
         },
         "lsq": {
             "load_occupancy_sum": 0,
             "store_occupancy_sum": 0,
-            "events": [0] * 28,
+            "events": [0] * 46,
         },
         "cache": {"events": [0] * 20, "occupancy_sum": [0] * 3},
         "axi": {
@@ -148,6 +150,7 @@ class PerfObservationContractTest(unittest.TestCase):
         document["schema_version"] = "miku-perf-observation-v1"
         document["roi"] = "difftest-observation-window-source-aligned"
         document["invariants"].pop("roi_complete")
+        document["lsq"]["events"] = document["lsq"]["events"][:28]
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 
@@ -161,6 +164,7 @@ class PerfObservationContractTest(unittest.TestCase):
             "complete": True,
             "boundary_cycles_included": False,
         }
+        document["lsq"]["events"] = document["lsq"]["events"][:28]
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 
@@ -169,6 +173,14 @@ class PerfObservationContractTest(unittest.TestCase):
         document["schema_version"] = "miku-perf-observation-v3"
         document["rob"].pop("zero_retire_head_reason")
         document["rob"].pop("incomplete_head_class")
+        document["lsq"]["events"] = document["lsq"]["events"][:28]
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_accepts_existing_v4_evidence(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v4"
+        document["lsq"]["events"] = document["lsq"]["events"][:28]
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 
@@ -225,6 +237,7 @@ class PerfObservationContractTest(unittest.TestCase):
         document["frontend"]["request_interval_histogram"] = [0, 2] + [0] * 6
         document["dispatch"]["fire_histogram"] = [4, 0, 0, 0, 0]
         document["branch"]["commit_histogram"] = [4, 0, 0, 0]
+        document["lsq"]["events"] = document["lsq"]["events"][:28]
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 

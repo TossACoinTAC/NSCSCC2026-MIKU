@@ -22,6 +22,7 @@ private:
     static constexpr unsigned kCommitObservationLag = 4;
     static constexpr unsigned kWordCount = 8;
     static constexpr unsigned kFrontendOccupancyBins = 17;
+    static constexpr unsigned kLsqEventCount = 46;
 
     struct CycleSnapshot {
         std::uint64_t words[kWordCount] = {};
@@ -78,11 +79,13 @@ private:
         std::uint64_t branch_resolve_to_recovery_cycles = 0;
         std::uint64_t branch_resolve_to_recovery_max = 0;
         std::uint64_t branch_resolve_to_recovery_hist[8] = {};
+        std::uint64_t branch_head_completion_opportunity = 0;
+        std::uint64_t branch_head_mispredict_opportunity = 0;
         std::uint64_t load_queue_occupancy_sum = 0;
         std::uint64_t store_queue_occupancy_sum = 0;
         std::uint64_t load_queue_full_cycles = 0;
         std::uint64_t store_queue_full_cycles = 0;
-        std::uint64_t lsq_events[28] = {};
+        std::uint64_t lsq_events[kLsqEventCount] = {};
         std::uint64_t cache_events[20] = {};
         std::uint64_t cache_occupancy_sum[3] = {};
         std::uint64_t axi_valid[5] = {};
@@ -164,6 +167,8 @@ private:
     std::uint64_t branch_resolve_to_recovery_cycles_ = 0;
     std::uint64_t branch_resolve_to_recovery_max_ = 0;
     std::uint64_t branch_resolve_to_recovery_hist_[8] = {};
+    std::uint64_t branch_head_completion_opportunity_ = 0;
+    std::uint64_t branch_head_mispredict_opportunity_ = 0;
     std::uint64_t branch_resolve_cycle_[64] = {};
     bool branch_mispredict_pending_[64] = {};
 
@@ -171,7 +176,7 @@ private:
     std::uint64_t store_queue_occupancy_sum_ = 0;
     std::uint64_t load_queue_full_cycles_ = 0;
     std::uint64_t store_queue_full_cycles_ = 0;
-    std::uint64_t lsq_events_[28] = {};
+    std::uint64_t lsq_events_[kLsqEventCount] = {};
     std::uint64_t cache_events_[20] = {};
     std::uint64_t cache_occupancy_sum_[3] = {};
     std::uint64_t axi_valid_[5] = {};

@@ -24,6 +24,7 @@ if schema in {
     "miku-perf-observation-v2",
     "miku-perf-observation-v3",
     "miku-perf-observation-v4",
+    "miku-perf-observation-v5",
 }:
     abi = counters.get("observation_abi")
     if abi != {"magic": "MIKU", "version": 1, "word_count": 8}:
@@ -35,6 +36,7 @@ if schema in {
         "miku-perf-observation-v2",
         "miku-perf-observation-v3",
         "miku-perf-observation-v4",
+        "miku-perf-observation-v5",
     }:
         roi = counters.get("roi")
         if not isinstance(roi, dict):
@@ -118,7 +120,7 @@ if schema in {
         fail("ROB occupancy max does not match its histogram")
     if rob.get("full_cycles") != rob_hist[32]:
         fail("ROB full cycles do not match occupancy bin 32")
-    if schema == "miku-perf-observation-v4":
+    if schema in {"miku-perf-observation-v4", "miku-perf-observation-v5"}:
         head_reason_names = {
             "invalid",
             "payload_not_ready",
@@ -160,6 +162,7 @@ if schema in {
         "miku-perf-observation-v2",
         "miku-perf-observation-v3",
         "miku-perf-observation-v4",
+        "miku-perf-observation-v5",
     }:
         request_sequences = frontend.get("request_interval_sequences")
         if (
@@ -226,10 +229,11 @@ if schema in {
 
     lsq = counters.get("lsq", {})
     lsq_events = lsq.get("events")
-    if not isinstance(lsq_events, list) or len(lsq_events) != 28 or not all(
+    expected_lsq_events = 46 if schema == "miku-perf-observation-v5" else 28
+    if not isinstance(lsq_events, list) or len(lsq_events) != expected_lsq_events or not all(
         isinstance(value, int) and 0 <= value <= cycles for value in lsq_events
     ):
-        fail("LSQ events must contain 28 per-cycle counters")
+        fail(f"LSQ events must contain {expected_lsq_events} per-cycle counters")
     if lsq.get("load_occupancy_sum", -1) > 16 * cycles:
         fail("load queue occupancy exceeds capacity")
     if lsq.get("store_occupancy_sum", -1) > 8 * cycles:
@@ -264,6 +268,7 @@ if schema in {
         "miku-perf-observation-v2",
         "miku-perf-observation-v3",
         "miku-perf-observation-v4",
+        "miku-perf-observation-v5",
     } and invariants.get("roi_complete") is not True:
         fail("invariant roi_complete is not true")
     for name in (

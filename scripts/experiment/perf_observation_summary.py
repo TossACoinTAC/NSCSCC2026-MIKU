@@ -19,7 +19,7 @@ from common import (  # noqa: E402
 )
 
 
-LSQ_EVENT_NAMES = (
+LSQ_EVENT_NAMES_V4 = (
     "scheduled_load_valid",
     "translation_active",
     "translation_cancel_pending",
@@ -48,6 +48,27 @@ LSQ_EVENT_NAMES = (
     "store_drain_busy",
     "request_buffer_valid",
     "accepted_store_valid",
+)
+
+LSQ_EVENT_NAMES = LSQ_EVENT_NAMES_V4 + (
+    "load_head_ready",
+    "load_needs_translation",
+    "load_block_unknown_store",
+    "load_block_older_uncached_store",
+    "load_block_older_load",
+    "load_block_partial_overlap",
+    "load_block_pending_store_data",
+    "load_forward_candidate",
+    "load_cache_candidate",
+    "load_request_capture",
+    "load_candidate_buffer_busy",
+    "load_candidate_store_priority",
+    "raw_load_completion",
+    "raw_ordinary_load_completion",
+    "raw_ordinary_load_completion_at_rob_head",
+    "oldest_load_address_not_ready",
+    "alternate_pending_load_address_ready",
+    "oldest_blocked_with_alternate_address_ready",
 )
 
 CACHE_EVENT_NAMES = (
@@ -202,6 +223,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "branch_mispredicted": 0,
         "branch_recovery_matches": 0,
         "branch_resolve_to_recovery_cycles": 0,
+        "branch_head_completion_opportunity": 0,
+        "branch_head_mispredict_opportunity": 0,
         "load_queue_occupancy_sum": 0,
         "store_queue_occupancy_sum": 0,
         "load_queue_full_cycles": 0,
@@ -236,8 +259,9 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         if row_schema not in {
             "miku-perf-observation-v3",
             "miku-perf-observation-v4",
+            "miku-perf-observation-v5",
         }:
-            raise ExperimentError(f"观测汇总要求 v3/v4 ROI 结构: {counters_path}")
+            raise ExperimentError(f"观测汇总要求 v3/v4/v5 ROI 结构: {counters_path}")
         if source_schema is None:
             source_schema = row_schema
         elif row_schema != source_schema:
@@ -279,21 +303,26 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             _named_counts(
                 counters, "rob.zero_retire_head_reason", ROB_HEAD_REASON_NAMES
             )
-            if row_schema == "miku-perf-observation-v4"
+            if row_schema in {"miku-perf-observation-v4", "miku-perf-observation-v5"}
             else None
         )
         incomplete_classes = (
             _named_counts(
                 counters, "rob.incomplete_head_class", ROB_INCOMPLETE_CLASS_NAMES
             )
-            if row_schema == "miku-perf-observation-v4"
+            if row_schema in {"miku-perf-observation-v4", "miku-perf-observation-v5"}
             else None
         )
         frontend_hist = _vector(counters, "frontend.occupancy_histogram", 17)
         issue_occupancy = _vector(counters, "issue.occupancy_sum", 4)
         issue_full = _vector(counters, "issue.full_cycles", 4)
         issue_fire = _vector(counters, "issue.fire_by_port", 4)
-        lsq_events = _vector(counters, "lsq.events", len(LSQ_EVENT_NAMES))
+        lsq_event_names = (
+            LSQ_EVENT_NAMES
+            if row_schema == "miku-perf-observation-v5"
+            else LSQ_EVENT_NAMES_V4
+        )
+        lsq_events = _vector(counters, "lsq.events", len(lsq_event_names))
         cache_events = _vector(counters, "cache.events", len(CACHE_EVENT_NAMES))
         axi_valid = _vector(counters, "axi.valid", 5)
         axi_fire = _vector(counters, "axi.fire", 5)
@@ -357,6 +386,16 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                 "resolve_to_recovery_cycles": _integer(
                     counters, "branch.resolve_to_recovery_cycles"
                 ),
+                "head_completion_opportunity": (
+                    _integer(counters, "branch.head_completion_opportunity")
+                    if row_schema == "miku-perf-observation-v5"
+                    else 0
+                ),
+                "head_mispredict_opportunity": (
+                    _integer(counters, "branch.head_mispredict_opportunity")
+                    if row_schema == "miku-perf-observation-v5"
+                    else 0
+                ),
             },
             "lsq": {
                 "average_load_occupancy": _ratio(
@@ -365,7 +404,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                 "average_store_occupancy": _ratio(
                     _integer(counters, "lsq.store_occupancy_sum"), roi_cycles
                 ),
-                "events": dict(zip(LSQ_EVENT_NAMES, lsq_events)),
+                "events": dict(zip(lsq_event_names, lsq_events)),
             },
             "cache_events": dict(zip(CACHE_EVENT_NAMES, cache_events)),
             "axi": counters["axi"],
@@ -417,6 +456,13 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         totals["branch_resolve_to_recovery_cycles"] += _integer(
             counters, "branch.resolve_to_recovery_cycles"
         )
+        if row_schema == "miku-perf-observation-v5":
+            totals["branch_head_completion_opportunity"] += _integer(
+                counters, "branch.head_completion_opportunity"
+            )
+            totals["branch_head_mispredict_opportunity"] += _integer(
+                counters, "branch.head_mispredict_opportunity"
+            )
         totals["load_queue_occupancy_sum"] += _integer(
             counters, "lsq.load_occupancy_sum"
         )
@@ -429,7 +475,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         totals["store_queue_full_cycles"] += _integer(
             counters, "lsq.store_full_cycles"
         )
-        _add_vector(totals["lsq_events"], lsq_events)
+        for index, value in enumerate(lsq_events):
+            totals["lsq_events"][index] += value
         _add_vector(totals["cache_events"], cache_events)
         _add_vector(totals["axi_valid"], axi_valid)
         _add_vector(totals["axi_fire"], axi_fire)
@@ -470,6 +517,12 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             totals["branch_resolve_to_recovery_cycles"],
             totals["branch_recovery_matches"],
         ),
+        "branch_head_completion_opportunity_ratio": _ratio(
+            totals["branch_head_completion_opportunity"], cycles
+        ),
+        "branch_head_mispredict_opportunity_ratio": _ratio(
+            totals["branch_head_mispredict_opportunity"], cycles
+        ),
         "load_queue_average_occupancy": _ratio(
             totals["load_queue_occupancy_sum"], cycles
         ),
@@ -483,7 +536,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             totals["store_queue_full_cycles"], cycles
         ),
     }
-    if source_schema == "miku-perf-observation-v4":
+    if source_schema in {"miku-perf-observation-v4", "miku-perf-observation-v5"}:
         derived["rob_zero_retire_head_reason_ratio"] = {
             name: _ratio(value, cycles)
             for name, value in totals["rob_zero_retire_head_reason"].items()

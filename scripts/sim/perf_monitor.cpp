@@ -181,6 +181,8 @@ void PerfMonitor::reset_accumulators() {
     branch_recovery_without_resolution_ = 0;
     branch_resolve_to_recovery_cycles_ = 0;
     branch_resolve_to_recovery_max_ = 0;
+    branch_head_completion_opportunity_ = 0;
+    branch_head_mispredict_opportunity_ = 0;
     std::fill(std::begin(branch_resolve_to_recovery_hist_),
               std::end(branch_resolve_to_recovery_hist_), 0);
 
@@ -247,6 +249,8 @@ void PerfMonitor::save_accumulator_checkpoint() {
     SAVE_SCALAR(branch_resolve_to_recovery_cycles);
     SAVE_SCALAR(branch_resolve_to_recovery_max);
     SAVE_ARRAY(branch_resolve_to_recovery_hist);
+    SAVE_SCALAR(branch_head_completion_opportunity);
+    SAVE_SCALAR(branch_head_mispredict_opportunity);
     SAVE_SCALAR(load_queue_occupancy_sum);
     SAVE_SCALAR(store_queue_occupancy_sum);
     SAVE_SCALAR(load_queue_full_cycles);
@@ -311,6 +315,8 @@ void PerfMonitor::restore_accumulator_checkpoint() {
     RESTORE_SCALAR(branch_resolve_to_recovery_cycles);
     RESTORE_SCALAR(branch_resolve_to_recovery_max);
     RESTORE_ARRAY(branch_resolve_to_recovery_hist);
+    RESTORE_SCALAR(branch_head_completion_opportunity);
+    RESTORE_SCALAR(branch_head_mispredict_opportunity);
     RESTORE_SCALAR(load_queue_occupancy_sum);
     RESTORE_SCALAR(store_queue_occupancy_sum);
     RESTORE_SCALAR(load_queue_full_cycles);
@@ -451,6 +457,8 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     const std::uint8_t mispredict_mask = static_cast<std::uint8_t>(field(branch, 5, 5));
     branch_resolved_ += popcount(resolved_mask);
     branch_mispredicted_ += popcount(mispredict_mask);
+    branch_head_completion_opportunity_ += field(branch, 52, 1);
+    branch_head_mispredict_opportunity_ += field(branch, 53, 1);
     for (unsigned lane = 0; lane < 5; lane++) {
         if (field(mispredict_mask, lane, 1) == 0) continue;
         const unsigned pointer = static_cast<unsigned>(field(branch, 10 + lane * 6, 6));
@@ -478,7 +486,7 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     store_queue_occupancy_sum_ += store_occupancy;
     load_queue_full_cycles_ += bit(load_occupancy >= 16);
     store_queue_full_cycles_ += bit(store_occupancy >= 8);
-    for (unsigned index = 0; index < 28; index++) {
+    for (unsigned index = 0; index < kLsqEventCount; index++) {
         lsq_events_[index] += field(lsq, 9 + index, 1);
     }
 
@@ -594,7 +602,7 @@ void PerfMonitor::write_json(const char *path) {
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
 
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v4\",\n");
+    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v5\",\n");
     std::fprintf(file, "  \"observation_abi\": {\"magic\": \"MIKU\", \"version\": 1, \"word_count\": 8},\n");
     std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"nested_counter_read_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
                  roi_marker_seen_ ? "outermost-counter-read-pair" : "full-run",
@@ -695,21 +703,23 @@ void PerfMonitor::write_json(const char *path) {
                  static_cast<unsigned long long>(dispatch_fire_hist_[2]),
                  static_cast<unsigned long long>(dispatch_fire_hist_[3]),
                  static_cast<unsigned long long>(dispatch_fire_hist_[4]));
-    std::fprintf(file, "  \"branch\": {\"commit_histogram\": [%llu, %llu, %llu, %llu], \"retired\": %llu, \"predictor_update_cycles\": %llu, \"resolved\": %llu, \"mispredicted\": %llu, \"recovery_matches\": %llu, \"recovery_without_resolution\": %llu, \"resolve_to_recovery_cycles\": %llu, \"resolve_to_recovery_max\": %llu, \"resolve_to_recovery_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu]},\n",
+    std::fprintf(file, "  \"branch\": {\"commit_histogram\": [%llu, %llu, %llu, %llu], \"retired\": %llu, \"predictor_update_cycles\": %llu, \"resolved\": %llu, \"mispredicted\": %llu, \"recovery_matches\": %llu, \"recovery_without_resolution\": %llu, \"resolve_to_recovery_cycles\": %llu, \"resolve_to_recovery_max\": %llu, \"resolve_to_recovery_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu], \"head_completion_opportunity\": %llu, \"head_mispredict_opportunity\": %llu},\n",
                  static_cast<unsigned long long>(branch_commit_hist_[0]), static_cast<unsigned long long>(branch_commit_hist_[1]), static_cast<unsigned long long>(branch_commit_hist_[2]), static_cast<unsigned long long>(branch_commit_hist_[3]),
                  static_cast<unsigned long long>(branch_retired_), static_cast<unsigned long long>(predictor_update_cycles_),
                  static_cast<unsigned long long>(branch_resolved_), static_cast<unsigned long long>(branch_mispredicted_),
                  static_cast<unsigned long long>(branch_recovery_matches_), static_cast<unsigned long long>(branch_recovery_without_resolution_),
                  static_cast<unsigned long long>(branch_resolve_to_recovery_cycles_), static_cast<unsigned long long>(branch_resolve_to_recovery_max_),
                  static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[0]), static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[1]), static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[2]), static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[3]),
-                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[4]), static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[5]), static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[6]), static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[7]));
+                 static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[4]), static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[5]), static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[6]), static_cast<unsigned long long>(branch_resolve_to_recovery_hist_[7]),
+                 static_cast<unsigned long long>(branch_head_completion_opportunity_),
+                 static_cast<unsigned long long>(branch_head_mispredict_opportunity_));
 
     std::fprintf(file, "  \"lsq\": {\"load_occupancy_sum\": %llu, \"store_occupancy_sum\": %llu, \"load_full_cycles\": %llu, \"store_full_cycles\": %llu, \"events\": [",
                  static_cast<unsigned long long>(load_queue_occupancy_sum_),
                  static_cast<unsigned long long>(store_queue_occupancy_sum_),
                  static_cast<unsigned long long>(load_queue_full_cycles_),
                  static_cast<unsigned long long>(store_queue_full_cycles_));
-    for (unsigned index = 0; index < 28; index++) {
+    for (unsigned index = 0; index < kLsqEventCount; index++) {
         std::fprintf(file, "%s%llu", index == 0 ? "" : ", ",
                      static_cast<unsigned long long>(lsq_events_[index]));
     }

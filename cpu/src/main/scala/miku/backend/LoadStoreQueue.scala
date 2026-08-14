@@ -1167,5 +1167,44 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   perfObservationV1Word5(34) := io.storeDrainBusy
   perfObservationV1Word5(35) := requestBufferValid
   perfObservationV1Word5(36) := acceptedStoreValid
+  perfObservationV1Word5(37) := loadHeadReady
+  perfObservationV1Word5(38) := loadNeedsTranslation
+  perfObservationV1Word5(39) := loadHeadReady && unknownOlderStore.orR
+  perfObservationV1Word5(40) := loadHeadReady && olderUncachedStore.orR
+  perfObservationV1Word5(41) := loadHeadReady && olderLoadOrderBlock.orR
+  perfObservationV1Word5(42) := loadHeadReady && partialOverlapStore.orR
+  perfObservationV1Word5(43) := loadHeadReady && pendingDataStore.orR
+  perfObservationV1Word5(44) := forwardCandidate
+  perfObservationV1Word5(45) := cacheLoadCandidate
+  perfObservationV1Word5(46) := requestCapture && !storeRequest
+  perfObservationV1Word5(47) := cacheLoadCandidate && requestBufferValid
+  perfObservationV1Word5(48) := cacheLoadCandidate && storeRequest
+  val rawLoadCompletion = responseLoadAccepted || forwardFire ||
+    (translationCompletionFire && !translationOwnerStore)
+  val rawOrdinaryLoadCompletion =
+    (responseLoadAccepted && !io.dataResponse.error && !responseLoadUncached && !responseLoadIsLl) ||
+      forwardFire
+  val rawOrdinaryLoadCompletionRobPointer = Mux(
+    responseLoadAccepted,
+    responseLoadRobPointer,
+    scheduledLoad.robPointer
+  )
+  val alternatePendingLoadAddressReady = Bits(config.loadQueueEntries bits)
+  for (entry <- 0 until config.loadQueueEntries) {
+    alternatePendingLoadAddressReady(entry) := pendingLoads(entry) &&
+      U(entry, config.loadQueueIndexWidth bits) =/= loadHead && loads(entry).addressReady
+  }
+  val oldestLoadAddressNotReady = scheduledLoadValid && headLoadState.valid &&
+    headLoadState.robPointer === scheduledLoad.robPointer && !headLoadState.addressReady
+  val oldestLoadOrderBlocked = loadHeadReady && !loadOrderClear
+  perfObservationV1Word5(49) := rawLoadCompletion
+  perfObservationV1Word5(50) := rawOrdinaryLoadCompletion
+  perfObservationV1Word5(51) := rawOrdinaryLoadCompletion &&
+    rawOrdinaryLoadCompletionRobPointer === io.robHeadPointer
+  perfObservationV1Word5(52) := oldestLoadAddressNotReady
+  perfObservationV1Word5(53) := alternatePendingLoadAddressReady.orR
+  perfObservationV1Word5(54) :=
+    (oldestLoadAddressNotReady || oldestLoadOrderBlocked) &&
+      alternatePendingLoadAddressReady.orR
   PerfObservationV1.expose(perfObservationV1Word5, 5)
 }

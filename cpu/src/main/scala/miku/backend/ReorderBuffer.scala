@@ -605,5 +605,19 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   perfObservationV1Word4(50) :=
     candidates(0).payload.systemOperation =/= SystemOperation.none
   perfObservationV1Word4(51) := headCompletionBypass
+  val observationIncomingHeadBranchCompletion = Bits(config.writebackWidth bits)
+  val observationIncomingHeadMispredictCompletion = Bits(config.writebackWidth bits)
+  for (lane <- 0 until config.writebackWidth) {
+    observationIncomingHeadBranchCompletion(lane) := io.completionValid(lane) &&
+      io.completion(lane).recoveryEpoch === io.currentEpoch &&
+      io.completion(lane).robPointer === payloadReadPointer(0) &&
+      io.completion(lane).branchResolved && !io.completion(lane).exception.valid &&
+      candidates(0).state.valid && !candidates(0).state.complete &&
+      candidates(0).state.payloadReady && candidates(0).payload.isBranch
+    observationIncomingHeadMispredictCompletion(lane) :=
+      observationIncomingHeadBranchCompletion(lane) && io.completion(lane).branchMispredict
+  }
+  perfObservationV1Word4(52) := observationIncomingHeadBranchCompletion.orR
+  perfObservationV1Word4(53) := observationIncomingHeadMispredictCompletion.orR
   PerfObservationV1.expose(perfObservationV1Word4, 4)
 }
