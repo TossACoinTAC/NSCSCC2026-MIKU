@@ -91,7 +91,7 @@ final case class OooCoreConfig(
     // registered echo of a tag that was already broadcast by a direct wake.
     enableDirectWakeupEchoSuppression: Boolean = true,
     enableDirectOnlyPortEchoSuppression: Boolean = true,
-    enableMultiplyCompletionEchoSuppression: Boolean = true,
+    enableMultiplyCompletionEchoSuppression: Boolean = false,
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,
