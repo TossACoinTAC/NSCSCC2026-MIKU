@@ -508,7 +508,10 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     for (write <- 0 until config.writebackWidth) {
       issueQueues(port).io.wakeupPdst(write) := earlyWakeupPdst(write)
     }
-    if (port == loadStorePort && config.enableLsuRegisteredWakeSelectDecoupling) {
+    if (
+      (port == loadStorePort && config.enableLsuRegisteredWakeSelectDecoupling) ||
+      (port != loadStorePort && config.enableOrdinaryRegisteredWakeSelectDecoupling)
+    ) {
       issueQueues(port).io.selectWakeupValid := fastSelectWakeupValid
       for (write <- 0 until config.writebackWidth) {
         issueQueues(port).io.selectWakeupPdst(write) := fastSelectWakeupPdst(write)

@@ -877,6 +877,87 @@ class OooBackendDispatchSpec extends AnyFunSuite {
     assert(decoupledRegistered == legacyRegistered + 1)
   }
 
+  test("ordinary IQ select keeps source readiness while deferring registered-only wake") {
+    def measure(testConfig: OooCoreConfig, label: String, seed: Int): Int = {
+      var consumerIssueCycle = -1
+      SimConfig.withVerilator
+        .workspacePath(
+          s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-backend-ordinary-select-$label"
+        )
+        .compile(new OooBackendDispatchProbe(testConfig))
+        .doSim(s"ooo-backend-ordinary-select-$label", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearControl(dut)
+          dut.io.issueReady #= 0xf
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          dut.clockDomain.waitSampling()
+
+          val producerPc = BigInt("1c000000", 16)
+          val consumerPc = producerPc + 4
+          dut.io.inputValid #= 3
+          dut.io.pc(0) #= producerPc
+          dut.io.instruction(0) #= BigInt("0280040d", 16) // addi.w r13,r0,1
+          dut.io.pc(1) #= consumerPc
+          dut.io.instruction(1) #= BigInt("028005ae", 16) // addi.w r14,r13,1
+          dut.clockDomain.waitSampling()
+          dut.io.inputValid #= 0
+
+          var producerPdst = BigInt(0)
+          var producerRobPointer = BigInt(0)
+          for (_ <- 0 until 16 if producerPdst == 0) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            val producerPort = (0 until testConfig.executionWidth).find { port =>
+              (dut.io.issueValid.toBigInt & (BigInt(1) << port)) != 0 &&
+                dut.io.issuePc(port).toBigInt == producerPc
+            }
+            producerPort.foreach { port =>
+              producerPdst = dut.io.issuePdst(port).toBigInt
+              producerRobPointer = dut.io.issueRobPointer(port).toBigInt
+            }
+          }
+          assert(producerPdst != 0)
+
+          val result = BigInt("2468ace0", 16)
+          // Lane 1 models a registered-only completion (the ALU/Divide port), with no direct
+          // wake.  The consumer is resident in an ordinary IQ before this event arrives.
+          dut.io.completionValid #= 1 << 1
+          dut.io.completionLane #= 1
+          dut.io.completionRobPointer #= producerRobPointer
+          dut.io.completionPdst #= producerPdst
+          dut.io.completionWritesPdst #= true
+          dut.io.completionData #= result
+          dut.clockDomain.waitSampling()
+          dut.io.completionValid #= 0
+
+          for (cycle <- 1 to 8 if consumerIssueCycle < 0) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            if ((dut.io.issueValid.toBigInt & 0x7) != 0) {
+              val port = (0 until testConfig.executionWidth).find { candidate =>
+                (dut.io.issueValid.toBigInt & (BigInt(1) << candidate)) != 0 &&
+                  dut.io.issuePc(candidate).toBigInt == consumerPc
+              }
+              port.foreach { selected =>
+                consumerIssueCycle = cycle
+                assert(dut.io.issueSource1(selected).toBigInt == result)
+              }
+            }
+          }
+          assert(consumerIssueCycle > 0)
+        }
+      consumerIssueCycle
+    }
+
+    val legacyConfig = config.copy(enableOrdinaryRegisteredWakeSelectDecoupling = false)
+    val decoupledConfig = config.copy(enableOrdinaryRegisteredWakeSelectDecoupling = true)
+    val legacy = measure(legacyConfig, "legacy", 0x4c84)
+    val decoupled = measure(decoupledConfig, "decoupled", 0x4c85)
+    assert(decoupled == legacy + 1)
+  }
+
   test("a direct-only completion port keeps resident and later consumers live") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-direct-only-echo")
