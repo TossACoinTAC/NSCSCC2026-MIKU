@@ -90,6 +90,7 @@ final case class OooCoreConfig(
     // Timing experiment: remove the low-ROI wakeup/retirement shortcuts while
     // retaining F01 phase 1 and the cache response cut.
     enableDirectWakeupEchoSuppression: Boolean = false,
+    enableDirectOnlyPortEchoSuppression: Boolean = true,
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,

@@ -10,6 +10,16 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   private val loadStorePort =
     config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
   require(loadStorePort >= 0)
+  // Multiply results use their own writeback lane.  For an execution-port-indexed lane whose
+  // remaining operations are ALU/Branch, every physical-register producer already emits a direct
+  // wake at issue acceptance; its staged ROB wake is therefore only an IQ echo.
+  private val directOnlyCompletionPorts = config.executionPorts.zipWithIndex.collect {
+    case (port, index)
+        if port.capabilities.forall(kind =>
+          kind == ExecutionUnitKind.Alu || kind == ExecutionUnitKind.Branch ||
+            kind == ExecutionUnitKind.Multiply
+        ) => index
+  }.toSet
 
   val io = new Bundle {
     val renameValid = in Bits (config.renameWidth bits)
@@ -322,7 +332,14 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
       // event and deliberately excludes the global flush signal from select.
       val registeredWake = rob.io.completionWakeupCandidateValid(write)
       val directWake = io.directWakeupValid(write) && io.directWakeupPdst(write) =/= 0
-      val selectedRegisteredWake = if (config.enableDirectWakeupEchoSuppression) {
+      val suppressDirectOnlyEcho = config.enableDirectOnlyPortEchoSuppression &&
+        directOnlyCompletionPorts.contains(write)
+      val selectedRegisteredWake = if (suppressDirectOnlyEcho) {
+        // Resident and same-edge enqueued consumers observed the direct wake.  A consumer arriving
+        // later is qualified by dispatchSourceReady above, while PRF/RAT still consume the raw ROB
+        // wake below.  Keeping stagedPdst off this IQ lane also lets a younger direct tag use it.
+        False
+      } else if (config.enableDirectWakeupEchoSuppression) {
         // A direct producer already woke every resident/enqueued IQ consumer.
         // Suppress only that producer's next-cycle registered echo, freeing the
         // lane for a new direct tag. A first-time DIV/other registered wake keeps
