@@ -8,8 +8,9 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：L07 matching RTL 为 `5,104,911` cycles，20/20 pass；相对前一节点
-  `5,299,059` 为 `-3.663820%`，归一化几何平均 `1.038957091x`。
+- perf20：BR01 matching RTL 为 `5,057,854` cycles，20/20 pass；相对 L07
+  `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
+  baseline `5,543,953` 累计 `-8.768094%`。
 - func58：L07 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
 - MT03+BT03 matching 100 MHz direct full implementation：setup `-0.694 ns`、hold `+0.053 ns`、
   DRC 0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
@@ -33,7 +34,7 @@
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 - `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
-  不再访问普通 Verilator 内部层级。当前完整 `cpu-check` 为 39 suites / 216 tests，Python
+  不再访问普通 Verilator 内部层级。当前完整 `cpu-check` 为 39 suites / 218 tests，Python
   合同为 53 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
   精确一致，全部计数器守恒 invariant 通过。`perf20-sim` 与 `func58-sim` 可通过
   `SIM_PROFILE=instrumented` 使用同一公开入口。
@@ -152,12 +153,15 @@ L07 matching instrumented perf20 进一步证明收益来自目标阻塞族：St
 branch resolve-to-recovery 暴露仍有 `153,592` cycles（约 `3.01%` ROI），可与内存方向
 并行形成同一综合批次的独立候选。
 
-同轮第二个 IPC 候选选择 `BR01`：对当前 epoch、精确命中 ROB head、无异常且 payload
-ready 的已解析 branch，在现有 ROB staging 边界保存 taken/target/mispredict，并允许下一拍
-退休；理论一拍机会为 `156,532` cycles（`3.0663%` ROI）。它不做 execute-time squash，
-不改变 speculative RAT/FreeList/LSQ，因此与 B01 的复杂选择性恢复不是同一机制。实现必须
-保持 predictor FIFO capacity、同拍多分支 prefix、精确异常、mispredict recovery 和
-commit debug result。
+同轮第二个 IPC 候选 `BR01 @ 1851a3c` 已实现并保留：对当前 epoch、精确命中 ROB head、
+无异常且 payload ready 的已解析 branch，在现有 ROB staging 边界保存 result、taken、target
+与 mispredict，并允许下一拍退休。ROB 定向测试覆盖开关 A/B、旧 epoch、完成异常、predictor
+FIFO 容量阻塞、link result 和误预测恢复；完整 `cpu-check` 为 39 suites / 218 tests。
+clean perf20 为 `5,104,911 -> 5,057,854`，总周期 `-0.921799%`、几何平均
+`1.009753745x`；19 项改善，`stream_copy` 仅增加 1 cycle（`+0.0088%`）。逐项证据见
+`build/reports/comparisons/R2-BR01.json`，冻结证据见
+`build/reports/experiments/R2-BR01/experiment-manifest.json`。它不做 execute-time squash，
+不改变 speculative RAT/FreeList/LSQ，因此与 B01 的复杂选择性恢复不是同一机制。
 
 同批时序候选选择 `BT04`：退出 BT03 的 9-way token payload read，恢复 BT02 已验证的本地
 两槽注册 issue output。BT03 周期中性但 matching top-50 占 47 条且未达成物理目标；BT04
