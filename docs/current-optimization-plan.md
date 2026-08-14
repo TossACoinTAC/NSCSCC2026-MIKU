@@ -190,9 +190,18 @@ predictor 10、cache/L2 9、IQ 11、ATU/other CPU 1；最差路径是 instructio
 response 的 virtual-address 到 uncached payload，随后是 frontend next-PC、BTB 更新和 L1I
 response prediction 路径。下一时序增量应处理这些已暴露路径，R1 仍未满足 setup 门禁。
 
+后续增量 `FT04 @ c90409e` 将 FixBranch 修正 PC 在 cache response 边界保存为窄 token，
+并在原本就存在的 predictor recovery 周期安装。OooFrontend 23 项、完整 `cpu-check`
+（39 suites / 219 tests）通过；测试明确锁定恢复后第一拍即发出 corrected translation request。
+完整 perf20 为 `5,057,854 -> 5,057,854`，20 项逐项精确相等、几何平均
+`1.000000000x`，证据见 `build/reports/comparisons/R2-FT04.json` 和
+`build/reports/experiments/R2-FT04/experiment-manifest.json`。它尚未运行 matching func58
+或 direct full，因此当前只算已验证候选提交，不改变 WT01 的物理基线结论。
+
 ## 系统、归档与发布
 
 MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其他候选在每个时序闭合
-里程碑运行 Linux。多轮期间只保存和推送 `dev/ECHO`。至少三轮 IPC 完成、最终组合通过
-100 MHz direct full implementation 和 Linux 后，才将 `main` fast-forward 到相同提交。
-板侧服务器恢复后补做板测；此前只标记本地稳定里程碑。
+里程碑运行 Linux。若若干候选已形成细粒度提交、完整软件证据和清楚的阶段结论，可在轮次
+中途推送远端 `dev/ECHO` 备份阶段成果，不要求先闭合时序。`main` 只在 matching 100 MHz
+direct full 的 setup/hold WNS 均严格大于零、DRC/route/bitstream 完整且 Linux 门禁通过后
+fast-forward 到同一提交。板侧服务器恢复后补做板测；此前只标记本地稳定里程碑。
