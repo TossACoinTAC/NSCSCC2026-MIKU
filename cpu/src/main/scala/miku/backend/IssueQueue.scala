@@ -332,6 +332,7 @@ final class IssueQueue(
 
   if (config.executionPorts(portIndex).registeredIssueOutput) {
     val outputSlots = Vec.fill(2)(Reg(IssueEntry(config, portIndex)))
+    val nextOutputSlots = Vec.fill(2)(IssueEntry(config, portIndex))
     val outputReadPointer = RegInit(False)
     val outputWritePointer = RegInit(False)
     val outputCount = Reg(UInt(2 bits)) init (0)
@@ -361,15 +362,17 @@ final class IssueQueue(
       when(queueDequeue) { outputWritePointer := !outputWritePointer }
       when(outputDequeue) { outputReadPointer := !outputReadPointer }
     }
-    // outputCount alone defines visibility.  Let an invalid slot absorb the
-    // flush-edge payload write so redirect does not drive every payload CE.
+    for (slot <- 0 until 2) nextOutputSlots(slot) := outputSlots(slot)
     when(queueDequeue) {
       when(outputWritePointer) {
-        outputSlots(1) := queue(issueIndex)
+        nextOutputSlots(1) := queue(issueIndex)
       }.otherwise {
-        outputSlots(0) := queue(issueIndex)
+        nextOutputSlots(0) := queue(issueIndex)
       }
     }
+    // Visibility is carried entirely by outputCount.  Updating the local
+    // payload next state every cycle keeps redirect out of the wide register CE.
+    for (slot <- 0 until 2) outputSlots(slot) := nextOutputSlots(slot)
 
     io.occupancy := (count + outputCount).resized
   } else {
@@ -413,36 +416,34 @@ final class IssueQueue(
   }.otherwise {
     count := count + enqueueFire.asUInt - queueDequeue.asUInt
   }
-  // count alone defines resident entries.  Payload mutation on a flush edge
-  // is harmless and keeps the redirect net out of every wide queue CE.
+  // count alone defines resident entries.  Payload mutation on a flush edge is
+  // harmless, so each slot can take an unconditional local next state while
+  // redirect only clears visibility.
   for (entry <- 0 until config.issueQueueEntriesPerPort) {
+    val nextEntry = IssueEntry(config, portIndex)
+    copyIssueEntry(
+      nextEntry,
+      queue(entry),
+      queue(entry).source1Ready || wakeupEntry1(entry),
+      queue(entry).source2Ready || wakeupEntry2(entry)
+    )
     val entryEnqueue = enqueueFire &&
       enqueueIndex === U(entry, log2Up(config.issueQueueEntriesPerPort) bits)
     if (entry < config.issueQueueEntriesPerPort - 1) {
       val entryShift = queueDequeue &&
         U(entry, count.getWidth bits) >= issueIndexWide &&
         U(entry + 1, count.getWidth bits) < count
-      when(entryEnqueue) {
-        queue(entry) := enqueued
-      }.elsewhen(entryShift) {
+      when(entryShift) {
         copyIssueEntry(
-          queue(entry),
+          nextEntry,
           queue(entry + 1),
           queue(entry + 1).source1Ready || wakeupEntry1(entry + 1),
           queue(entry + 1).source2Ready || wakeupEntry2(entry + 1)
         )
-      }.otherwise {
-        when(wakeupEntry1(entry)) { queue(entry).source1Ready := True }
-        when(wakeupEntry2(entry)) { queue(entry).source2Ready := True }
-      }
-    } else {
-      when(entryEnqueue) {
-        queue(entry) := enqueued
-      }.otherwise {
-        when(wakeupEntry1(entry)) { queue(entry).source1Ready := True }
-        when(wakeupEntry2(entry)) { queue(entry).source2Ready := True }
       }
     }
+    when(entryEnqueue) { nextEntry := enqueued }
+    queue(entry) := nextEntry
   }
 }
 
