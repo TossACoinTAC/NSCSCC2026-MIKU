@@ -11,10 +11,12 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "scripts/experiment"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from common import ExperimentError
 from perf_observation_summary import summarize_matrix
+from perf_observation_summary import PERF20_BENCHMARKS
 
-from cpu.tests.python.test_perf_observation_contract import valid_document
+from test_perf_observation_contract import valid_document
 
 
 def write_observation_matrix(root: Path) -> Path:
@@ -32,8 +34,7 @@ def write_observation_matrix(root: Path) -> Path:
             ),
         )
         writer.writeheader()
-        for index in range(20):
-            benchmark = f"bench_{index:02d}"
+        for benchmark in PERF20_BENCHMARKS:
             relative = f"perf20__{benchmark}/seed_0/limit_1ns"
             lane = root / relative
             lane.mkdir(parents=True)
@@ -47,6 +48,20 @@ def write_observation_matrix(root: Path) -> Path:
                 "recovery": 0,
                 "rob_empty": 499,
                 "rob_nonempty": 0,
+            }
+            counters["rob"]["zero_retire_head_reason"] = {
+                "invalid": 0,
+                "payload_not_ready": 0,
+                "incomplete": 0,
+                "predictor_backpressure": 0,
+                "ready_without_retire": 0,
+            }
+            counters["rob"]["incomplete_head_class"] = {
+                "load": 0,
+                "store": 0,
+                "branch": 0,
+                "system": 0,
+                "other": 0,
             }
             counters["rob"]["occupancy_histogram"] = [499, 500] + [0] * 31
             counters["rob"]["occupancy_sum"] = 500
@@ -110,6 +125,10 @@ class PerfObservationSummaryTest(unittest.TestCase):
             self.assertEqual(raw["score_cycles"], 20000)
             self.assertEqual(raw["roi_cycles"], 19980)
             self.assertEqual(raw["retired_instructions"], 10000)
+            self.assertEqual(result["source_schema"], "miku-perf-observation-v4")
+            self.assertEqual(
+                raw["rob_zero_retire_head_reason"]["incomplete"], 0
+            )
             self.assertEqual(len(result["workloads"]), 20)
 
     def test_rejects_tampered_counter_artifact(self) -> None:
@@ -119,6 +138,15 @@ class PerfObservationSummaryTest(unittest.TestCase):
             counter = next(root.glob("perf20__*/seed_0/limit_1ns/m01-counters.json"))
             counter.write_text("{}\n", encoding="utf-8")
             with self.assertRaises(ExperimentError):
+                summarize_matrix(matrix)
+
+    def test_rejects_incomplete_perf20_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            matrix = write_observation_matrix(root)
+            rows = matrix.read_text(encoding="utf-8").splitlines()
+            matrix.write_text("\n".join(rows[:-1]) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(ExperimentError, "完整"):
                 summarize_matrix(matrix)
 
 

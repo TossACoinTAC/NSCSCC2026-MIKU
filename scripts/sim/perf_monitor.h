@@ -51,6 +51,8 @@ private:
         std::uint64_t rob_occupancy_max = 0;
         std::uint64_t rob_full_cycles = 0;
         std::uint64_t rob_occupancy_hist[33] = {};
+        std::uint64_t rob_zero_retire_head_reason[5] = {};
+        std::uint64_t rob_incomplete_head_class[5] = {};
         std::uint64_t frontend_decode_valid_sum = 0;
         std::uint64_t frontend_occupancy_hist[kFrontendOccupancyBins] = {};
         std::uint64_t frontend_events[12] = {};
@@ -129,6 +131,8 @@ private:
     std::uint64_t rob_occupancy_max_ = 0;
     std::uint64_t rob_full_cycles_ = 0;
     std::uint64_t rob_occupancy_hist_[33] = {};
+    std::uint64_t rob_zero_retire_head_reason_[5] = {};
+    std::uint64_t rob_incomplete_head_class_[5] = {};
 
     std::uint64_t frontend_decode_valid_sum_ = 0;
     std::uint64_t frontend_occupancy_hist_[kFrontendOccupancyBins] = {};

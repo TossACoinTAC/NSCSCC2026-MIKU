@@ -550,5 +550,24 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   }
   perfObservationV1Word4(4 downto 0) := observationBranchResolved
   perfObservationV1Word4(9 downto 5) := observationBranchMispredict
+  val observationHeadRetiringBranch =
+    candidates(0).payload.isBranch && !candidates(0).exception.valid
+  val observationHeadPredictorHasCapacity =
+    !observationHeadRetiringBranch || io.predictorUpdateCapacity =/= 0
+  // Bits 40..51 extend the reserved portion of the V1 ABI. Existing readers
+  // ignore them, while newer monitors can classify zero-retirement cycles.
+  perfObservationV1Word4(40) := candidates(0).state.valid
+  perfObservationV1Word4(41) := candidates(0).state.complete || headCompletionBypass
+  perfObservationV1Word4(42) := candidates(0).state.payloadReady
+  perfObservationV1Word4(43) := observationHeadPredictorHasCapacity
+  perfObservationV1Word4(44) := candidates(0).exception.valid
+  perfObservationV1Word4(45) := candidates(0).state.serializing
+  perfObservationV1Word4(46) := candidates(0).state.branchMispredict
+  perfObservationV1Word4(47) := candidates(0).payload.isLoad
+  perfObservationV1Word4(48) := candidates(0).payload.isStore
+  perfObservationV1Word4(49) := candidates(0).payload.isBranch
+  perfObservationV1Word4(50) :=
+    candidates(0).payload.systemOperation =/= SystemOperation.none
+  perfObservationV1Word4(51) := headCompletionBypass
   PerfObservationV1.expose(perfObservationV1Word4, 4)
 }

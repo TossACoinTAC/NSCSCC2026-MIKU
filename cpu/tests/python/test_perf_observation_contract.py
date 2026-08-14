@@ -24,7 +24,7 @@ OBSERVATION_SOURCES = (
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v3",
+        "schema_version": "miku-perf-observation-v4",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
         "roi": {
             "mode": "outermost-counter-read-pair",
@@ -57,6 +57,20 @@ def valid_document() -> dict:
             "occupancy_max": 0,
             "full_cycles": 0,
             "occupancy_histogram": [1] + [0] * 32,
+            "zero_retire_head_reason": {
+                "invalid": 0,
+                "payload_not_ready": 0,
+                "incomplete": 0,
+                "predictor_backpressure": 0,
+                "ready_without_retire": 0,
+            },
+            "incomplete_head_class": {
+                "load": 0,
+                "store": 0,
+                "branch": 0,
+                "system": 0,
+                "other": 0,
+            },
         },
         "frontend": {
             "occupancy_histogram": [1] + [0] * 16,
@@ -150,6 +164,14 @@ class PerfObservationContractTest(unittest.TestCase):
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_accepts_existing_v3_evidence(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v3"
+        document["rob"].pop("zero_retire_head_reason")
+        document["rob"].pop("incomplete_head_class")
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_accepts_full_run_without_counter_markers(self) -> None:
         document = copy.deepcopy(valid_document())
         document["roi"] = {
@@ -219,6 +241,35 @@ class PerfObservationContractTest(unittest.TestCase):
         result = self.run_checker(document)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("ROB occupancy sum", result.stdout)
+
+    def test_rejects_nonconserving_head_reason(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["zero_retire_loss"] = {
+            "recovery": 0,
+            "rob_empty": 0,
+            "rob_nonempty": 1,
+        }
+        document["rob"]["occupancy_histogram"] = [0, 1] + [0] * 31
+        document["rob"]["occupancy_sum"] = 1
+        document["rob"]["occupancy_max"] = 1
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("head reasons do not conserve", result.stdout)
+
+    def test_rejects_nonconserving_incomplete_class(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["zero_retire_loss"] = {
+            "recovery": 0,
+            "rob_empty": 0,
+            "rob_nonempty": 1,
+        }
+        document["rob"]["occupancy_histogram"] = [0, 1] + [0] * 31
+        document["rob"]["occupancy_sum"] = 1
+        document["rob"]["occupancy_max"] = 1
+        document["rob"]["zero_retire_head_reason"]["incomplete"] = 1
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("head classes do not conserve", result.stdout)
 
     def test_monitor_reads_only_dedicated_observation_words(self) -> None:
         source = MONITOR.read_text(encoding="utf-8")

@@ -73,6 +73,39 @@ CACHE_EVENT_NAMES = (
     "memory_write_response_valid",
 )
 
+ROB_HEAD_REASON_NAMES = (
+    "invalid",
+    "payload_not_ready",
+    "incomplete",
+    "predictor_backpressure",
+    "ready_without_retire",
+)
+
+ROB_INCOMPLETE_CLASS_NAMES = ("load", "store", "branch", "system", "other")
+
+PERF20_BENCHMARKS = (
+    "bitcount",
+    "bubble_sort",
+    "coremark",
+    "crc32",
+    "dhrystone",
+    "quick_sort",
+    "select_sort",
+    "sha",
+    "stream_copy",
+    "stringsearch",
+    "fireye_A0",
+    "fireye_B2",
+    "fireye_C0",
+    "fireye_D1",
+    "fireye_I2",
+    "inner_product",
+    "lookup_table",
+    "loop_induction",
+    "my_memcmp",
+    "minmax_sequence",
+)
+
 
 def _vector(document: dict[str, Any], path: str, length: int) -> list[int]:
     value: Any = document
@@ -94,6 +127,19 @@ def _integer(document: dict[str, Any], path: str) -> int:
     return value
 
 
+def _named_counts(
+    document: dict[str, Any], path: str, names: tuple[str, ...]
+) -> dict[str, int]:
+    value: Any = document
+    for key in path.split("."):
+        value = value.get(key) if isinstance(value, dict) else None
+    if not isinstance(value, dict) or set(value) != set(names) or not all(
+        isinstance(item, int) and item >= 0 for item in value.values()
+    ):
+        raise ExperimentError(f"观测字段 {path} 必须包含指定的非负计数器")
+    return {name: value[name] for name in names}
+
+
 def _add_vector(total: list[int], value: list[int]) -> None:
     for index, item in enumerate(value):
         total[index] += item
@@ -107,6 +153,11 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
     matrix = load_perf_matrix(matrix_path)
     if matrix["identity"]["profile"] != "instrumented":
         raise ExperimentError("性能观测汇总只接受 instrumented matrix")
+    expected_rows = {
+        (benchmark, "ideal", 0) for benchmark in PERF20_BENCHMARKS
+    }
+    if set(matrix["rows"]) != expected_rows:
+        raise ExperimentError("性能观测汇总要求完整的 ideal-memory perf20 20/20 矩阵")
 
     identity_keys = (
         "cpu_commit",
@@ -119,6 +170,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "software_key",
     )
     reference_identity: dict[str, str] | None = None
+    source_schema: str | None = None
     workloads: list[dict[str, Any]] = []
 
     totals = {
@@ -131,6 +183,12 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "rob_occupancy_sum": 0,
         "rob_full_cycles": 0,
         "rob_empty_cycles": 0,
+        "rob_zero_retire_head_reason": {
+            name: 0 for name in ROB_HEAD_REASON_NAMES
+        },
+        "rob_incomplete_head_class": {
+            name: 0 for name in ROB_INCOMPLETE_CLASS_NAMES
+        },
         "frontend_empty_cycles": 0,
         "frontend_decode_valid_sum": 0,
         "frontend_translation_outstanding_cycles": 0,
@@ -174,8 +232,16 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             raise ExperimentError(f"M01 计数器缺失或 hash 不匹配: {counters_path}")
 
         counters = load_json(counters_path)
-        if counters.get("schema_version") != "miku-perf-observation-v3":
-            raise ExperimentError(f"观测汇总要求 v3 ROI 结构: {counters_path}")
+        row_schema = counters.get("schema_version")
+        if row_schema not in {
+            "miku-perf-observation-v3",
+            "miku-perf-observation-v4",
+        }:
+            raise ExperimentError(f"观测汇总要求 v3/v4 ROI 结构: {counters_path}")
+        if source_schema is None:
+            source_schema = row_schema
+        elif row_schema != source_schema:
+            raise ExperimentError(f"观测矩阵 schema 不一致: {counters_path}")
         roi = counters.get("roi")
         if not isinstance(roi, dict) or roi.get("mode") != "outermost-counter-read-pair":
             raise ExperimentError(f"perf20 必须使用最外层 counter-read ROI: {counters_path}")
@@ -209,6 +275,20 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         retired = _integer(counters, "retired_instructions")
         retire_hist = _vector(counters, "retire_width_histogram", 4)
         rob_hist = _vector(counters, "rob.occupancy_histogram", 33)
+        head_reasons = (
+            _named_counts(
+                counters, "rob.zero_retire_head_reason", ROB_HEAD_REASON_NAMES
+            )
+            if row_schema == "miku-perf-observation-v4"
+            else None
+        )
+        incomplete_classes = (
+            _named_counts(
+                counters, "rob.incomplete_head_class", ROB_INCOMPLETE_CLASS_NAMES
+            )
+            if row_schema == "miku-perf-observation-v4"
+            else None
+        )
         frontend_hist = _vector(counters, "frontend.occupancy_histogram", 17)
         issue_occupancy = _vector(counters, "issue.occupancy_sum", 4)
         issue_full = _vector(counters, "issue.full_cycles", 4)
@@ -239,6 +319,14 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                     _integer(counters, "rob.full_cycles"), roi_cycles
                 ),
                 "empty_cycle_ratio": _ratio(rob_hist[0], roi_cycles),
+                **(
+                    {
+                        "zero_retire_head_reason": head_reasons,
+                        "incomplete_head_class": incomplete_classes,
+                    }
+                    if head_reasons is not None and incomplete_classes is not None
+                    else {}
+                ),
             },
             "frontend": {
                 "empty_cycle_ratio": _ratio(frontend_hist[0], roi_cycles),
@@ -301,6 +389,11 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         totals["rob_occupancy_sum"] += _integer(counters, "rob.occupancy_sum")
         totals["rob_full_cycles"] += _integer(counters, "rob.full_cycles")
         totals["rob_empty_cycles"] += rob_hist[0]
+        if head_reasons is not None and incomplete_classes is not None:
+            for name in ROB_HEAD_REASON_NAMES:
+                totals["rob_zero_retire_head_reason"][name] += head_reasons[name]
+            for name in ROB_INCOMPLETE_CLASS_NAMES:
+                totals["rob_incomplete_head_class"][name] += incomplete_classes[name]
         totals["frontend_empty_cycles"] += frontend_hist[0]
         totals["frontend_decode_valid_sum"] += _integer(
             counters, "frontend.decode_valid_sum"
@@ -390,6 +483,15 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             totals["store_queue_full_cycles"], cycles
         ),
     }
+    if source_schema == "miku-perf-observation-v4":
+        derived["rob_zero_retire_head_reason_ratio"] = {
+            name: _ratio(value, cycles)
+            for name, value in totals["rob_zero_retire_head_reason"].items()
+        }
+        derived["rob_incomplete_head_class_ratio"] = {
+            name: _ratio(value, cycles)
+            for name, value in totals["rob_incomplete_head_class"].items()
+        }
     raw_totals = {
         **totals,
         "lsq_events": dict(zip(LSQ_EVENT_NAMES, totals["lsq_events"])),
@@ -397,7 +499,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
     }
     return {
         "schema_version": 1,
-        "source_schema": "miku-perf-observation-v3",
+        "source_schema": source_schema,
         "matrix": {
             "path": matrix["path"].as_posix(),
             "sha256": sha256_file(matrix["path"]),

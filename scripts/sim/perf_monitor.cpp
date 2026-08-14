@@ -139,6 +139,10 @@ void PerfMonitor::reset_accumulators() {
     rob_full_cycles_ = 0;
     std::fill(std::begin(rob_occupancy_hist_),
               std::end(rob_occupancy_hist_), 0);
+    std::fill(std::begin(rob_zero_retire_head_reason_),
+              std::end(rob_zero_retire_head_reason_), 0);
+    std::fill(std::begin(rob_incomplete_head_class_),
+              std::end(rob_incomplete_head_class_), 0);
 
     frontend_decode_valid_sum_ = 0;
     std::fill(std::begin(frontend_occupancy_hist_),
@@ -216,6 +220,8 @@ void PerfMonitor::save_accumulator_checkpoint() {
     SAVE_SCALAR(rob_occupancy_max);
     SAVE_SCALAR(rob_full_cycles);
     SAVE_ARRAY(rob_occupancy_hist);
+    SAVE_ARRAY(rob_zero_retire_head_reason);
+    SAVE_ARRAY(rob_incomplete_head_class);
     SAVE_SCALAR(frontend_decode_valid_sum);
     SAVE_ARRAY(frontend_occupancy_hist);
     SAVE_ARRAY(frontend_events);
@@ -278,6 +284,8 @@ void PerfMonitor::restore_accumulator_checkpoint() {
     RESTORE_SCALAR(rob_occupancy_max);
     RESTORE_SCALAR(rob_full_cycles);
     RESTORE_ARRAY(rob_occupancy_hist);
+    RESTORE_ARRAY(rob_zero_retire_head_reason);
+    RESTORE_ARRAY(rob_incomplete_head_class);
     RESTORE_SCALAR(frontend_decode_valid_sum);
     RESTORE_ARRAY(frontend_occupancy_hist);
     RESTORE_ARRAY(frontend_events);
@@ -376,6 +384,22 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     if (retired_count == 0) {
         const unsigned zero_reason = recovery ? 0 : rob_occupancy == 0 ? 1 : 2;
         zero_retire_[zero_reason]++;
+        if (!recovery && rob_occupancy != 0) {
+            const bool head_valid = field(branch, 40, 1) != 0;
+            const bool head_complete = field(branch, 41, 1) != 0;
+            const bool head_payload_ready = field(branch, 42, 1) != 0;
+            const bool predictor_has_capacity = field(branch, 43, 1) != 0;
+            const unsigned head_reason =
+                !head_valid ? 0 : !head_payload_ready ? 1 :
+                !head_complete ? 2 : !predictor_has_capacity ? 3 : 4;
+            rob_zero_retire_head_reason_[head_reason]++;
+            if (head_reason == 2) {
+                const unsigned incomplete_class =
+                    field(branch, 47, 1) ? 0 : field(branch, 48, 1) ? 1 :
+                    field(branch, 49, 1) ? 2 : field(branch, 50, 1) ? 3 : 4;
+                rob_incomplete_head_class_[incomplete_class]++;
+            }
+        }
     }
 
     const unsigned frontend_occupancy = static_cast<unsigned>(field(core, 15, 5));
@@ -570,7 +594,7 @@ void PerfMonitor::write_json(const char *path) {
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
 
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v3\",\n");
+    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v4\",\n");
     std::fprintf(file, "  \"observation_abi\": {\"magic\": \"MIKU\", \"version\": 1, \"word_count\": 8},\n");
     std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"nested_counter_read_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
                  roi_marker_seen_ ? "outermost-counter-read-pair" : "full-run",
@@ -615,7 +639,17 @@ void PerfMonitor::write_json(const char *path) {
         std::fprintf(file, "%s%llu", index == 0 ? "" : ", ",
                      static_cast<unsigned long long>(rob_occupancy_hist_[index]));
     }
-    std::fprintf(file, "]},\n");
+    std::fprintf(file, "], \"zero_retire_head_reason\": {\"invalid\": %llu, \"payload_not_ready\": %llu, \"incomplete\": %llu, \"predictor_backpressure\": %llu, \"ready_without_retire\": %llu}, \"incomplete_head_class\": {\"load\": %llu, \"store\": %llu, \"branch\": %llu, \"system\": %llu, \"other\": %llu}},\n",
+                 static_cast<unsigned long long>(rob_zero_retire_head_reason_[0]),
+                 static_cast<unsigned long long>(rob_zero_retire_head_reason_[1]),
+                 static_cast<unsigned long long>(rob_zero_retire_head_reason_[2]),
+                 static_cast<unsigned long long>(rob_zero_retire_head_reason_[3]),
+                 static_cast<unsigned long long>(rob_zero_retire_head_reason_[4]),
+                 static_cast<unsigned long long>(rob_incomplete_head_class_[0]),
+                 static_cast<unsigned long long>(rob_incomplete_head_class_[1]),
+                 static_cast<unsigned long long>(rob_incomplete_head_class_[2]),
+                 static_cast<unsigned long long>(rob_incomplete_head_class_[3]),
+                 static_cast<unsigned long long>(rob_incomplete_head_class_[4]));
 
     std::fprintf(file, "  \"frontend\": {\"decode_valid_sum\": %llu, \"occupancy_histogram\": [",
                  static_cast<unsigned long long>(frontend_decode_valid_sum_));

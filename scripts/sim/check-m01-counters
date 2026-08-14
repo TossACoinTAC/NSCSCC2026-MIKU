@@ -23,6 +23,7 @@ if schema in {
     "miku-perf-observation-v1",
     "miku-perf-observation-v2",
     "miku-perf-observation-v3",
+    "miku-perf-observation-v4",
 }:
     abi = counters.get("observation_abi")
     if abi != {"magic": "MIKU", "version": 1, "word_count": 8}:
@@ -30,7 +31,11 @@ if schema in {
     if counters.get("commit_observation_lag_cycles") != 4:
         fail("unexpected DiffTest commit observation lag")
 
-    if schema in {"miku-perf-observation-v2", "miku-perf-observation-v3"}:
+    if schema in {
+        "miku-perf-observation-v2",
+        "miku-perf-observation-v3",
+        "miku-perf-observation-v4",
+    }:
         roi = counters.get("roi")
         if not isinstance(roi, dict):
             fail("ROI must be a structured object")
@@ -113,6 +118,29 @@ if schema in {
         fail("ROB occupancy max does not match its histogram")
     if rob.get("full_cycles") != rob_hist[32]:
         fail("ROB full cycles do not match occupancy bin 32")
+    if schema == "miku-perf-observation-v4":
+        head_reason_names = {
+            "invalid",
+            "payload_not_ready",
+            "incomplete",
+            "predictor_backpressure",
+            "ready_without_retire",
+        }
+        incomplete_class_names = {"load", "store", "branch", "system", "other"}
+        head_reasons = rob.get("zero_retire_head_reason", {})
+        incomplete_classes = rob.get("incomplete_head_class", {})
+        if set(head_reasons) != head_reason_names or not all(
+            isinstance(value, int) and value >= 0 for value in head_reasons.values()
+        ):
+            fail("ROB zero-retire head reasons have an invalid schema")
+        if set(incomplete_classes) != incomplete_class_names or not all(
+            isinstance(value, int) and value >= 0 for value in incomplete_classes.values()
+        ):
+            fail("ROB incomplete head classes have an invalid schema")
+        if sum(head_reasons.values()) != zero["rob_nonempty"]:
+            fail("ROB zero-retire head reasons do not conserve ROB-nonempty cycles")
+        if sum(incomplete_classes.values()) != head_reasons["incomplete"]:
+            fail("ROB incomplete head classes do not conserve incomplete cycles")
 
     frontend = counters.get("frontend", {})
     frontend_hist = frontend.get("occupancy_histogram")
@@ -128,7 +156,11 @@ if schema in {
     ):
         fail("frontend request interval histogram must contain eight nonnegative integers")
     request_fire = frontend.get("cache_request_fire")
-    if schema in {"miku-perf-observation-v2", "miku-perf-observation-v3"}:
+    if schema in {
+        "miku-perf-observation-v2",
+        "miku-perf-observation-v3",
+        "miku-perf-observation-v4",
+    }:
         request_sequences = frontend.get("request_interval_sequences")
         if (
             not isinstance(request_sequences, int)
@@ -228,7 +260,11 @@ if schema in {
     ):
         if invariants.get(name) is not True:
             fail(f"invariant {name} is not true")
-    if schema in {"miku-perf-observation-v2", "miku-perf-observation-v3"} and invariants.get("roi_complete") is not True:
+    if schema in {
+        "miku-perf-observation-v2",
+        "miku-perf-observation-v3",
+        "miku-perf-observation-v4",
+    } and invariants.get("roi_complete") is not True:
         fail("invariant roi_complete is not true")
     for name in (
         "abi_errors", "source_retire_alignment_errors",
