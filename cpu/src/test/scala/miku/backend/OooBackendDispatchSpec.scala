@@ -472,12 +472,16 @@ class OooBackendDispatchSpec extends AnyFunSuite {
   }
 
   test("ordinary issue address buffering holds payload and sustains one issue per cycle") {
-    val multiplyPort =
-      config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Multiply))
-    SimConfig.withVerilator
-      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
-      .compile(new OooBackendDispatchProbe(config))
-      .doSim("ooo-backend-ordinary-address-buffer", 0x4c7c) { dut =>
+    for (tokenizedOutput <- Seq(false, true)) {
+      val testConfig = config.copy(enableTokenizedOrdinaryIssueOutput = tokenizedOutput)
+      val multiplyPort = testConfig.executionPorts.indexWhere(
+        _.capabilities.contains(ExecutionUnitKind.Multiply)
+      )
+      SimConfig.withVerilator
+        .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          s"/sim-workspace-ooo-backend-ordinary-output-$tokenizedOutput")
+        .compile(new OooBackendDispatchProbe(testConfig))
+        .doSim(s"ooo-backend-ordinary-address-buffer-$tokenizedOutput", 0x4c7c) { dut =>
         dut.clockDomain.forkStimulus(period = 10)
         clearControl(dut)
         dut.io.issueReady #= 0xf & ~(1 << multiplyPort)
@@ -529,8 +533,9 @@ class OooBackendDispatchSpec extends AnyFunSuite {
           cycles += 1
         }
 
-        assert(observedPc == expectedPc)
-      }
+          assert(observedPc == expectedPc)
+        }
+    }
   }
 
   test("a Store address issues before its data dependency reaches writeback") {

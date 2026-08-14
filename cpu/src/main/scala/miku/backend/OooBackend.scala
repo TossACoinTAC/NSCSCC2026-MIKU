@@ -71,9 +71,18 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val dispatchQueue = new DispatchQueue(config)
   val dispatchWindow = new DispatchWindow(config)
   val router = new DispatchRouter(config)
-  val issueQueues = (0 until config.executionWidth).map(index =>
-    new IssueQueue(config, index, tokenizedIssueOutput = index != loadStorePort)
-  )
+  val issueQueues = (0 until config.executionWidth).map { index =>
+    val ordinaryPort = index != loadStorePort
+    val tokenizedOutput = ordinaryPort && config.enableTokenizedOrdinaryIssueOutput
+    val registeredOutput = config.executionPorts(index).registeredIssueOutput ||
+      (ordinaryPort && !config.enableTokenizedOrdinaryIssueOutput)
+    new IssueQueue(
+      config,
+      index,
+      tokenizedIssueOutput = tokenizedOutput,
+      forceRegisteredIssueOutput = registeredOutput
+    )
+  }
   val storeDataQueue = new StoreDataQueue(config)
 
   val issueOperandValid = RegInit(B(0, config.executionWidth bits))

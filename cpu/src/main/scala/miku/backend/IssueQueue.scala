@@ -87,11 +87,14 @@ final case class IssueEntry(config: OooCoreConfig, portIndex: Int) extends Bundl
 final class IssueQueue(
     config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit,
     portIndex: Int = 0,
-    tokenizedIssueOutput: Boolean = false
+    tokenizedIssueOutput: Boolean = false,
+    forceRegisteredIssueOutput: Boolean = false
 ) extends Component {
   require(portIndex >= 0 && portIndex < config.executionWidth)
+  private val registeredIssueOutput =
+    forceRegisteredIssueOutput || config.executionPorts(portIndex).registeredIssueOutput
   require(
-    !tokenizedIssueOutput || !config.executionPorts(portIndex).registeredIssueOutput,
+    !tokenizedIssueOutput || !registeredIssueOutput,
     "an issue port cannot use both tokenized and copied registered outputs"
   )
 
@@ -375,7 +378,7 @@ final class IssueQueue(
     tokenOutputSlot := 0
   }
 
-  if (!tokenizedIssueOutput && config.executionPorts(portIndex).registeredIssueOutput) {
+  if (!tokenizedIssueOutput && registeredIssueOutput) {
     val outputSlots = Vec.fill(2)(Reg(IssueEntry(config, portIndex)))
     val nextOutputSlots = Vec.fill(2)(IssueEntry(config, portIndex))
     val outputReadPointer = RegInit(False)
