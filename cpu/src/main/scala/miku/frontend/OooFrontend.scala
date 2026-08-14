@@ -241,33 +241,109 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val translatedPredictionTaken = Vec(Bool(), config.fetchWidth)
   val translatedConditionalSeen = Vec(Bool(), config.fetchWidth)
   val earlierTranslatedPredictionTaken = Vec(Bool(), config.fetchWidth + 1)
-  earlierTranslatedPredictionTaken(0) := False
+  val rawTranslatedPredictionTaken = Vec(Bool(), config.fetchWidth)
   for (lane <- 0 until config.fetchWidth) {
+    val laneInGroup = U(lane, config.fetchSlotWidth bits) >= translatedFirstSlot
     val laneTaken = requestPrediction(lane).branchType =/=
       PredictedBranchType.conditional || requestPrediction(lane).phtState(1)
-    translatedPredictionTaken(lane) := requestPrediction(lane).hit &&
-      laneTaken &&
-      U(lane, config.fetchSlotWidth bits) >= translatedFirstSlot &&
-      !earlierTranslatedPredictionTaken(lane)
-    translatedConditionalSeen(lane) := requestPrediction(lane).hit &&
-      requestPrediction(lane).branchType === PredictedBranchType.conditional &&
-      U(lane, config.fetchSlotWidth bits) >= translatedFirstSlot &&
-      !earlierTranslatedPredictionTaken(lane)
-    earlierTranslatedPredictionTaken(lane + 1) :=
-      earlierTranslatedPredictionTaken(lane) || translatedPredictionTaken(lane)
+    rawTranslatedPredictionTaken(lane) := requestPrediction(lane).hit && laneTaken && laneInGroup
   }
-  val requestPredictedTaken = earlierTranslatedPredictionTaken(config.fetchWidth)
+  earlierTranslatedPredictionTaken(0) := False
+  if (config.enableBalancedFrontendPredictionSelect) {
+    val lowerTaken = rawTranslatedPredictionTaken(0) || rawTranslatedPredictionTaken(1)
+    translatedPredictionTaken(0) := rawTranslatedPredictionTaken(0)
+    translatedPredictionTaken(1) := rawTranslatedPredictionTaken(1) &&
+      !rawTranslatedPredictionTaken(0)
+    translatedPredictionTaken(2) := rawTranslatedPredictionTaken(2) && !lowerTaken
+    translatedPredictionTaken(3) := rawTranslatedPredictionTaken(3) && !lowerTaken &&
+      !rawTranslatedPredictionTaken(2)
+    for (lane <- 0 until config.fetchWidth) {
+      val laneInGroup = U(lane, config.fetchSlotWidth bits) >= translatedFirstSlot
+      val conditional = requestPrediction(lane).hit && laneInGroup &&
+        requestPrediction(lane).branchType === PredictedBranchType.conditional
+      val earlierTaken = lane match {
+        case 0 => False
+        case 1 => rawTranslatedPredictionTaken(0)
+        case 2 => lowerTaken
+        case 3 => lowerTaken || rawTranslatedPredictionTaken(2)
+      }
+      translatedConditionalSeen(lane) := conditional && !earlierTaken
+    }
+    earlierTranslatedPredictionTaken(1) := rawTranslatedPredictionTaken(0)
+    earlierTranslatedPredictionTaken(2) := lowerTaken
+    earlierTranslatedPredictionTaken(3) := lowerTaken || rawTranslatedPredictionTaken(2)
+    earlierTranslatedPredictionTaken(4) := lowerTaken || rawTranslatedPredictionTaken(2) ||
+      rawTranslatedPredictionTaken(3)
+  } else {
+    for (lane <- 0 until config.fetchWidth) {
+      translatedPredictionTaken(lane) := rawTranslatedPredictionTaken(lane) &&
+        !earlierTranslatedPredictionTaken(lane)
+      translatedConditionalSeen(lane) := requestPrediction(lane).hit &&
+        requestPrediction(lane).branchType === PredictedBranchType.conditional &&
+        U(lane, config.fetchSlotWidth bits) >= translatedFirstSlot &&
+        !earlierTranslatedPredictionTaken(lane)
+      earlierTranslatedPredictionTaken(lane + 1) :=
+        earlierTranslatedPredictionTaken(lane) || translatedPredictionTaken(lane)
+    }
+  }
+  val requestPredictedTaken = Bool()
   val requestPredictedPc = UInt(config.xlen bits)
   val requestPredictedTarget = UInt(config.xlen bits)
   val requestPredictedType = UInt(PredictedBranchType.Width bits)
-  requestPredictedPc := translatedGroupBase
-  requestPredictedTarget := translatedGroupBase + fetchGroupBytes
-  requestPredictedType := PredictedBranchType.conditional
-  for (lane <- (0 until config.fetchWidth).reverse) {
-    when(translatedPredictionTaken(lane)) {
-      requestPredictedPc := translatedGroupBase + lane * 4
-      requestPredictedTarget := requestPrediction(lane).target
-      requestPredictedType := requestPrediction(lane).branchType
+  if (config.enableBalancedFrontendPredictionSelect) {
+    val lowerTaken = rawTranslatedPredictionTaken(0) || rawTranslatedPredictionTaken(1)
+    val upperTaken = rawTranslatedPredictionTaken(2) || rawTranslatedPredictionTaken(3)
+    val lowerLane = Mux(
+      rawTranslatedPredictionTaken(0),
+      U(0, config.fetchSlotWidth bits),
+      U(1, config.fetchSlotWidth bits)
+    )
+    val upperLane = Mux(
+      rawTranslatedPredictionTaken(2),
+      U(2, config.fetchSlotWidth bits),
+      U(3, config.fetchSlotWidth bits)
+    )
+    val predictedLane = Mux(lowerTaken, lowerLane, upperLane)
+    val lowerTarget = Mux(
+      rawTranslatedPredictionTaken(0),
+      requestPrediction(0).target,
+      requestPrediction(1).target
+    )
+    val upperTarget = Mux(
+      rawTranslatedPredictionTaken(2),
+      requestPrediction(2).target,
+      requestPrediction(3).target
+    )
+    val lowerType = Mux(
+      rawTranslatedPredictionTaken(0),
+      requestPrediction(0).branchType,
+      requestPrediction(1).branchType
+    )
+    val upperType = Mux(
+      rawTranslatedPredictionTaken(2),
+      requestPrediction(2).branchType,
+      requestPrediction(3).branchType
+    )
+    requestPredictedTaken := lowerTaken || upperTaken
+    requestPredictedPc := translatedGroupBase
+    requestPredictedTarget := translatedGroupBase + fetchGroupBytes
+    requestPredictedType := PredictedBranchType.conditional
+    when(requestPredictedTaken) {
+      requestPredictedPc(fetchGroupOffsetWidth - 1 downto 2) := predictedLane
+      requestPredictedTarget := Mux(lowerTaken, lowerTarget, upperTarget)
+      requestPredictedType := Mux(lowerTaken, lowerType, upperType)
+    }
+  } else {
+    requestPredictedTaken := earlierTranslatedPredictionTaken(config.fetchWidth)
+    requestPredictedPc := translatedGroupBase
+    requestPredictedTarget := translatedGroupBase + fetchGroupBytes
+    requestPredictedType := PredictedBranchType.conditional
+    for (lane <- (0 until config.fetchWidth).reverse) {
+      when(translatedPredictionTaken(lane)) {
+        requestPredictedPc := translatedGroupBase + lane * 4
+        requestPredictedTarget := requestPrediction(lane).target
+        requestPredictedType := requestPrediction(lane).branchType
+      }
     }
   }
   val requestHistoryValid = translatedConditionalSeen.asBits.orR
