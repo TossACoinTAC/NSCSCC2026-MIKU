@@ -3,6 +3,7 @@ package miku.backend
 import miku.core._
 import miku.execute.AddressGenerationRequest
 import miku.memory._
+import miku.observe.PerfObservationV1
 import miku.privileged._
 import spinal.core._
 import spinal.lib._
@@ -1138,4 +1139,46 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       storeHead := storeHead + 1
     }
   }
+
+  val perfObservationV1Word5 = Bits(PerfObservationV1.WordWidth bits)
+  perfObservationV1Word5 := 0
+  val observationLoadsValid = Bits(config.loadQueueEntries bits)
+  val observationStoresValid = Bits(config.storeQueueEntries bits)
+  for (entry <- 0 until config.loadQueueEntries) {
+    observationLoadsValid(entry) := loads(entry).valid
+  }
+  for (entry <- 0 until config.storeQueueEntries) {
+    observationStoresValid(entry) := stores(entry).valid
+  }
+  perfObservationV1Word5(4 downto 0) := CountOne(observationLoadsValid).resize(5).asBits
+  perfObservationV1Word5(8 downto 5) := CountOne(observationStoresValid).resize(4).asBits
+  perfObservationV1Word5(9) := scheduledLoadValid
+  perfObservationV1Word5(10) := translationActive
+  perfObservationV1Word5(11) := translationCancelPending
+  perfObservationV1Word5(12) := io.translationRequest.valid
+  perfObservationV1Word5(13) := io.translationRequest.ready
+  perfObservationV1Word5(14) := translationRequestFire
+  perfObservationV1Word5(15) := io.translationResponse.valid
+  perfObservationV1Word5(16) := io.translationResponse.ready
+  perfObservationV1Word5(17) := translationResponseFire
+  perfObservationV1Word5(18) := io.dataRequestValid
+  perfObservationV1Word5(19) := io.dataRequestReady
+  perfObservationV1Word5(20) := dataRequestFire
+  perfObservationV1Word5(21) := io.dataRequest.isWrite
+  perfObservationV1Word5(22) := io.dataRequest.uncached
+  perfObservationV1Word5(23) := io.dataResponseValid
+  perfObservationV1Word5(24) := loadRequestFire
+  perfObservationV1Word5(25) := storeRequestFire
+  perfObservationV1Word5(26) := forwardFire
+  perfObservationV1Word5(27) := storeCompletionFire
+  perfObservationV1Word5(28) := translationCompletionFire
+  perfObservationV1Word5(29) := io.completionValid
+  perfObservationV1Word5(30) := io.loadWakeupValid
+  perfObservationV1Word5(31) := storeDataFire
+  perfObservationV1Word5(32) := aguFire
+  perfObservationV1Word5(33) := io.olderStorePending
+  perfObservationV1Word5(34) := io.storeDrainBusy
+  perfObservationV1Word5(35) := requestBufferValid
+  perfObservationV1Word5(36) := acceptedStoreValid
+  PerfObservationV1.expose(perfObservationV1Word5, 5)
 }

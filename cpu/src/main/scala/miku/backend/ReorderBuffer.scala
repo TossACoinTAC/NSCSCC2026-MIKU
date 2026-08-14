@@ -1,6 +1,7 @@
 package miku.backend
 
 import miku.core._
+import miku.observe.PerfObservationV1
 import miku.predict.PredictedBranchType
 import spinal.core._
 import spinal.lib._
@@ -531,4 +532,23 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   io.empty := occupancy === 0
   io.occupancy := occupancy
   io.headPointer := commitPointer
+
+  require(config.writebackWidth == 5)
+  require(config.robPointerWidth == 6)
+  val perfObservationV1Word4 = Bits(PerfObservationV1.WordWidth bits)
+  perfObservationV1Word4 := 0
+  val observationBranchResolved = Bits(config.writebackWidth bits)
+  val observationBranchMispredict = Bits(config.writebackWidth bits)
+  val observationCompletionActive = stagedCompletionValid & stagedCompletionCurrent
+  for (lane <- 0 until config.writebackWidth) {
+    observationBranchResolved(lane) :=
+      observationCompletionActive(lane) && stagedBranchResolved(lane)
+    observationBranchMispredict(lane) :=
+      observationBranchResolved(lane) && stagedBranchMispredict(lane)
+    perfObservationV1Word4(10 + lane * 6 + 5 downto 10 + lane * 6) :=
+      stagedRobPointer(lane).asBits
+  }
+  perfObservationV1Word4(4 downto 0) := observationBranchResolved
+  perfObservationV1Word4(9 downto 5) := observationBranchMispredict
+  PerfObservationV1.expose(perfObservationV1Word4, 4)
 }

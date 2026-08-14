@@ -206,18 +206,18 @@ sim-matrix:
 sim: sim-prepare sim-matrix
 
 func58-sim:
-	@$(MAKE) sim-prepare SIM_PROFILE=clean SIM_SUITE=func58 SIM_WORKLOADS="$(FUNC58_WORKLOADS)" RUN_SOFTWARE=func/func_lab19
+	@$(MAKE) sim-prepare SIM_PROFILE="$(SIM_PROFILE)" SIM_SUITE=func58 SIM_WORKLOADS="$(FUNC58_WORKLOADS)" RUN_SOFTWARE=func/func_lab19
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" --workspace "$(ROOT_DIR)" \
 		--artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
-		--profile clean --suite func58 --memory-mode random --workloads "$(FUNC58_WORKLOADS)" \
+		--profile "$(SIM_PROFILE)" --suite func58 --memory-mode random --workloads "$(FUNC58_WORKLOADS)" \
 		--seeds 240,255,141 --lanes "$(SIM_LANES)" --time-limit "$(FUNC58_TIME_LIMIT)" \
 		--sim-path "$(CONTAINER_SIM_PATH)" --allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
 
 perf20-sim:
-	@$(MAKE) sim-prepare SIM_PROFILE=clean SIM_SUITE=perf20 SIM_WORKLOADS="$(PERF20_WORKLOADS)" RUN_SOFTWARE=coremark
+	@$(MAKE) sim-prepare SIM_PROFILE="$(SIM_PROFILE)" SIM_SUITE=perf20 SIM_WORKLOADS="$(PERF20_WORKLOADS)" RUN_SOFTWARE=coremark
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" --workspace "$(ROOT_DIR)" \
 		--artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
-		--profile clean --suite perf20 --memory-mode ideal --workloads "$(PERF20_WORKLOADS)" \
+		--profile "$(SIM_PROFILE)" --suite perf20 --memory-mode ideal --workloads "$(PERF20_WORKLOADS)" \
 		--seeds 0 --lanes "$(SIM_LANES)" --time-limit "$(PERF20_TIME_LIMIT)" \
 		--sim-path "$(CONTAINER_SIM_PATH)" --allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
 

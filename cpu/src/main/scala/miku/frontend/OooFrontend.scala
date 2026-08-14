@@ -3,6 +3,7 @@ package miku.frontend
 import miku.backend._
 import miku.core._
 import miku.memory._
+import miku.observe.PerfObservationV1
 import miku.predict._
 import miku.privileged._
 import spinal.core._
@@ -864,4 +865,33 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
 
   io.fetchPc := nextFetchPc
   io.occupancy := count
+
+  val perfObservationV1Word2 = Bits(PerfObservationV1.WordWidth bits)
+  perfObservationV1Word2 := 0
+  perfObservationV1Word2(0) := io.translationRequest.valid
+  perfObservationV1Word2(1) := io.translationRequest.ready
+  perfObservationV1Word2(2) := translationRequestFire
+  perfObservationV1Word2(3) := translationOutstanding
+  perfObservationV1Word2(4) := io.translationResponse.valid
+  perfObservationV1Word2(5) := io.translationResponse.ready
+  perfObservationV1Word2(6) := translationResponseFire
+  perfObservationV1Word2(7) := translatedRequestValid
+  perfObservationV1Word2(8) := cacheRequestBaseValid
+  perfObservationV1Word2(9) := io.cacheRequestValid
+  perfObservationV1Word2(10) := io.cacheUncachedRequestValid
+  perfObservationV1Word2(11) := io.cacheRequestReady
+  perfObservationV1Word2(12) := requestFire
+  perfObservationV1Word2(13) := io.cacheResponseValid
+  perfObservationV1Word2(14) := responseFire
+  perfObservationV1Word2(15) := cacheOutstanding
+  perfObservationV1Word2(16) := io.cacheHitResponsePending
+  perfObservationV1Word2(17) := io.cacheKill
+  perfObservationV1Word2(18) := io.redirectValid
+  perfObservationV1Word2(19) := io.predictorUpdateValid
+  perfObservationV1Word2(20) := io.predictorUpdateReady
+  perfObservationV1Word2(21) := io.predictorUpdateValid && io.predictorUpdateReady
+  perfObservationV1Word2(26) := translationTurnoverTokenValid
+  perfObservationV1Word2(27) := predictionPendingValid
+  perfObservationV1Word2(28) := cacheDropPending
+  PerfObservationV1.expose(perfObservationV1Word2, 2)
 }

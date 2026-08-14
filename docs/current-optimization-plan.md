@@ -10,11 +10,13 @@
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - perf20：`5,299,059` cycles，20/20 pass。
 - func58：BT02 matching RTL 的 random-AXI seeds `240/255/141` 均通过完整 func58。
-- R1 matching 100 MHz direct full implementation：setup `-0.466 ns`、hold `+0.050 ns`、DRC
+- BT02 matching 100 MHz direct full implementation：setup `-0.678 ns`、hold `+0.053 ns`、DRC
   0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
-- 相对上一份 direct full，setup 改善 `0.086 ns`；CPU 层次 LUT `76,873 -> 77,789`
-  （`+916`）、FF `39,941 -> 40,083`（`+142`）。最新 setup top-50 全部属于 IQ，
-  平均 route 占比 `83.52%`，说明下一步应继续切断 IQ 宽 payload 的资格控制锥。
+- 相对 BT02 前一份 direct full，器件总 LUT `90,221 -> 86,159`、寄存器
+  `54,233 -> 53,633`、slice `27,096 -> 26,856`，BRAM `56.5 -> 68.5`。旧 IQ payload
+  CE 路径族已从 top-50 消失；当前 top-50 为 LSQ 22、frontend 10、IQ 7、predictor 6、
+  ROB/CSR 5 条。单次 setup 从 `-0.466 ns` 变为 `-0.678 ns`，既未闭合，也暴露了此前被
+  IQ 遮蔽的 LSQ 到 ATU 路径，不能把整个差值直接归为 BT02 的确定性退化。
 - post-route `-0.055 ns` 只用于识别路径族，不是正式产物。
 
 本阶段固定 100 MHz，不做升频探索。先让 direct full implementation 闭合，再把正 WNS
@@ -28,6 +30,11 @@
   platform 和 other CPU。
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
+- `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
+  不再访问普通 Verilator 内部层级。完整 `cpu-check` 为 39 suites / 213 tests，Python
+  合同为 33 项；clean/instrumented dhrystone A/B 的平台周期 `2,727,045`、退休指令
+  `535,896`、计分周期 `5,425` 和 UART hash 均精确一致，全部计数器守恒 invariant 通过。
+  `perf20-sim` 与 `func58-sim` 现可通过 `SIM_PROFILE=instrumented` 使用同一公开入口。
 
 ## R1：时序候选与周期验证
 
@@ -70,8 +77,10 @@ fully routed 和 bitstream 成功。正 WNS 不用于升频。
   IssueQueue 10 项定向测试、完整 `cpu-check`（39 suites、213 tests）和 perf20 20/20 通过；
   相对 R1 首批组合 20 项逐项精确相等，总周期 `5,299,059`、几何平均
   `1.000000000x`。matching func58 seeds `240/255/141` 均通过，证据已冻结到
-  `build/reports/experiments/R1-BT02/experiment-manifest.json`。下一步只运行一次 100 MHz
-  direct full，用新的 IQ top-50、WNS/TNS 和资源结果判定该结构是否闭合 R1。
+  `build/reports/experiments/R1-BT02/experiment-manifest.json`。matching direct full 的
+  setup/hold 为 `-0.678/+0.053 ns`，DRC、route 和 bitstream 完整；旧 IQ payload CE
+  路径族已经消失，并降低 4,062 LUT，但新主导族转为 22 条 LSQ 到 ATU 路径。BT02
+  继续保留，R1 尚未闭合；下一增量优先局部化 ATU response payload 的资格控制。
 
 ## IPC 第 1 至第 3 轮
 

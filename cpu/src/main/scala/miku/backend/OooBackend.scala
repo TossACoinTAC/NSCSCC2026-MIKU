@@ -1,6 +1,7 @@
 package miku.backend
 
 import miku.core._
+import miku.observe.PerfObservationV1
 import spinal.core._
 import spinal.lib._
 
@@ -529,4 +530,25 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   freeList.io.flush := io.flush
   prf.io.flush := io.flush
   rob.io.flush := io.flush
+
+  require(config.executionWidth == 4)
+  val perfObservationV1Word3 = Bits(PerfObservationV1.WordWidth bits)
+  perfObservationV1Word3 := 0
+  perfObservationV1Word3(5 downto 0) := rob.io.occupancy.asBits.resized
+  perfObservationV1Word3(11 downto 6) := rob.io.headPointer.asBits
+  perfObservationV1Word3(14 downto 12) := io.renameValid
+  perfObservationV1Word3(17 downto 15) := io.renameValid & io.renameReady
+  perfObservationV1Word3(20 downto 18) := dispatchWindow.io.outputValid
+  perfObservationV1Word3(24 downto 21) := issueOperandValid
+  perfObservationV1Word3(28 downto 25) := issueOperandValid & io.issueReady
+  perfObservationV1Word3(33 downto 29) := io.completionValid
+  for (queue <- 0 until config.executionWidth) {
+    perfObservationV1Word3(34 + queue * 4 + 3 downto 34 + queue * 4) :=
+      issueQueues(queue).io.occupancy.asBits.resized
+    perfObservationV1Word3(50 + queue) := issueQueues(queue).io.issueValid
+    perfObservationV1Word3(54 + queue) := issueQueues(queue).io.issueReady
+    perfObservationV1Word3(58 + queue) :=
+      router.io.portValid(queue) && router.io.portReady(queue)
+  }
+  PerfObservationV1.expose(perfObservationV1Word3, 3)
 }
