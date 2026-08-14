@@ -12,7 +12,11 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     val flush = in Bool ()
     val allocatePc = in Vec (UInt(config.xlen bits), config.renameWidth)
     val allocateSerializing = in Bits (config.renameWidth bits)
+    val allocateIsLoad = in Bits (config.renameWidth bits)
+    val allocateIsStore = in Bits (config.renameWidth bits)
     val allocateIsBranch = in Bits (config.renameWidth bits)
+    val allocateLoadQueueIndex = in Vec (UInt(config.loadQueueIndexWidth bits), config.renameWidth)
+    val allocateStoreQueueIndex = in Vec (UInt(config.storeQueueIndexWidth bits), config.renameWidth)
     val allocateSystemOperation =
       in Vec (UInt(SystemOperation.Width bits), config.renameWidth)
     val allocateReady = out Bool ()
@@ -37,6 +41,11 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     val commitValid = out Bits (config.commitWidth bits)
     val commitPc = out Vec (UInt(config.xlen bits), config.commitWidth)
     val commitResult = out Vec (Bits(config.xlen bits), config.commitWidth)
+    val commitIsLoad = out Bits (config.commitWidth bits)
+    val commitIsStore = out Bits (config.commitWidth bits)
+    val commitIsBranch = out Bits (config.commitWidth bits)
+    val commitLoadQueueIndex = out Vec (UInt(config.loadQueueIndexWidth bits), config.commitWidth)
+    val commitStoreQueueIndex = out Vec (UInt(config.storeQueueIndexWidth bits), config.commitWidth)
     val commitBranchTaken = out Bits (config.commitWidth bits)
     val commitBranchTarget = out Vec (UInt(config.xlen bits), config.commitWidth)
     val recoveryValid = out Bool ()
@@ -57,9 +66,17 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     rob.io.allocate(lane).uop.decoded.serializing.allowOverride()
     rob.io.allocate(lane).uop.decoded.serializing := io.allocateSerializing(lane)
     rob.io.allocate(lane).uop.decoded.isBranch.allowOverride()
+    rob.io.allocate(lane).uop.decoded.isLoad.allowOverride()
+    rob.io.allocate(lane).uop.decoded.isStore.allowOverride()
+    rob.io.allocate(lane).uop.decoded.isLoad := io.allocateIsLoad(lane)
+    rob.io.allocate(lane).uop.decoded.isStore := io.allocateIsStore(lane)
     rob.io.allocate(lane).uop.decoded.isBranch := io.allocateIsBranch(lane)
     rob.io.allocate(lane).uop.decoded.systemOperation.allowOverride()
     rob.io.allocate(lane).uop.decoded.systemOperation := io.allocateSystemOperation(lane)
+    rob.io.allocate(lane).uop.loadQueueIndex.allowOverride()
+    rob.io.allocate(lane).uop.storeQueueIndex.allowOverride()
+    rob.io.allocate(lane).uop.loadQueueIndex := io.allocateLoadQueueIndex(lane)
+    rob.io.allocate(lane).uop.storeQueueIndex := io.allocateStoreQueueIndex(lane)
   }
   rob.io.currentEpoch := io.currentEpoch
   rob.io.predictorUpdateCapacity := io.predictorUpdateCapacity
@@ -98,6 +115,11 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
   for (lane <- 0 until config.commitWidth) {
     io.commitPc(lane) := rob.io.commit(lane).pc
     io.commitResult(lane) := rob.io.commit(lane).result
+    io.commitIsLoad(lane) := rob.io.commit(lane).isLoad
+    io.commitIsStore(lane) := rob.io.commit(lane).isStore
+    io.commitIsBranch(lane) := rob.io.commit(lane).isBranch
+    io.commitLoadQueueIndex(lane) := rob.io.commit(lane).loadQueueIndex
+    io.commitStoreQueueIndex(lane) := rob.io.commit(lane).storeQueueIndex
     io.commitBranchTaken(lane) := rob.io.commit(lane).branchTaken
     io.commitBranchTarget(lane) := rob.io.commit(lane).branchTarget
   }
@@ -127,6 +149,8 @@ class ReorderBufferSpec extends AnyFunSuite {
     dut.io.currentEpoch #= 0
     dut.io.predictorUpdateCapacity #= config.commitWidth
     dut.io.allocateSerializing #= 0
+    dut.io.allocateIsLoad #= 0
+    dut.io.allocateIsStore #= 0
     dut.io.allocateIsBranch #= 0
     for (lane <- 0 until config.writebackWidth) {
       dut.io.completionRobPointer(lane) #= 0
@@ -135,6 +159,8 @@ class ReorderBufferSpec extends AnyFunSuite {
     }
     for (lane <- 0 until config.renameWidth) {
       dut.io.allocatePc(lane) #= 0
+      dut.io.allocateLoadQueueIndex(lane) #= 0
+      dut.io.allocateStoreQueueIndex(lane) #= 0
       dut.io.allocateSystemOperation(lane) #= 0
     }
   }
@@ -178,6 +204,90 @@ class ReorderBufferSpec extends AnyFunSuite {
         dut.io.flush #= true
         sample()
         assert(dut.io.occupancy.toBigInt == 0)
+        assert(dut.io.empty.toBoolean)
+      }
+  }
+
+  test("ROB preserves retirement metadata across three-wide wrap and reuse") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-rob")
+      .compile(new ReorderBufferProbe(config))
+      .doSim("ooo-rob-metadata-wrap-reuse", 0x4f4f60) { dut =>
+        def sample(): Unit = {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+        }
+
+        dut.clockDomain.forkStimulus(period = 10)
+        initialize(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample()
+
+        // Eleven groups allocate 33 entries, forcing the 32-entry ROB pointer/index to wrap.
+        for (group <- 0 until 11) {
+          dut.io.allocateValid #= 7
+          dut.io.allocateAccept #= true
+          var loadMask = 0
+          var storeMask = 0
+          var branchMask = 0
+          val expected = (0 until config.renameWidth).map { lane =>
+            val kind = (group + lane) % 3
+            (kind == 0, kind == 1, kind == 2,
+              (group * 3 + lane) & 7, (group * 5 + lane) & 7)
+          }.toList
+          for (lane <- 0 until config.renameWidth) {
+            val load = (group + lane) % 3 == 0
+            val store = (group + lane) % 3 == 1
+            val branch = (group + lane) % 3 == 2
+            dut.io.allocatePc(lane) #= BigInt(group * 0x100 + lane * 4)
+            if (load) loadMask |= 1 << lane
+            if (store) storeMask |= 1 << lane
+            if (branch) branchMask |= 1 << lane
+            dut.io.allocateLoadQueueIndex(lane) #= BigInt((group * 3 + lane) & 7)
+            dut.io.allocateStoreQueueIndex(lane) #= BigInt((group * 5 + lane) & 7)
+          }
+          dut.io.allocateIsLoad #= loadMask
+          dut.io.allocateIsStore #= storeMask
+          dut.io.allocateIsBranch #= branchMask
+          sleep(1)
+          val pointers = (0 until config.renameWidth)
+            .map(lane => dut.io.allocatedPointer(lane).toBigInt)
+          sample()
+
+          dut.io.allocateValid #= 0
+          dut.io.allocateAccept #= false
+          dut.io.completionValid #= 7
+          for (lane <- 0 until config.renameWidth) {
+            dut.io.completionRobPointer(lane) #= pointers(lane)
+          }
+
+          var remaining = expected
+          for (_ <- 0 until 4) {
+            sample()
+            for (lane <- 0 until config.commitWidth) {
+              if ((dut.io.commitValid.toBigInt & (1 << lane)) != 0 && remaining.nonEmpty) {
+                val (expectedLoad, expectedStore, expectedBranch, expectedLoadIndex,
+                  expectedStoreIndex) = remaining.head
+                remaining = remaining.tail
+                assert(dut.io.commitIsLoad.toBigInt.testBit(lane) == expectedLoad)
+                assert(dut.io.commitIsStore.toBigInt.testBit(lane) == expectedStore)
+                assert(dut.io.commitIsBranch.toBigInt.testBit(lane) == expectedBranch)
+                assert(
+                  dut.io.commitLoadQueueIndex(lane).toBigInt == BigInt(expectedLoadIndex)
+                )
+                assert(
+                  dut.io.commitStoreQueueIndex(lane).toBigInt == BigInt(expectedStoreIndex)
+                )
+              }
+            }
+          }
+          assert(remaining.isEmpty)
+          dut.io.completionValid #= 0
+        }
+        sample()
         assert(dut.io.empty.toBoolean)
       }
   }

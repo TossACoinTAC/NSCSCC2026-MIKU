@@ -17,13 +17,7 @@ final case class ReorderBufferPayload(config: OooCoreConfig) extends Bundle {
   val csrAddress = UInt(14 bits)
   val csrWrite = Bool()
   val csrMask = Bool()
-  val isLoad = Bool()
-  val isStore = Bool()
-  val isBranch = Bool()
-  val predictorType = UInt(PredictedBranchType.Width bits)
   val predictorMetadata = Bits(16 bits)
-  val loadQueueIndex = UInt(config.loadQueueIndexWidth bits)
-  val storeQueueIndex = UInt(config.storeQueueIndexWidth bits)
   val decodedException = ExceptionMetadata()
 }
 
@@ -33,6 +27,15 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   val payloadReady = Bool()
   val decodedExceptionValid = Bool()
   val serializing = Bool()
+  // Retirement and LSU ownership metadata is read every commit cycle.  Keeping it beside the
+  // validity/completion state avoids routing these narrow fields through the wide payload-bank
+  // read and commit crossbar.
+  val isLoad = Bool()
+  val isStore = Bool()
+  val isBranch = Bool()
+  val predictorType = UInt(PredictedBranchType.Width bits)
+  val loadQueueIndex = UInt(config.loadQueueIndexWidth bits)
+  val storeQueueIndex = UInt(config.storeQueueIndexWidth bits)
   val pointer = UInt(config.robPointerWidth bits)
   val result = Bits(config.xlen bits)
   val sideEffectData = Bits(config.xlen bits)
@@ -136,9 +139,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     allocationPayload(lane).csrAddress := io.allocate(lane).uop.decoded.csrAddress
     allocationPayload(lane).csrWrite := io.allocate(lane).uop.decoded.csrWrite
     allocationPayload(lane).csrMask := io.allocate(lane).uop.decoded.csrMask
-    allocationPayload(lane).isLoad := io.allocate(lane).uop.decoded.isLoad
-    allocationPayload(lane).isStore := io.allocate(lane).uop.decoded.isStore
-    allocationPayload(lane).isBranch := io.allocate(lane).uop.decoded.isBranch
     val instruction = io.allocate(lane).uop.decoded.instruction
     val opcode = instruction(31 downto 26).asUInt
     val isJirl = opcode === U(0x13, 6 bits)
@@ -146,23 +146,22 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       instruction(9 downto 5) === 1 && instruction(25 downto 10) === 0
     val isCall = opcode === U(0x15, 6 bits) ||
       (isJirl && instruction(4 downto 0) === 1)
-    allocationPayload(lane).predictorType := PredictedBranchType.direct
+    val allocationPredictorType = UInt(PredictedBranchType.Width bits)
+    allocationPredictorType := PredictedBranchType.direct
     when(
       io.allocate(lane).uop.decoded.branchKind >= 1 &&
         io.allocate(lane).uop.decoded.branchKind <= 6
     ) {
-      allocationPayload(lane).predictorType := PredictedBranchType.conditional
+      allocationPredictorType := PredictedBranchType.conditional
     }.elsewhen(isReturn) {
-      allocationPayload(lane).predictorType := PredictedBranchType.ret
+      allocationPredictorType := PredictedBranchType.ret
     }.elsewhen(isCall) {
-      allocationPayload(lane).predictorType := PredictedBranchType.call
+      allocationPredictorType := PredictedBranchType.call
     }.elsewhen(isJirl) {
-      allocationPayload(lane).predictorType := PredictedBranchType.indirect
+      allocationPredictorType := PredictedBranchType.indirect
     }
     allocationPayload(lane).predictorMetadata :=
       io.allocate(lane).uop.decoded.predictorMetadata
-    allocationPayload(lane).loadQueueIndex := io.allocate(lane).uop.loadQueueIndex
-    allocationPayload(lane).storeQueueIndex := io.allocate(lane).uop.storeQueueIndex
     allocationPayload(lane).decodedException := io.allocate(lane).uop.decoded.exception
 
     when(io.allocateAccept && io.allocateValid(lane)) {
@@ -175,6 +174,18 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.allocate(lane).uop.decoded.exception.valid
       entries(destination(config.robIndexWidth - 1 downto 0)).serializing :=
         io.allocate(lane).uop.decoded.serializing
+      entries(destination(config.robIndexWidth - 1 downto 0)).isLoad :=
+        io.allocate(lane).uop.decoded.isLoad
+      entries(destination(config.robIndexWidth - 1 downto 0)).isStore :=
+        io.allocate(lane).uop.decoded.isStore
+      entries(destination(config.robIndexWidth - 1 downto 0)).isBranch :=
+        io.allocate(lane).uop.decoded.isBranch
+      entries(destination(config.robIndexWidth - 1 downto 0)).predictorType :=
+        allocationPredictorType
+      entries(destination(config.robIndexWidth - 1 downto 0)).loadQueueIndex :=
+        io.allocate(lane).uop.loadQueueIndex
+      entries(destination(config.robIndexWidth - 1 downto 0)).storeQueueIndex :=
+        io.allocate(lane).uop.storeQueueIndex
       entries(destination(config.robIndexWidth - 1 downto 0)).pointer := destination
       entries(destination(config.robIndexWidth - 1 downto 0)).result := B(0, config.xlen bits)
       entries(destination(config.robIndexWidth - 1 downto 0)).sideEffectData :=
@@ -305,7 +316,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val stopAfter = Vec(Bool(), config.commitWidth)
   val branchPrefix = Vec(UInt(log2Up(config.commitWidth + 1) bits), config.commitWidth)
   for (lane <- 0 until config.commitWidth) {
-    val retiringBranch = candidates(lane).payload.isBranch && !candidates(lane).exception.valid
+    val retiringBranch = candidates(lane).state.isBranch && !candidates(lane).exception.valid
     if (lane == 0) {
       effectiveBranchTaken(lane) := Mux(
         headBranchBypass,
@@ -373,15 +384,15 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     io.commit(lane).sideEffectData := candidates(lane).state.sideEffectData
     io.commit(lane).retired := canCommit(lane) && !candidates(lane).exception.valid
     io.commit(lane).serializing := candidates(lane).state.serializing
-    io.commit(lane).isLoad := candidates(lane).payload.isLoad
-    io.commit(lane).isStore := candidates(lane).payload.isStore
-    io.commit(lane).isBranch := candidates(lane).payload.isBranch
-    io.commit(lane).predictorType := candidates(lane).payload.predictorType
+    io.commit(lane).isLoad := candidates(lane).state.isLoad
+    io.commit(lane).isStore := candidates(lane).state.isStore
+    io.commit(lane).isBranch := candidates(lane).state.isBranch
+    io.commit(lane).predictorType := candidates(lane).state.predictorType
     io.commit(lane).branchTaken := effectiveBranchTaken(lane)
     io.commit(lane).branchTarget := effectiveBranchTarget(lane)
     io.commit(lane).predictorMetadata := candidates(lane).payload.predictorMetadata
-    io.commit(lane).loadQueueIndex := candidates(lane).payload.loadQueueIndex
-    io.commit(lane).storeQueueIndex := candidates(lane).payload.storeQueueIndex
+    io.commit(lane).loadQueueIndex := candidates(lane).state.loadQueueIndex
+    io.commit(lane).storeQueueIndex := candidates(lane).state.storeQueueIndex
     io.commit(lane).exception := candidates(lane).exception
   }
 
@@ -593,14 +604,14 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       stagedHeadCompletionBypassValid &&
       candidates(0).state.valid && !candidates(0).state.complete &&
       !candidates(0).exception.valid && !candidates(0).state.serializing &&
-      !candidates(0).payload.isBranch &&
+      !candidates(0).state.isBranch &&
       candidates(0).payload.systemOperation === SystemOperation.none
     headCompletionBypassResult := stagedHeadCompletionBypassResult
     if (config.enableBranchHeadCompletionBypass) {
       headBranchBypass := !io.flush && candidates(0).state.payloadReady &&
         stagedHeadBranchBypassValid && candidates(0).state.valid &&
         !candidates(0).state.complete && !candidates(0).exception.valid &&
-        !candidates(0).state.serializing && candidates(0).payload.isBranch &&
+        !candidates(0).state.serializing && candidates(0).state.isBranch &&
         candidates(0).payload.systemOperation === SystemOperation.none
     } else {
       headBranchBypass := False
@@ -659,7 +670,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   perfObservationV1Word4(4 downto 0) := observationBranchResolved
   perfObservationV1Word4(9 downto 5) := observationBranchMispredict
   val observationHeadRetiringBranch =
-    candidates(0).payload.isBranch && !candidates(0).exception.valid
+    candidates(0).state.isBranch && !candidates(0).exception.valid
   val observationHeadPredictorHasCapacity =
     !observationHeadRetiringBranch || io.predictorUpdateCapacity =/= 0
   // Bits 40..51 extend the reserved portion of the V1 ABI. Existing readers
@@ -672,9 +683,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   perfObservationV1Word4(44) := candidates(0).exception.valid
   perfObservationV1Word4(45) := candidates(0).state.serializing
   perfObservationV1Word4(46) := candidates(0).state.branchMispredict
-  perfObservationV1Word4(47) := candidates(0).payload.isLoad
-  perfObservationV1Word4(48) := candidates(0).payload.isStore
-  perfObservationV1Word4(49) := candidates(0).payload.isBranch
+  perfObservationV1Word4(47) := candidates(0).state.isLoad
+  perfObservationV1Word4(48) := candidates(0).state.isStore
+  perfObservationV1Word4(49) := candidates(0).state.isBranch
   perfObservationV1Word4(50) :=
     candidates(0).payload.systemOperation =/= SystemOperation.none
   perfObservationV1Word4(51) := headCompletionBypass
@@ -686,7 +697,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       io.completion(lane).robPointer === payloadReadPointer(0) &&
       io.completion(lane).branchResolved && !io.completion(lane).exception.valid &&
       candidates(0).state.valid && !candidates(0).state.complete &&
-      candidates(0).state.payloadReady && candidates(0).payload.isBranch
+      candidates(0).state.payloadReady && candidates(0).state.isBranch
     observationIncomingHeadMispredictCompletion(lane) :=
       observationIncomingHeadBranchCompletion(lane) && io.completion(lane).branchMispredict
   }
