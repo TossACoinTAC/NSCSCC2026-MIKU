@@ -8,8 +8,9 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：`5,299,059` cycles，20/20 pass。
-- func58：BT03 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+- perf20：L07 matching RTL 为 `5,104,911` cycles，20/20 pass；相对前一节点
+  `5,299,059` 为 `-3.663820%`，归一化几何平均 `1.038957091x`。
+- func58：L07 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
 - MT03+BT03 matching 100 MHz direct full implementation：setup `-0.694 ns`、hold `+0.053 ns`、
   DRC 0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
 - 相对 BT02 matching direct full，器件总 LUT `86,159 -> 86,489`、寄存器
@@ -32,10 +33,21 @@
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 - `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
-  不再访问普通 Verilator 内部层级。当前完整 `cpu-check` 为 39 suites / 215 tests，Python
-  合同为 36 项；clean/instrumented dhrystone A/B 的平台周期 `2,727,045`、退休指令
-  `535,896`、计分周期 `5,425` 和 UART hash 均精确一致，全部计数器守恒 invariant 通过。
-  `perf20-sim` 与 `func58-sim` 现可通过 `SIM_PROFILE=instrumented` 使用同一公开入口。
+  不再访问普通 Verilator 内部层级。当前完整 `cpu-check` 为 39 suites / 216 tests，Python
+  合同为 52 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
+  精确一致，全部计数器守恒 invariant 通过。`perf20-sim` 与 `func58-sim` 可通过
+  `SIM_PROFILE=instrumented` 使用同一公开入口。
+- L07 前的 M01 v4 完整 perf20 matrix 为 score `5,299,059`、ROI `5,299,039`、退休
+  `3,608,034`、IPC `0.680885`。ROB 非空零退休占 ROI `56.10%`，其中 head incomplete
+  `54.38%`；按 head uop 分类，Load `22.87%`、Store `18.61%`、branch `8.19%`、other
+  `4.70%`，ROB 空仅 `6.73%`。这使 Store/Load completion latency 进入首轮 IPC 候选，
+  但这些比例是理论暴露上界，不能直接当作预期加速比。
+- L07 matching M01 v4 的 score/ROI 为 `5,104,911/5,104,891`，退休指令仍为
+  `3,608,034`，IPC 提高到 `0.706780`。Store head-incomplete 从 `986,333`
+  降到 `764,452` cycles（占 ROI `18.61% -> 14.97%`），SQ 满周期从
+  `11.13% -> 9.06%`；ROB 非空零退休同步减少 `198,145` cycles。Load
+  head-incomplete 为 `1,224,728` cycles：相对占比升至 `23.99%`，但绝对值只比前一
+  节点多 `12,819`，尚不能判断为 L07 引入的 Load 回归，也不能直接证明 L02 可回收。
 
 ## R1：时序候选与周期验证
 
@@ -118,6 +130,23 @@ R1 后至少完成三轮 IPC 优化。每轮从新的稳定 baseline 选 2 至 3
 K01 或 B01；Load/cache miss/AXI 串行优先 L02、H05 或新内存候选；IQ credit、端口匹配或
 DIV head-of-line 有权重时优先 I01、D02 或 E03。新的正确性问题使用 `Cxx`，只阻断受影响
 方向，其他独立方向继续推进。
+
+当前 IPC-R1 首项为 `L07 @ 652631f`。普通 cached Store 不再进入 execution 的宽
+completion mux，只以 ROB pointer 和 recovery epoch 的窄身份通道进入 ROB；异常、SC、
+uncached 与冲突路径保持原宽 completion 语义。LSQ 32 项、ROB 14 项、完整 `cpu-check`
+（39 suites / 216 tests）、perf20 20/20 和 func58 三 seed 均通过。perf20 为
+`5,299,059 -> 5,104,911`，总周期 `-3.663820%`、几何平均 `1.038957091x`，20 项全部改善；
+逐项证据见 `build/reports/comparisons/R2-L07.json`。本项改变 LSQ/ROB completion 时序，
+在加入同轮其他独立候选后必须以 matching direct full 重新判断 100 MHz；此前不继承
+L07 前 `-0.694 ns` 的时序结论。
+
+L07 matching instrumented perf20 进一步证明收益来自目标阻塞族：Store head-incomplete
+绝对减少 `221,881` cycles，SQ 满周期减少 `127,198`，ROB 非空零退休减少 `198,145`。
+当前最大的剩余 head-incomplete 类别是 Load（`23.99%` ROI），其次为 Store（`14.97%`）
+和 branch（`8.60%`）。下一增量先用稳定观测 ABI 细分 Load 的 translation、老 Store
+顺序、cache request/response 与可跳过 oldest-load 机会，再决定 L02 或新的内存候选；
+branch resolve-to-recovery 暴露仍有 `153,592` cycles（约 `3.01%` ROI），可与内存方向
+并行形成同一综合批次的独立候选。
 
 ## 系统、归档与发布
 

@@ -155,11 +155,11 @@ Standalone 最差路径是 P2 乘法输入到结果寄存器，数据路径 9.46
 
 | 层级 | 当前候选证据 | 结论边界 |
 | --- | --- | --- |
-| 本地 gates | Scala/Verilator 39 suites / 213 tests；Python、port、lint、Yosys、publication 全通过 | 结构与现有定向合同通过，不证明 Linux shell |
+| 本地 gates | Scala/Verilator 39 suites / 216 tests；Python、port、lint、Yosys、publication 全通过 | 结构与现有定向合同通过，不证明 Linux shell |
 | Chiplab func58 | random-AXI seeds `240/255/141` 全部通过 | matching RTL 的功能仿真保险，不用于 perf score |
-| Chiplab perf20 | 20/20；总计 `5,306,558` cycles | 相对本轮原始 baseline `5,543,953` 为 `-4.282053%`；详细单项归因见候选总账 |
+| Chiplab perf20 | 20/20；总计 `5,104,911` cycles | L07 matching RTL；相对本轮原始 baseline `5,543,953` 为 `-7.919295%`；详细单项归因见候选总账 |
 | Linux | 本轮未重跑 | 历史 Linux 无 mismatch 不能跨 RTL 继承 |
-| 完整 SoC | full implementation setup `-0.552 ns`；首轮同网表 post-route setup `-0.125 ns`；两者 hold `+0.018 ns`、DRC 0 error/critical warning、fully routed、bitstream 成功 | full run 因 setup 未闭合为 candidate；post-route 永远仅作物理探索，不具备竞赛产物资格 |
+| 完整 SoC | 最新 matching direct full 仍对应 L07 前 RTL：setup/hold `-0.694/+0.053 ns`，DRC 0 error/critical warning、fully routed、bitstream 成功 | setup 未闭合且不能跨 RTL 继承；post-route 永远仅作物理探索，不具备竞赛产物资格 |
 | 团队板 | 板侧服务器暂不可用 | 本轮边界止于完整 SoC 实现 |
 
 ## 3. 全局心智模型
