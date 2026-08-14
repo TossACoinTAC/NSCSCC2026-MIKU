@@ -8,18 +8,26 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：当前 R4 RTL 为 `5,014,546` cycles，20/20 pass；R4 前三项保持
+- perf20：当前 R5 RTL 为 `5,014,776` cycles，20/20 pass；R4 前三项保持
   `5,014,520`，FT08 增加 26 cycles（`+0.000518%`），归一化几何平均性能回退
-  `0.005882%`，满足时序候选 `<0.5%` 的软件预算。W01 相对 WT02
+  `0.005882%`；WT05 相对 R4 增加 230 cycles（`+0.004587%`），归一化几何
+  平均性能回退 `0.010913%`；CT02 相对 WT05 的 20 项周期逐项精确相等。两项组合满足
+  时序批次 `<0.5%` 的软件预算。W01 相对 WT02
   减少 42,348 cycles（`-0.837435%`），几何平均加速 `1.010598877x`；BR01 相对 L07
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
   baseline `5,543,953` 累计 `-9.549269%`。
-- func58：当前 R4 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
-- 最近已完成的 R3 matching 100 MHz direct full implementation：setup `-0.440 ns`、hold `+0.009 ns`、
+- func58：当前 R5 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+- 历史 R3 matching 100 MHz direct full implementation：setup `-0.440 ns`、hold `+0.009 ns`、
   setup TNS `-13.390 ns`、128 个失败 endpoint；DRC 0 error/critical warning、fully routed、
   bitstream 成功，但仍不是里程碑。placed utilization 为 88,048 LUT、54,595 FF、
   56.5 BRAM、8 DSP。相对 WT04，WNS 改善 `0.149 ns`、TNS 改善 `28.035 ns`、失败 endpoint
   减少 180 个，但 LUT/FF 分别增加 688/370。
+- R4 `IT01+MT06+CT01+FT08` matching direct full 已完成 fresh route：setup WNS `-0.106 ns`、
+  hold WNS `+0.051 ns`、setup TNS `-0.435 ns`、10 个失败 endpoint；fully routed、DRC 0
+  error/critical warning、bitstream 成功。资源为 87,633 LUT、54,616 FF、56.5 BRAM、8 DSP，
+  相对 R3 减少 415 LUT、增加 21 FF。R4 top-50 为 IQ 18、ROB/CSR 12、cache/L2 9、predictor 5、
+  LSQ 6，前端为 0；最差路径是 `rob/stagedPdst -> issueQueues_0/ageOrder_0`，
+  `-0.106 ns`，route 占比 80.17%，LSQ 最差已改善至 `+0.041 ns`。
 - R3 将 WT04 top-50 中 predictor 的 `45/50` 降为 `2/50`，证明 PT01+AT01 组合切断了
   目标锥；ROB/CSR 在两次 route 中都为 0，不能从本次 route 单独量化 RT01。新的 top-50
   为 IQ 25、LSQ 16、cache/L2 7、predictor 2；最差路径是 L1I registered response valid
@@ -311,10 +319,30 @@ R4 不再把 RTL 文本变短或显式条件消失当作时序成功，而是按
   平均性能回退 `0.005882%`，最大单项回退为 dhrystone 的 `0.05849%`，没有异常长尾。
   该微小而可归因的周期代价由 matching route 是否真正移除 frontend correction 路径来裁决。
 
-R4 最终组合 func58 三 seed 均已通过；冻结 manifest 后只启动一次
-100 MHz direct full implementation。若 route 仍未闭合，必须用新的 top-50 判断哪类路径
-被真正移除、转移或复制，再设计下一批至少两个候选；不根据单次 WNS 数字回退已通过软件
-门禁的候选，也不把综合器可重新推导的表面布尔改写重复列为新方向。
+R4 最终组合 func58 三 seed 均已通过；matching direct full 已完成但 setup 仍差 `0.106 ns`。
+R5 已积累两个相互独立、直接对应 routed path cone 的候选，只在组合软件证据完整后启动一次
+direct implementation：
+
+- `WT05 @ 0e47e4b`：ordinary IQ 只用 direct/fast wake 做同拍 select bypass，ROB/LSQ 的 registered wake
+  仍更新 resident `sourceReady`，但不再进入 age-order/select 的同拍宽路径。R4 最差路径正是
+  `stagedPdst -> ageOrder`。定向 A/B 和完整 `cpu-check` 已通过；独立 perf20 为
+  `5,014,546 -> 5,014,776`（`+0.004587%`），归一化几何平均性能回退
+  `0.010913%`，明显低于时序批次 `0.5%` 的预算。它不是严格周期透明候选，但代价小且
+  可归因，是否保留由 matching IQ/ROB top-N 与 WNS 裁决。
+- `CT02 @ 8e58a9f`：L1I controller 的状态机保证 lookup 与 refill install 不会同拍发生，因此
+  data RAM 的同步读使能只需 `lookupFire || maintenanceFire`，无需再经过 `!externalWrite`。
+  该变化直接切断 R4 rank 2/8/10 的 tag/read context 到 data BRAM `ENARDEN` 控制锥；L1D/L2
+  保持原语义。legacy、CT01 speculative pre-read 和 CT02 decoupled-enable 三配置定向测试均
+  通过，组合完整 `cpu-check` 为 39 suites/230 tests，发布 RTL hash 为
+  `36bb4a4514302411f72997a6cf965f86d601e7b88330bd3bc29fbad9fa1e95ac`。生成 RTL 已确认
+  目标条件从 L1I data RAM 读使能中消失；完整 perf20 相对 WT05 20 项逐项精确相等，
+  func58 random-AXI seeds `240/255/141` 均为 58/58。
+- `MT07`：在 MT06 的 forwarding owner 边界前把 one-hot owner 编码为 3-bit registered index，
+  completion 侧只做已注册 index 的局部 data select。只有新的 LSQ 路径重新进入 top-50 时才实施，
+  避免为已变成正 slack 的路径增加寄存器。
+
+若下一轮仍未闭合，必须用新的 top-50 判断哪类路径被真正移除、转移或复制；不根据单次 WNS
+数字回退已通过软件门禁的候选，也不把综合器可重新推导的表面布尔改写重复列为新方向。
 
 ## 系统、归档与发布
 
