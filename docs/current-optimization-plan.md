@@ -39,6 +39,13 @@ suite、完整 `cpu-check`、完整 perf20 20/20 和相对前一节点的 A/B。
 R1 晋级要求是 func58 三 seed通过、direct full setup/hold 非负、DRC 0 error/critical warning、
 fully routed 和 bitstream 成功。正 WNS 不用于升频。
 
+当前进度：
+
+- `BT01 @ fc73f5b`：IssueQueue 定向测试和完整 `cpu-check` 通过；perf20 相对
+  `5,306,558` 基线 20 项逐项精确相等，几何平均 `1.000000000x`。该节点作为
+  周期透明的 R1 累积基线保留，matching implementation 效果待五项组合后统一验证。
+- `MT01`：下一节点，尚未形成候选 RTL。
+
 ## IPC 第 1 至第 3 轮
 
 R1 后至少完成三轮 IPC 优化。每轮从新的稳定 baseline 选 2 至 3 个相互较独立的候选，
