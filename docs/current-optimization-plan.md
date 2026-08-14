@@ -8,16 +8,20 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：当前 WT02 RTL 为 `5,056,868` cycles，20/20 pass；WT02 相对 FT05 减少
-  986 cycles（`-0.019494%`），几何平均加速 `1.000446233x`；BR01 相对 L07
+- perf20：当前 W01+FT06+MT05 RTL 为 `5,014,520` cycles，20/20 pass；W01 相对 WT02
+  减少 42,348 cycles（`-0.837435%`），几何平均加速 `1.010598877x`；BR01 相对 L07
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
-  baseline `5,543,953` 累计 `-8.785879%`。
-- func58：当前 WT02 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
-- WT02 matching 100 MHz direct full implementation：setup `-0.641 ns`、hold `+0.050 ns`、
-  DRC 0 error/critical warning、fully routed、bitstream 成功；资源为 87,244 LUT、54,390 FF、
-  56.5 BRAM、8 DSP。相对 WT01 的 setup 改善 `0.183 ns`，但 setup 仍未闭合，因此尚不是
-  里程碑。最新 top-50 全部属于 IQ，平均 route 占比 `79.95%`；主要源是 divider 共享
-  writeback lane 1 的 `stagedPdst_1`，其次包括 lane 3。
+  baseline `5,543,953` 累计 `-9.549738%`。
+- func58：当前 W01+FT06+MT05 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+- W01+FT06+MT05 matching 100 MHz direct full implementation：setup `-0.395 ns`、hold
+  `+0.053 ns`、setup TNS `-12.353 ns`、156 个失败 endpoint；DRC 0 error/critical warning、
+  fully routed、bitstream 成功。相对 WT02 的 setup 改善 `0.246 ns`，但仍不是里程碑。
+  placed utilization 为 86,810 LUT、53,760 FF、68.5 BRAM、8 DSP；routed hierarchy
+  summary 为 86,935 LUT、53,822 FF。
+- 最新 top-50 中 IQ 占 38 条，最差 `-0.395 ns`，平均 route 占比 `77.79%`；前六条均由
+  ROB lane 0 的 `stagedPdst_0` 经 wakeup/select 驱动 LSU IQ 宽 issue payload。ROB/CSR
+  占 4 条、cache/L2 占 7 条、predictor 占 1 条，frontend、ATU/LSQ 均未进入 top-50。
+  FT06、MT05 的组合物理目标得到支持，但单次组合 route 不能拆分出各自收益。
 - BT04 相对 MT03+BT03 的器件总 LUT `86,489 -> 89,422`、寄存器
   `54,358 -> 54,881`、slice `26,920 -> 27,745`，BRAM `56.5 -> 54.5`。其 top-50 全部为
   IQ，最差路径 `-1.442 ns`，由 recovery 经另一个 IQ 的 direct wakeup/select 级联到本地复制
@@ -245,7 +249,17 @@ backpressure 和同拍 replacement 定向测试以及完整门禁通过，生成
 连接 owner context，perf20 仍为 `5,014,520 -> 5,014,520`，20 项逐项精确相等。redirect drain
 同拍接收新 translation 时的 owner 安装问题单列为性能候选，必须先用定向失败测试确认机会与
 正确语义。本批最终组合的 func58 random-AXI seeds `240/255/141` 均为 58/58，已满足启动
-matching direct full implementation 的软件门禁。
+matching direct full implementation 的软件门禁。matching direct full 已完成：setup/hold
+为 `-0.395/+0.053 ns`，相对 WT02 改善 `0.246 ns`；DRC 0 error/critical warning、fully
+routed、bitstream 成功，但 setup 仍未闭合。top-50 分类为 IQ 38、ROB/CSR 4、cache/L2 7、
+predictor 1；最新主导族从 lane 1/3 转为 ROB lane 0 staged wake 到 LSU IQ 宽输出。
+
+下一时序节点 `WT04` 计划把 LSU IQ 的“持久 source-ready 更新”和“同拍 select bypass”
+拆成两个合同：所有已注册 completion wake 仍在原拍写入 resident/enqueue ready 状态，只有
+ALU direct wake 与 load early wake 继续进入 LSU IQ 同拍 select。这样不丢失 CSR、DIV、SC、
+Multiply 等首次 completion；它们的内存消费者最坏晚一拍被选择。该候选允许小于 `0.5%` 的
+平均性能回退，但必须完整记录 20 项变化，并以 matching route 判断 staged ROB tag 是否退出
+LSU IQ 宽 payload 路径。
 
 ## 系统、归档与发布
 
