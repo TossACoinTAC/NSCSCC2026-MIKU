@@ -8,19 +8,19 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：BT04 matching RTL 为 `5,057,854` cycles，20/20 pass；BT04 相对 BR01
-  20 项逐项精确相等；BR01 相对 L07
+- perf20：WT01 matching RTL 为 `5,057,854` cycles，20/20 pass；WT01、已否决的 BT04
+  与 BR01 三者在软件侧均为 20 项逐项精确相等；BR01 相对 L07
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
   baseline `5,543,953` 累计 `-8.768094%`。
-- func58：BT04 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
-- MT03+BT03 matching 100 MHz direct full implementation：setup `-0.694 ns`、hold `+0.053 ns`、
-  DRC 0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
-- 相对 BT02 matching direct full，器件总 LUT `86,159 -> 86,489`、寄存器
-  `53,633 -> 54,358`、slice `26,856 -> 26,920`，BRAM `68.5 -> 56.5`。MT03 已使原有
-  22 条 LSQ 到 ATU 路径全部移出 top-50；BT03 移除了宽 `issueAddressUop` 寄存器，却把
-  IQ recovery/wakeup/select 到 token slot payload read 的新路径推成 47/50，最差为
-  `-0.694 ns`，其余 3 条为 frontend。setup 相对 BT02 仅变化 `-0.016 ns`，单次 route
-  不足以证明该差值是确定性退化，但 BT03 未达到预期物理目标，需要结构重做或退出组合。
+- func58：WT01 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+- L07+BR01+BT04 matching 100 MHz direct full implementation：setup `-1.442 ns`、hold
+  `+0.050 ns`、DRC 0 error/critical warning、fully routed、bitstream 成功，但 setup 明显退化，
+  因此 BT04 已否决并恢复 BT03 默认结构。
+- BT04 相对 MT03+BT03 的器件总 LUT `86,489 -> 89,422`、寄存器
+  `54,358 -> 54,881`、slice `26,920 -> 27,745`，BRAM `56.5 -> 54.5`。其 top-50 全部为
+  IQ，最差路径 `-1.442 ns`，由 recovery 经另一个 IQ 的 direct wakeup/select 级联到本地复制
+  输出寄存器；平均 route 占比 `80.45%`。这证明恢复宽双槽输出既没有周期收益，也放大了
+  面积、拥塞和跨 IQ 控制锥，不能作为时序修复保留。
 - post-route `-0.055 ns` 只用于识别路径族，不是正式产物。
 
 本阶段固定 100 MHz，不做升频探索。先让 direct full implementation 闭合，再把正 WNS
@@ -35,8 +35,8 @@
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 - `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
-  不再访问普通 Verilator 内部层级。当前完整 `cpu-check` 为 39 suites / 218 tests，Python
-  合同为 53 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
+  不再访问普通 Verilator 内部层级。当前完整 `cpu-check` 为 39 suites / 219 tests，Python
+  合同为 54 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
   精确一致，全部计数器守恒 invariant 通过。`perf20-sim` 与 `func58-sim` 可通过
   `SIM_PROFILE=instrumented` 使用同一公开入口。
 - L07 前的 M01 v4 完整 perf20 matrix 为 score `5,299,059`、ROI `5,299,039`、退休
@@ -164,16 +164,26 @@ clean perf20 为 `5,104,911 -> 5,057,854`，总周期 `-0.921799%`、几何平�
 `build/reports/experiments/R2-BR01/experiment-manifest.json`。它不做 execute-time squash，
 不改变 speculative RAT/FreeList/LSQ，因此与 B01 的复杂选择性恢复不是同一机制。
 
-同批时序候选 `BT04 @ 50f998c` 已实现并保留：退出 BT03 的 9-way token payload read，
+同批时序候选 `BT04 @ 50f998c` 已实现后否决：退出 BT03 的 9-way token payload read，
 恢复 BT02 已验证的每端口本地两槽注册 issue output；配置开关仍可选择 BT03 token 路径，
 用于结构 A/B 回归。IssueQueue 10 项、Backend 17 项以及完整 `cpu-check`（39 suites / 218
 tests）通过，测试覆盖两种输出结构在 backpressure 下的 payload 稳定性和连续逐拍发射。
 clean perf20 相对 BR01 为 `5,057,854 -> 5,057,854`，20 项逐项精确相等、几何平均
 `1.000000000x`；matching func58 seeds `240/255/141` 均为 58/58。逐项证据见
 `build/reports/comparisons/R2-BT04.json`，冻结证据见
-`build/reports/experiments/R2-BT04-local-issue-output/experiment-manifest.json`。L07、BR01 与 BT04
-最终组合只运行一次 100 MHz direct full；BT04 是否移除 IQ token-read 路径墙以及组合能否闭合，
-只由该次 matching implementation 判定。
+`build/reports/experiments/R2-BT04-local-issue-output/experiment-manifest.json`。matching direct full
+为 setup/hold `-1.442/+0.050 ns`；top-50 全部为 IQ，且相对 BT03 增加 2,933 LUT、523 FF、
+825 slice。`91be40f` 已恢复 BT03 token 输出为默认，BT04 仅保留作可复现实验分支。
+
+下一时序候选 `WT01 @ ecd4786` 针对该实现暴露的共同根因：execution 的 direct-wakeup
+注释原本声称不含 flush，但旧表达式通过 `fire = valid && ready` 把 redirect/flush 送入了
+全局 wakeup/select 网络。WT01 显式拆分资源可接受性与架构 fire；completion 仍由真实 fire
+资格化，恢复周期只允许产生由 IQ flush 优先级吞掉的不可见 wake 候选。Execution 定向 11 项、
+C01 barrier 门禁、IQ flush 负向用例及完整 `cpu-check`（39 suites / 219 tests）通过；生成 RTL
+已确认 direct-wakeup 表达式不含 `io_flush`，completion 仍含 `io_issueReady`。完整 perf20
+为 `5,057,854 -> 5,057,854`，20 项逐项精确相等、几何平均 `1.000000000x`；func58
+random-AXI seeds `240/255/141` 均为 58/58。逐项证据见
+`build/reports/comparisons/R2-WT01.json`；matching direct full 是后续晋级门禁。
 
 ## 系统、归档与发布
 
