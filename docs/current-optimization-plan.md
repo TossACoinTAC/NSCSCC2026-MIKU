@@ -13,15 +13,16 @@
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
   baseline `5,543,953` 累计 `-9.549738%`。
 - func58：当前 R3 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
-- 最近已完成的 WT04 matching 100 MHz direct full implementation：setup `-0.589 ns`、hold `+0.053 ns`、
-  setup TNS `-41.425 ns`、308 个失败 endpoint；DRC 0 error/critical warning、fully routed、
-  bitstream 成功，但仍不是里程碑。placed utilization 为 87,360 LUT、54,225 FF、
-  56.5 BRAM、8 DSP。
-- WT04 将上一节点 top-50 中 38 条 ROB staged wake 到 LSU IQ 的路径全部移除；最新 top-50
-  为 predictor 45 条、IQ 5 条，最差路径改为 BTB bank 输出到 instruction ATU context，
-  setup `-0.589 ns`。剩余 IQ 路径始于 load completion/early wake，最差 `-0.302 ns`。
-  这证明 WT04 的目标锥被切断，同时说明压力已转移到 predictor/ATU，而本次整体 WNS 不可
-  拆分成 WT04 的独立物理收益或退化。
+- 最近已完成的 R3 matching 100 MHz direct full implementation：setup `-0.440 ns`、hold `+0.009 ns`、
+  setup TNS `-13.390 ns`、128 个失败 endpoint；DRC 0 error/critical warning、fully routed、
+  bitstream 成功，但仍不是里程碑。placed utilization 为 88,048 LUT、54,595 FF、
+  56.5 BRAM、8 DSP。相对 WT04，WNS 改善 `0.149 ns`、TNS 改善 `28.035 ns`、失败 endpoint
+  减少 180 个，但 LUT/FF 分别增加 688/370。
+- R3 将 WT04 top-50 中 predictor 的 `45/50` 降为 `2/50`，证明 PT01+AT01 组合切断了
+  目标锥；ROB/CSR 在两次 route 中都为 0，不能从本次 route 单独量化 RT01。新的 top-50
+  为 IQ 25、LSQ 16、cache/L2 7、predictor 2；最差路径是 L1I registered response valid
+  到 frontend `cacheOutstanding`，setup `-0.440 ns`。其次为 LSQ completion `-0.380 ns`
+  和 IQ issue output `-0.281 ns`，构成下一批时序候选的三个相对独立方向。
 - BT04 相对 MT03+BT03 的器件总 LUT `86,489 -> 89,422`、寄存器
   `54,358 -> 54,881`、slice `26,920 -> 27,745`，BRAM `56.5 -> 54.5`。其 top-50 全部为
   IQ，最差路径 `-1.442 ns`，由 recovery 经另一个 IQ 的 direct wakeup/select 级联到本地复制
@@ -276,12 +277,16 @@ R3 已积累三个时序候选并完成软件验证：`PT01 @ bc98e07` 将四 la
 `5,014,520` 且逐项精确相等。AT01 暴露的 Main TLB 复位问题已由独立 `C09 @ 2bc5433`
 修复并回归，不能把正确性修复收益归给 AT01。比较证据为 `R3-PT01.json`、`R3-AT01.json`
 和 `R3-RT01.json`。R3 组合 func58 random-AXI seeds `240/255/141` 均为 58/58；
-matching direct full 尚未运行。
+matching direct full 为 setup/hold `-0.440/+0.009 ns`、setup TNS `-13.390 ns`、128 个
+失败 endpoint，DRC/route/bitstream 完整。相对 WT04 的组合物理结果明确改善，但尚未满足
+正 WNS 里程碑；归档见
+`Post_Impl_Bundles/cpu_434b34291ca7_chiplab_c398d274812f_perf_100mhz_20260815-031510/manifest.json`。
 
 下一轮时序工作不以单候选直接进入综合。先积累至少两个、通常两个至三个相对独立的候选，
 逐个完成定向测试、完整门禁和 perf20 A/B，再对最终组合只执行一次 direct full implementation。
-当前优先从 BTB/predictor 到 ATU/PHT 的主导路径族选择一项强候选，并搭配至少一个不共享该
-主锥的周期透明候选；若某候选带来平均性能回退，归一化幅度必须小于 `0.5%` 且单独记录。
+当前优先分别从 L1I response 到 frontend 状态、LSQ completion payload 和 IQ issue output
+选择至少三个相对独立且不增加拍数的候选；若某候选带来平均性能回退，归一化幅度必须小于
+`0.5%` 且单独记录。三个节点仍按线性顺序完成门禁，只对最终组合启动一次 Vivado。
 
 ## 系统、归档与发布
 
