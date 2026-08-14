@@ -464,6 +464,68 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         }
 
         assert(observedPc == expectedPc)
+    }
+  }
+
+  test("ordinary issue address buffering holds payload and sustains one issue per cycle") {
+    val multiplyPort =
+      config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Multiply))
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
+      .compile(new OooBackendDispatchProbe(config))
+      .doSim("ooo-backend-ordinary-address-buffer", 0x4c7c) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearControl(dut)
+        dut.io.issueReady #= 0xf & ~(1 << multiplyPort)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        val basePc = BigInt("1c000000", 16)
+        val expectedPc = (0 until 4).map(index => basePc + index * 4)
+        for (index <- expectedPc.indices) {
+          dut.io.inputValid #= 1
+          dut.io.pc(0) #= expectedPc(index)
+          dut.io.instruction(0) #= (BigInt("001c0000", 16) | (index + 1)) // mul.w rd,r0,r0
+          sleep(1)
+          assert(dut.io.renameReady.toBigInt == 7)
+          dut.clockDomain.waitSampling()
+        }
+        dut.io.inputValid #= 0
+
+        var waitCycles = 0
+        while (
+          (dut.io.issueValid.toBigInt & (BigInt(1) << multiplyPort)) == 0 && waitCycles < 12
+        ) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          waitCycles += 1
+        }
+        assert((dut.io.issueValid.toBigInt & (BigInt(1) << multiplyPort)) != 0)
+        assert(dut.io.issuePc(multiplyPort).toBigInt == expectedPc.head)
+        val heldPdst = dut.io.issuePdst(multiplyPort).toBigInt
+        for (_ <- 0 until 4) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          assert((dut.io.issueValid.toBigInt & (BigInt(1) << multiplyPort)) != 0)
+          assert(dut.io.issuePc(multiplyPort).toBigInt == expectedPc.head)
+          assert(dut.io.issuePdst(multiplyPort).toBigInt == heldPdst)
+        }
+
+        val observedPc = ArrayBuffer(expectedPc.head)
+        dut.io.issueReady #= 0xf
+        var cycles = 0
+        while (observedPc.size < expectedPc.size && cycles < 16) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          if ((dut.io.issueValid.toBigInt & (BigInt(1) << multiplyPort)) != 0) {
+            observedPc += dut.io.issuePc(multiplyPort).toBigInt
+          }
+          cycles += 1
+        }
+
+        assert(observedPc == expectedPc)
       }
   }
 
