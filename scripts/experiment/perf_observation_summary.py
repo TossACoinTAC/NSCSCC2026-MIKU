@@ -174,20 +174,20 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             raise ExperimentError(f"M01 计数器缺失或 hash 不匹配: {counters_path}")
 
         counters = load_json(counters_path)
-        if counters.get("schema_version") != "miku-perf-observation-v2":
-            raise ExperimentError(f"观测汇总要求 v2 ROI 结构: {counters_path}")
+        if counters.get("schema_version") != "miku-perf-observation-v3":
+            raise ExperimentError(f"观测汇总要求 v3 ROI 结构: {counters_path}")
         roi = counters.get("roi")
-        if not isinstance(roi, dict) or roi.get("mode") != "counter-read-pairs":
-            raise ExperimentError(f"perf20 必须使用 counter-read-pairs ROI: {counters_path}")
+        if not isinstance(roi, dict) or roi.get("mode") != "outermost-counter-read-pair":
+            raise ExperimentError(f"perf20 必须使用最外层 counter-read ROI: {counters_path}")
         markers = roi.get("counter_read_markers")
-        pairs = roi.get("closed_pairs")
+        nested_pairs = roi.get("nested_counter_read_pairs")
         if (
             roi.get("complete") is not True
             or roi.get("boundary_cycles_included") is not False
             or not isinstance(markers, int)
             or markers < 2
             or markers % 2 != 0
-            or pairs != markers // 2
+            or nested_pairs != markers // 2 - 1
         ):
             raise ExperimentError(f"perf20 ROI marker 未闭合: {counters_path}")
         invariants = counters.get("invariants")
@@ -227,7 +227,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             "score_cycles": score_cycles,
             "roi_cycles": roi_cycles,
             "score_minus_roi_cycles": score_cycles - roi_cycles,
-            "roi_pairs": pairs,
+            "nested_counter_read_pairs": nested_pairs,
             "retired_instructions": retired,
             "ipc": _ratio(retired, roi_cycles),
             "zero_retire_loss": counters["zero_retire_loss"],
@@ -397,7 +397,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
     }
     return {
         "schema_version": 1,
-        "source_schema": "miku-perf-observation-v2",
+        "source_schema": "miku-perf-observation-v3",
         "matrix": {
             "path": matrix["path"].as_posix(),
             "sha256": sha256_file(matrix["path"]),

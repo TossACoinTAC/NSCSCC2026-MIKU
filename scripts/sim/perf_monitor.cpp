@@ -195,6 +195,129 @@ void PerfMonitor::reset_accumulators() {
     std::fill(std::begin(axi_error_), std::end(axi_error_), 0);
 }
 
+void PerfMonitor::save_accumulator_checkpoint() {
+#define SAVE_SCALAR(name) accumulator_checkpoint_.name = name##_
+#define SAVE_ARRAY(name)                                                       \
+    std::copy(std::begin(name##_), std::end(name##_),                         \
+              std::begin(accumulator_checkpoint_.name))
+    SAVE_SCALAR(cycles);
+    SAVE_ARRAY(retire_hist);
+    SAVE_SCALAR(sampled_instructions);
+    SAVE_SCALAR(observed_instructions);
+    SAVE_SCALAR(trace_signature);
+    SAVE_SCALAR(abi_errors);
+    SAVE_SCALAR(sampling_protocol_errors);
+    SAVE_SCALAR(source_retire_alignment_errors);
+    SAVE_SCALAR(non_prefix_retire);
+    SAVE_SCALAR(recovery_cycles);
+    SAVE_ARRAY(recovery_cause);
+    SAVE_ARRAY(zero_retire);
+    SAVE_SCALAR(rob_occupancy_sum);
+    SAVE_SCALAR(rob_occupancy_max);
+    SAVE_SCALAR(rob_full_cycles);
+    SAVE_ARRAY(rob_occupancy_hist);
+    SAVE_SCALAR(frontend_decode_valid_sum);
+    SAVE_ARRAY(frontend_occupancy_hist);
+    SAVE_ARRAY(frontend_events);
+    SAVE_ARRAY(frontend_request_interval_hist);
+    SAVE_SCALAR(frontend_request_sequences);
+    SAVE_ARRAY(issue_ready_cycles);
+    SAVE_ARRAY(issue_ready_entries);
+    SAVE_ARRAY(issue_occupancy_sum);
+    SAVE_ARRAY(issue_full_cycles);
+    SAVE_ARRAY(issue_fire_by_port);
+    SAVE_SCALAR(issue_valid_sum);
+    SAVE_SCALAR(issue_fire_sum);
+    SAVE_SCALAR(dispatch_valid_sum);
+    SAVE_SCALAR(dispatch_fire_sum);
+    SAVE_ARRAY(dispatch_fire_hist);
+    SAVE_ARRAY(branch_commit_hist);
+    SAVE_SCALAR(branch_retired);
+    SAVE_SCALAR(predictor_update_cycles);
+    SAVE_SCALAR(branch_resolved);
+    SAVE_SCALAR(branch_mispredicted);
+    SAVE_SCALAR(branch_recovery_matches);
+    SAVE_SCALAR(branch_recovery_without_resolution);
+    SAVE_SCALAR(branch_resolve_to_recovery_cycles);
+    SAVE_SCALAR(branch_resolve_to_recovery_max);
+    SAVE_ARRAY(branch_resolve_to_recovery_hist);
+    SAVE_SCALAR(load_queue_occupancy_sum);
+    SAVE_SCALAR(store_queue_occupancy_sum);
+    SAVE_SCALAR(load_queue_full_cycles);
+    SAVE_SCALAR(store_queue_full_cycles);
+    SAVE_ARRAY(lsq_events);
+    SAVE_ARRAY(cache_events);
+    SAVE_ARRAY(cache_occupancy_sum);
+    SAVE_ARRAY(axi_valid);
+    SAVE_ARRAY(axi_fire);
+    SAVE_ARRAY(axi_backpressure);
+    SAVE_ARRAY(axi_error);
+#undef SAVE_ARRAY
+#undef SAVE_SCALAR
+    accumulator_checkpoint_valid_ = true;
+}
+
+void PerfMonitor::restore_accumulator_checkpoint() {
+#define RESTORE_SCALAR(name) name##_ = accumulator_checkpoint_.name
+#define RESTORE_ARRAY(name)                                                    \
+    std::copy(std::begin(accumulator_checkpoint_.name),                       \
+              std::end(accumulator_checkpoint_.name), std::begin(name##_))
+    RESTORE_SCALAR(cycles);
+    RESTORE_ARRAY(retire_hist);
+    RESTORE_SCALAR(sampled_instructions);
+    RESTORE_SCALAR(observed_instructions);
+    RESTORE_SCALAR(trace_signature);
+    RESTORE_SCALAR(abi_errors);
+    RESTORE_SCALAR(sampling_protocol_errors);
+    RESTORE_SCALAR(source_retire_alignment_errors);
+    RESTORE_SCALAR(non_prefix_retire);
+    RESTORE_SCALAR(recovery_cycles);
+    RESTORE_ARRAY(recovery_cause);
+    RESTORE_ARRAY(zero_retire);
+    RESTORE_SCALAR(rob_occupancy_sum);
+    RESTORE_SCALAR(rob_occupancy_max);
+    RESTORE_SCALAR(rob_full_cycles);
+    RESTORE_ARRAY(rob_occupancy_hist);
+    RESTORE_SCALAR(frontend_decode_valid_sum);
+    RESTORE_ARRAY(frontend_occupancy_hist);
+    RESTORE_ARRAY(frontend_events);
+    RESTORE_ARRAY(frontend_request_interval_hist);
+    RESTORE_SCALAR(frontend_request_sequences);
+    RESTORE_ARRAY(issue_ready_cycles);
+    RESTORE_ARRAY(issue_ready_entries);
+    RESTORE_ARRAY(issue_occupancy_sum);
+    RESTORE_ARRAY(issue_full_cycles);
+    RESTORE_ARRAY(issue_fire_by_port);
+    RESTORE_SCALAR(issue_valid_sum);
+    RESTORE_SCALAR(issue_fire_sum);
+    RESTORE_SCALAR(dispatch_valid_sum);
+    RESTORE_SCALAR(dispatch_fire_sum);
+    RESTORE_ARRAY(dispatch_fire_hist);
+    RESTORE_ARRAY(branch_commit_hist);
+    RESTORE_SCALAR(branch_retired);
+    RESTORE_SCALAR(predictor_update_cycles);
+    RESTORE_SCALAR(branch_resolved);
+    RESTORE_SCALAR(branch_mispredicted);
+    RESTORE_SCALAR(branch_recovery_matches);
+    RESTORE_SCALAR(branch_recovery_without_resolution);
+    RESTORE_SCALAR(branch_resolve_to_recovery_cycles);
+    RESTORE_SCALAR(branch_resolve_to_recovery_max);
+    RESTORE_ARRAY(branch_resolve_to_recovery_hist);
+    RESTORE_SCALAR(load_queue_occupancy_sum);
+    RESTORE_SCALAR(store_queue_occupancy_sum);
+    RESTORE_SCALAR(load_queue_full_cycles);
+    RESTORE_SCALAR(store_queue_full_cycles);
+    RESTORE_ARRAY(lsq_events);
+    RESTORE_ARRAY(cache_events);
+    RESTORE_ARRAY(cache_occupancy_sum);
+    RESTORE_ARRAY(axi_valid);
+    RESTORE_ARRAY(axi_fire);
+    RESTORE_ARRAY(axi_backpressure);
+    RESTORE_ARRAY(axi_error);
+#undef RESTORE_ARRAY
+#undef RESTORE_SCALAR
+}
+
 bool PerfMonitor::is_counter_read(std::uint32_t instruction) {
     // LA32R rdtimel.w (assembler alias rdcntvl.w) has only rd in bits 4:0.
     return (instruction & 0xffffffe0U) == 0x00006000U;
@@ -392,21 +515,22 @@ void PerfMonitor::record_commit_cycle(std::uint8_t count) {
             if (!roi_marker_seen_) {
                 reset_accumulators();
                 roi_marker_seen_ = true;
-                roi_active_ = true;
-            } else if (roi_active_) {
-                roi_active_ = false;
-                roi_closed_pairs_++;
             } else {
-                roi_active_ = true;
-                reset_interval_state();
+                save_accumulator_checkpoint();
             }
             roi_counter_read_markers_++;
+        }
+        if (roi_counter_read_markers_ > marker_count && aligned_available) {
+            accumulate_snapshot(aligned, count);
+            for (unsigned index = 0; index < pending_commit_count_; index++) {
+                accumulate_commit(pending_commits_[index]);
+            }
         }
         pending_commit_count_ = 0;
         return;
     }
 
-    if (aligned_available && (!roi_marker_seen_ || roi_active_)) {
+    if (aligned_available) {
         accumulate_snapshot(aligned, count);
         for (unsigned index = 0; index < pending_commit_count_; index++) {
             accumulate_commit(pending_commits_[index]);
@@ -425,7 +549,8 @@ void PerfMonitor::record_commit(std::uint64_t pc, std::uint32_t instruction,
     pending_commits_[pending_commit_count_++] = {pc, instruction, index};
 }
 
-void PerfMonitor::write_json(const char *path) const {
+void PerfMonitor::write_json(const char *path) {
+    if (accumulator_checkpoint_valid_) restore_accumulator_checkpoint();
     FILE *file = std::fopen(path, "w");
     if (file == nullptr) {
         std::perror("m01-counters.json");
@@ -437,16 +562,23 @@ void PerfMonitor::write_json(const char *path) const {
         retire_hist_[0] + retire_hist_[1] + retire_hist_[2] + retire_hist_[3] == cycles_;
     const bool hist_instructions_ok = retire_sum == sampled_instructions_;
     const bool commit_count_ok = observed_instructions_ == sampled_instructions_;
-    const bool roi_complete = !roi_marker_seen_ || !roi_active_;
+    const bool roi_complete =
+        !roi_marker_seen_ ||
+        (roi_counter_read_markers_ >= 2 &&
+         roi_counter_read_markers_ % 2 == 0 &&
+         accumulator_checkpoint_valid_);
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
 
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v2\",\n");
+    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v3\",\n");
     std::fprintf(file, "  \"observation_abi\": {\"magic\": \"MIKU\", \"version\": 1, \"word_count\": 8},\n");
-    std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"closed_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
-                 roi_marker_seen_ ? "counter-read-pairs" : "full-run",
+    std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"nested_counter_read_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
+                 roi_marker_seen_ ? "outermost-counter-read-pair" : "full-run",
                  static_cast<unsigned long long>(roi_counter_read_markers_),
-                 static_cast<unsigned long long>(roi_closed_pairs_),
+                 static_cast<unsigned long long>(
+                     roi_counter_read_markers_ >= 2
+                         ? roi_counter_read_markers_ / 2 - 1
+                         : 0),
                  roi_complete ? "true" : "false");
     std::fprintf(file, "  \"commit_observation_lag_cycles\": %u,\n", kCommitObservationLag);
     std::fprintf(file, "  \"cycles\": %llu,\n", static_cast<unsigned long long>(cycles_));

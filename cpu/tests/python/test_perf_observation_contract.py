@@ -24,12 +24,12 @@ OBSERVATION_SOURCES = (
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v2",
+        "schema_version": "miku-perf-observation-v3",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
         "roi": {
-            "mode": "counter-read-pairs",
+            "mode": "outermost-counter-read-pair",
             "counter_read_markers": 2,
-            "closed_pairs": 1,
+            "nested_counter_read_pairs": 0,
             "complete": True,
             "boundary_cycles_included": False,
         },
@@ -137,12 +137,25 @@ class PerfObservationContractTest(unittest.TestCase):
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_accepts_existing_v2_evidence(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v2"
+        document["roi"] = {
+            "mode": "counter-read-pairs",
+            "counter_read_markers": 2,
+            "closed_pairs": 1,
+            "complete": True,
+            "boundary_cycles_included": False,
+        }
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_accepts_full_run_without_counter_markers(self) -> None:
         document = copy.deepcopy(valid_document())
         document["roi"] = {
             "mode": "full-run",
             "counter_read_markers": 0,
-            "closed_pairs": 0,
+            "nested_counter_read_pairs": 0,
             "complete": True,
             "boundary_cycles_included": False,
         }
@@ -160,16 +173,22 @@ class PerfObservationContractTest(unittest.TestCase):
 
     def test_rejects_inconsistent_closed_pair_count(self) -> None:
         document = copy.deepcopy(valid_document())
-        document["roi"]["closed_pairs"] = 2
+        document["roi"]["nested_counter_read_pairs"] = 2
         result = self.run_checker(document)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("do not form closed pairs", result.stdout)
+        self.assertIn("markers are inconsistent", result.stdout)
 
     def test_accepts_multiple_roi_request_sequences(self) -> None:
         document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v2"
+        document["roi"] = {
+            "mode": "counter-read-pairs",
+            "counter_read_markers": 4,
+            "closed_pairs": 2,
+            "complete": True,
+            "boundary_cycles_included": False,
+        }
         document["cycles"] = 4
-        document["roi"]["counter_read_markers"] = 4
-        document["roi"]["closed_pairs"] = 2
         document["retire_width_histogram"] = [4, 0, 0, 0]
         document["unused_commit_slots"] = 12
         document["zero_retire_loss"] = {
