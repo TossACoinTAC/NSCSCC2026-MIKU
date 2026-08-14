@@ -302,6 +302,11 @@ final class AddressTranslationUnit(
     val dataDmw0 = dmwEnabled(io.dataRequest.virtualAddress, io.csrDmw0)
     val dataDmw1 = dmwEnabled(io.dataRequest.virtualAddress, io.csrDmw1)
     val dataTranslate = pagingMode && !dataDmw0 && !dataDmw1
+    val dataRequestMemoryAttribute = Mux(
+      dataDmw0,
+      io.csrDmw0(5 downto 4),
+      Mux(dataDmw1, io.csrDmw1(5 downto 4), io.dataMat)
+    )
     // As on the instruction side, an available ATU owner implies that the data TLB port has no
     // accepted probe or walk.  Keep ready dependent on capacity and mutation only; routing the
     // accepted VA through DMW or the TLB remains acceptance-qualified below.
@@ -314,41 +319,37 @@ final class AddressTranslationUnit(
     tlb.io.dataRequest.oddPage := io.dataRequest.virtualAddress(12)
     tlb.io.dataRequest.asid := io.csrAsid
     io.tlbSearchReady := True
+    // Prefill the bypass payload whenever the response slot is free. Request
+    // acceptance then only qualifies visibility; a later TLB completion or
+    // mutation overrides these fields with higher assignment priority.
+    when(!dataResponseValid) {
+      dataResponse.virtualAddress := io.dataRequest.virtualAddress
+      dataResponse.physicalAddress := bypassPhysicalAddress(
+        io.dataRequest.virtualAddress,
+        dataDmw0,
+        dataDmw1
+      )
+      dataResponse.uncached := io.disableCache || dataRequestMemoryAttribute === 0
+      dataResponse.cancelled := False
+      dataResponse.exception.valid := False
+      dataResponse.exception.ecode := 0
+      dataResponse.exception.esubcode := 0
+      dataResponse.exception.badVAddrValid := False
+      dataResponse.exception.badVAddr := io.dataRequest.virtualAddress
+      dataResponse.exception.tlbRefill := False
+    }
     when(dataRequestFire) {
       dataContext.virtualAddress := io.dataRequest.virtualAddress
       dataContext.isWrite := io.dataRequest.isWrite
       dataContext.translationEnabled := dataTranslate
       dataContext.dmw0Enabled := dataDmw0
       dataContext.dmw1Enabled := dataDmw1
-      dataContext.memoryAttribute := Mux(
-        dataDmw0,
-        io.csrDmw0(5 downto 4),
-        Mux(dataDmw1, io.csrDmw1(5 downto 4), io.dataMat)
-      )
+      dataContext.memoryAttribute := dataRequestMemoryAttribute
       dataContext.privilege := io.csrPrivilege
       dataContext.disableCache := io.disableCache
       dataSearchPending := dataTranslate
       when(!dataTranslate) {
-        val memoryAttribute = Mux(
-          dataDmw0,
-          io.csrDmw0(5 downto 4),
-          Mux(dataDmw1, io.csrDmw1(5 downto 4), io.dataMat)
-        )
         dataResponseValid := True
-        dataResponse.virtualAddress := io.dataRequest.virtualAddress
-        dataResponse.physicalAddress := bypassPhysicalAddress(
-          io.dataRequest.virtualAddress,
-          dataDmw0,
-          dataDmw1
-        )
-        dataResponse.uncached := io.disableCache || memoryAttribute === 0
-        dataResponse.cancelled := False
-        dataResponse.exception.valid := False
-        dataResponse.exception.ecode := 0
-        dataResponse.exception.esubcode := 0
-        dataResponse.exception.badVAddrValid := False
-        dataResponse.exception.badVAddr := io.dataRequest.virtualAddress
-        dataResponse.exception.tlbRefill := False
       }
     }
     when(io.dataResponse.valid && io.dataResponse.ready) { dataResponseValid := False }
