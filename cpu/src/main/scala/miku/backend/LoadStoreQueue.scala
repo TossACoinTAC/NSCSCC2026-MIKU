@@ -590,6 +590,23 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val translationCompletionFire = translationResponseFire && !io.flush &&
     translationActive && translationProducesCompletion
   val translationCompletionCandidate = translationResponseCandidate && translationProducesCompletion
+  // Capture the resident payload through the registered owner tuple.  A
+  // completion-producing response may be held while another completion wins;
+  // Stream keeps its payload stable, so the address fields can be captured
+  // idempotently without putting completion arbitration in every wide LQ CE.
+  val residentLoadTranslation = io.translationResponse.valid && translationActive &&
+    !io.translationResponse.cancelled && !translationOwnerStore
+  val residentLoadTranslationOwner = Bits(config.loadQueueEntries bits)
+  for (entry <- 0 until config.loadQueueEntries) {
+    residentLoadTranslationOwner(entry) := residentLoadTranslation &&
+      translationOwnerLoadIndex === U(entry, config.loadQueueIndexWidth bits) &&
+      loads(entry).valid && loads(entry).robPointer === translationOwnerRobPointer &&
+      loads(entry).recoveryEpoch === translationOwnerRecoveryEpoch
+  }
+  val scheduledLoadTranslationOwner = residentLoadTranslation && scheduledLoadValid &&
+    loadHead === translationOwnerLoadIndex &&
+    scheduledLoad.robPointer === translationOwnerRobPointer &&
+    scheduledLoad.recoveryEpoch === translationOwnerRecoveryEpoch
   // Misaligned accesses are rare and already terminal exceptions. Buffer that
   // completion instead of feeding the current load/translation arbitration
   // back into aguReady. This keeps an older load's forwarding cone out of the
@@ -1020,36 +1037,35 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       loads(index).uncached := aguTranslationBypass && io.translationBypass.uncached
     }
 
+    for (index <- 0 until config.loadQueueEntries) {
+      when(residentLoadTranslationOwner(index)) {
+        loads(index).physicalAddress := io.translationResponse.physicalAddress
+        loads(index).uncached := io.translationResponse.uncached
+        when(translationResponseFire) {
+          loads(index).translationDone := True
+          when(io.translationResponse.exception.valid) { loads(index).completed := True }
+        }
+      }
+    }
+    when(scheduledLoadTranslationOwner) {
+      scheduledLoad.physicalAddress := io.translationResponse.physicalAddress
+      scheduledLoad.uncached := io.translationResponse.uncached
+      when(translationResponseFire) { scheduledLoad.translationDone := True }
+    }
+
     when(translationResponseFire && translationActive) {
       translationActive := False
       when(!io.translationResponse.cancelled && translationOwnerStore) {
         val entry = stores(translationOwnerStoreIndex)
-        when(entry.valid && entry.robPointer === translationOwnerRobPointer) {
+        when(
+          entry.valid && entry.robPointer === translationOwnerRobPointer &&
+            entry.recoveryEpoch === translationOwnerRecoveryEpoch
+        ) {
           entry.physicalAddress := io.translationResponse.physicalAddress
           entry.uncached := io.translationResponse.uncached
           entry.translationDone := True
           when(entry.isSc) { entry.scSuccess := translatedScSuccess }
           when(translationCompletionFire) { entry.completed := True }
-        }
-      }.elsewhen(!io.translationResponse.cancelled) {
-        val entry = loads(translationOwnerLoadIndex)
-        when(entry.valid && entry.robPointer === translationOwnerRobPointer) {
-          entry.physicalAddress := io.translationResponse.physicalAddress
-          entry.uncached := io.translationResponse.uncached
-          entry.translationDone := True
-          // The selected-load payload is already the timing boundary for
-          // ordering and cache issue. Capture translation on the same edge as
-          // the LQ entry so the next request cycle does not re-read the wide
-          // physical address through the dynamic loadHead mux.
-          when(
-            scheduledLoadValid && loadHead === translationOwnerLoadIndex &&
-              scheduledLoad.robPointer === translationOwnerRobPointer
-          ) {
-            scheduledLoad.physicalAddress := io.translationResponse.physicalAddress
-            scheduledLoad.uncached := io.translationResponse.uncached
-            scheduledLoad.translationDone := True
-          }
-          when(io.translationResponse.exception.valid) { entry.completed := True }
         }
       }
     }
