@@ -140,7 +140,7 @@ model hash。每个候选 manifest 至少包含 CPU source、RTL、software、cl
 `perf20-result.json`；归档后的 CSV 因此仍可直接交给 `experiment-compare`，不会连带复制
 未被矩阵引用的其他 run。默认 `auto` 分类只允许从当前
 RTL 直接执行一次完整 implementation（`implementation_stage=full`），并同时满足 setup/hold
-非负、routed DRC 0 error/critical warning、fully routed 和 bitstream 完整的实现进入
+WNS 均严格大于零、routed DRC 0 error/critical warning、fully routed 和 bitstream 完整的实现进入
 `Stable_Backup/`；其余已产生完整报告的实现进入 `Post_Impl_Bundles/`。归档身份来自
 `build/rtl/generation-manifest.json`，并再次核对根发布 RTL 与 Vivado staging RTL 的哈希，
 不能用归档时的文档 HEAD 冒充生成 RTL 的源码提交。实验清单中的源码树、raw/published

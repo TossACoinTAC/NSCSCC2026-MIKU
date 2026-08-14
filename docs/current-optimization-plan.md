@@ -8,11 +8,11 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：WT01 matching RTL 为 `5,057,854` cycles，20/20 pass；WT01、已否决的 BT04
-  与 BR01 三者在软件侧均为 20 项逐项精确相等；BR01 相对 L07
+- perf20：当前 WT02 RTL 为 `5,056,868` cycles，20/20 pass；WT02 相对 FT05 减少
+  986 cycles（`-0.019494%`），几何平均加速 `1.000446233x`；BR01 相对 L07
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
-  baseline `5,543,953` 累计 `-8.768094%`。
-- func58：WT01 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+  baseline `5,543,953` 累计 `-8.785879%`。
+- func58：当前 WT02 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
 - WT01 matching 100 MHz direct full implementation：setup `-0.824 ns`、hold `+0.056 ns`、
   DRC 0 error/critical warning、fully routed、bitstream 成功；资源为 88,850 LUT、54,432 FF、
   27,681 slice、54.5 BRAM、8 DSP。setup 仍未闭合，因此尚不是里程碑。
@@ -35,8 +35,8 @@
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 - `PerfObservationV1` 已用八个本地 owner 的 64-bit word 建立稳定仿真 ABI；外部 monitor
-  不再访问普通 Verilator 内部层级。当前完整 `cpu-check` 为 39 suites / 219 tests，Python
-  合同为 54 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
+  不再访问普通 Verilator 内部层级。当前 Scala 门禁为 39 suites / 222 tests，Python
+  合同为 56 项；clean/instrumented dhrystone A/B 的平台周期、退休数、计分周期和 UART hash
   精确一致，全部计数器守恒 invariant 通过。`perf20-sim` 与 `func58-sim` 可通过
   `SIM_PROFILE=instrumented` 使用同一公开入口。
 - L07 前的 M01 v4 完整 perf20 matrix 为 score `5,299,059`、ROI `5,299,039`、退休
@@ -66,8 +66,8 @@ CE 后，再以 `BT02` 作为同一 R1 的证据驱动增量。每个节点独�
 必须记录全部分项，并与目标路径族、WNS、TNS 和资源变化交叉验证。周期改善的候选转为性能
 候选记录；超过允许回退的候选退出 R1 组合，除非独立实现证据证明它是 100 MHz 闭合所必需。
 
-R1 晋级要求是 func58 三 seed通过、direct full setup/hold 非负、DRC 0 error/critical warning、
-fully routed 和 bitstream 成功。正 WNS 不用于升频。
+R1 晋级要求是 func58 三 seed通过、direct full setup/hold WNS 均严格大于零、
+DRC 0 error/critical warning、fully routed 和 bitstream 成功。正 WNS 不用于升频。
 
 当前进度：
 
@@ -197,6 +197,32 @@ response prediction 路径。下一时序增量应处理这些已暴露路径，
 `1.000000000x`，证据见 `build/reports/comparisons/R2-FT04.json` 和
 `build/reports/experiments/R2-FT04/experiment-manifest.json`。它尚未运行 matching func58
 或 direct full，因此当前只算已验证候选提交，不改变 WT01 的物理基线结论。
+
+`MT04 @ 11c760b` 将 instruction direct/DMW response 的 MAT 从已接受的 instruction owner
+context 推导，移除 virtual address 到 response payload 的旁路预填组合依赖。ATU 9 项、完整
+`cpu-check`（39 suites / 220 tests）通过；perf20 相对 FT04 为
+`5,057,854 -> 5,057,854`，20 项逐项精确相等。逐项证据见
+`build/reports/comparisons/R2-MT04.json`，冻结证据见
+`build/reports/experiments/R2-MT04/experiment-manifest.json`。
+
+`FT05 @ fd40007` 在已注册 L1I owner 活跃期间持续预填 pending response 的 PC 和 prediction
+context，命中 handoff 只设置窄 valid。定向测试证明同拍安装年轻 owner 时，较老 response 的
+预测 taken/target 仍保持配对；OooFrontend 24 项、完整 `cpu-check`（39 suites / 221 tests）
+通过。perf20 相对 MT04 为 `5,057,854 -> 5,057,854`，20 项逐项精确相等；证据见
+`build/reports/comparisons/R2-FT05.json` 和
+`build/reports/experiments/R2-FT05/experiment-manifest.json`。
+
+`WT02 @ 4435ae2` 对 direct-only execution port 屏蔽其 staged ROB completion 在 IQ 中的
+重复 wake echo；原始 completion 仍进入 PRF、RenameMap、dispatch source-ready 和架构完成
+路径，Multiply 继续使用独立 writeback lane。新增测试覆盖已驻留消费者及 direct event 后才
+到达的消费者；完整 `cpu-check` 为 39 suites / 222 tests，Python 合同 55 项。生成 RTL 中
+lane 2 registered wake 已为常量 `0`，`stagedPdst_2` 不再进入任何 IQ。perf20 为
+`5,057,854 -> 5,056,868`（`-0.019494%`），几何平均 `1.000446233x`；7 项改善、12 项不变，
+quick_sort 单项 `+9 cycles`（`+0.00331%`）。它仍按时序候选保留，这个极小净改善用于与
+matching route 交叉验证，不按 IPC 候选的 `0.5%` 门槛宣称收益。证据见
+`build/reports/comparisons/R2-WT02.json` 和
+`build/reports/experiments/R2-WT02/experiment-manifest.json`；matching func58 seeds
+`240/255/141` 均为 58/58。
 
 ## 系统、归档与发布
 
