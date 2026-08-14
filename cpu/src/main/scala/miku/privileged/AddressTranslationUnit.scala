@@ -288,7 +288,14 @@ final class AddressTranslationUnit(
     io.instructionResponse.valid := instructionResponseValid &&
       (!instructionContext.translationEnabled || !instructionSearchPending) && !tlbMutation
     val visibleInstructionResponse = TranslationResponse(config)
-    visibleInstructionResponse := instructionResponse
+    // Every visible response belongs to the registered instruction owner.  Source the identity
+    // from that owner so direct, paged and cancel completions do not each recreate a live
+    // response-payload path for the same virtual address.
+    visibleInstructionResponse.virtualAddress := instructionContext.virtualAddress
+    visibleInstructionResponse.physicalAddress := instructionResponse.physicalAddress
+    visibleInstructionResponse.uncached := instructionResponse.uncached
+    visibleInstructionResponse.cancelled := instructionResponse.cancelled
+    visibleInstructionResponse.exception := instructionResponse.exception
     // Direct and DMW requests expose the accepted owner's registered MAT snapshot.  TLB
     // completions retain their registered response payload, as do explicit cancel tokens.
     when(!instructionContext.translationEnabled && !instructionResponse.cancelled) {
