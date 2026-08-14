@@ -179,6 +179,67 @@ class AddressTranslationUnitSpec extends AnyFunSuite {
       }
   }
 
+  test("instruction direct and DMW MAT snapshots remain stable under backpressure") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-address-translation-instruction-mat-stability"
+      )
+      .compile(new AddressTranslationUnit(config))
+      .doSim("ooo-address-translation-instruction-mat-stability", 0x4c84) { dut =>
+        dut.domain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.io.instructionResponse.ready #= false
+        dut.domain.assertReset()
+        dut.domain.waitSampling(2)
+        dut.domain.deassertReset()
+        sample(dut)
+
+        val directAddress = BigInt(0x1c001240)
+        dut.io.instructionRequest.valid #= true
+        dut.io.instructionRequest.virtualAddress #= directAddress
+        sleep(1)
+        assert(dut.io.instructionRequest.ready.toBoolean)
+        sample(dut)
+        dut.io.instructionRequest.valid #= false
+        dut.io.instructionMat #= 0
+        dut.io.disableCache #= true
+        dut.io.csrDa #= false
+        dut.io.csrPg #= true
+        dut.domain.waitSampling(2)
+
+        assert(dut.io.instructionResponse.valid.toBoolean)
+        assert(dut.io.instructionResponse.virtualAddress.toBigInt == directAddress)
+        assert(dut.io.instructionResponse.physicalAddress.toBigInt == directAddress)
+        assert(!dut.io.instructionResponse.uncached.toBoolean)
+
+        dut.io.instructionResponse.ready #= true
+        sample(dut)
+        dut.io.instructionResponse.ready #= false
+
+        val dmwAddress = BigInt(0x80001240L)
+        val uncachedDmw0 = (BigInt(4) << 29) | (BigInt(1) << 25) | 1
+        dut.io.disableCache #= false
+        dut.io.instructionMat #= 1
+        dut.io.csrDmw0 #= uncachedDmw0
+        dut.io.instructionRequest.valid #= true
+        dut.io.instructionRequest.virtualAddress #= dmwAddress
+        sleep(1)
+        assert(dut.io.instructionRequest.ready.toBoolean)
+        sample(dut)
+        dut.io.instructionRequest.valid #= false
+        dut.io.csrDmw0 #= 0
+        dut.io.csrDa #= true
+        dut.io.csrPg #= false
+        dut.domain.waitSampling(2)
+
+        assert(dut.io.instructionResponse.valid.toBoolean)
+        assert(dut.io.instructionResponse.virtualAddress.toBigInt == dmwAddress)
+        assert(dut.io.instructionResponse.physicalAddress.toBigInt == 0x20001240)
+        assert(dut.io.instructionResponse.uncached.toBoolean)
+      }
+  }
+
   test("data bypass preview exactly covers direct and permitted DMW modes") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-address-translation-preview")

@@ -221,18 +221,12 @@ final class AddressTranslationUnit(
       instructionContext.privilege := io.csrPrivilege
       instructionContext.disableCache := io.disableCache
       val misaligned = io.instructionRequest.virtualAddress(1 downto 0) =/= 0
-      val memoryAttribute = Mux(
-        instructionDmw0,
-        io.csrDmw0(5 downto 4),
-        Mux(instructionDmw1, io.csrDmw1(5 downto 4), io.instructionMat)
-      )
       instructionResponse.virtualAddress := io.instructionRequest.virtualAddress
       instructionResponse.physicalAddress := bypassPhysicalAddress(
         io.instructionRequest.virtualAddress,
         instructionDmw0,
         instructionDmw1
       )
-      instructionResponse.uncached := io.disableCache || memoryAttribute === 0
       instructionResponse.cancelled := False
       instructionResponse.exception.valid := misaligned
       instructionResponse.exception.ecode := Mux(misaligned, U(8, 6 bits), U(0, 6 bits))
@@ -293,7 +287,15 @@ final class AddressTranslationUnit(
     }
     io.instructionResponse.valid := instructionResponseValid &&
       (!instructionContext.translationEnabled || !instructionSearchPending) && !tlbMutation
-    io.instructionResponse.payload := instructionResponse
+    val visibleInstructionResponse = TranslationResponse(config)
+    visibleInstructionResponse := instructionResponse
+    // Direct and DMW requests expose the accepted owner's registered MAT snapshot.  TLB
+    // completions retain their registered response payload, as do explicit cancel tokens.
+    when(!instructionContext.translationEnabled && !instructionResponse.cancelled) {
+      visibleInstructionResponse.uncached := instructionContext.disableCache ||
+        instructionContext.memoryAttribute === 0
+    }
+    io.instructionResponse.payload := visibleInstructionResponse
 
     val dataContext = Reg(TranslationContext(config))
     val dataSearchPending = RegInit(False)
