@@ -187,6 +187,11 @@ final class AddressTranslationUnit(
     val instructionSearchPending = RegInit(False)
     val instructionResponseValid = RegInit(False)
     val instructionResponse = Reg(TranslationResponse(config))
+    val instructionDirectMemoryAttribute = Reg(Bits(2 bits))
+    val instructionDmw0MemoryAttribute = Reg(Bits(2 bits))
+    val instructionDmw1MemoryAttribute = Reg(Bits(2 bits))
+    val instructionDmw0PhysicalSegment = Reg(Bits(3 bits))
+    val instructionDmw1PhysicalSegment = Reg(Bits(3 bits))
     val instructionDmw0 = dmwEnabled(io.instructionRequest.virtualAddress, io.csrDmw0)
     val instructionDmw1 = dmwEnabled(io.instructionRequest.virtualAddress, io.csrDmw1)
     val instructionTranslate = pagingMode && !instructionDmw0 && !instructionDmw1
@@ -213,20 +218,34 @@ final class AddressTranslationUnit(
       instructionContext.translationEnabled := instructionTranslate
       instructionContext.dmw0Enabled := instructionDmw0
       instructionContext.dmw1Enabled := instructionDmw1
-      instructionContext.memoryAttribute := Mux(
-        instructionDmw0,
-        io.csrDmw0(5 downto 4),
-        Mux(instructionDmw1, io.csrDmw1(5 downto 4), io.instructionMat)
-      )
+      if (config.enableInstructionOwnerLateBypassPayload) {
+        // Snapshot every address-independent source beside the owner.  Selecting the DMW payload
+        // from registered owner flags on the response side removes the accepted VA from the MAT
+        // and physical-address register D cones without changing request or response latency.
+        instructionContext.memoryAttribute := io.instructionMat
+        instructionDirectMemoryAttribute := io.instructionMat
+        instructionDmw0MemoryAttribute := io.csrDmw0(5 downto 4)
+        instructionDmw1MemoryAttribute := io.csrDmw1(5 downto 4)
+        instructionDmw0PhysicalSegment := io.csrDmw0(27 downto 25)
+        instructionDmw1PhysicalSegment := io.csrDmw1(27 downto 25)
+      } else {
+        instructionContext.memoryAttribute := Mux(
+          instructionDmw0,
+          io.csrDmw0(5 downto 4),
+          Mux(instructionDmw1, io.csrDmw1(5 downto 4), io.instructionMat)
+        )
+      }
       instructionContext.privilege := io.csrPrivilege
       instructionContext.disableCache := io.disableCache
       val misaligned = io.instructionRequest.virtualAddress(1 downto 0) =/= 0
       instructionResponse.virtualAddress := io.instructionRequest.virtualAddress
-      instructionResponse.physicalAddress := bypassPhysicalAddress(
-        io.instructionRequest.virtualAddress,
-        instructionDmw0,
-        instructionDmw1
-      )
+      if (!config.enableInstructionOwnerLateBypassPayload) {
+        instructionResponse.physicalAddress := bypassPhysicalAddress(
+          io.instructionRequest.virtualAddress,
+          instructionDmw0,
+          instructionDmw1
+        )
+      }
       instructionResponse.cancelled := False
       instructionResponse.exception.valid := misaligned
       instructionResponse.exception.ecode := Mux(misaligned, U(8, 6 bits), U(0, 6 bits))
@@ -299,8 +318,34 @@ final class AddressTranslationUnit(
     // Direct and DMW requests expose the accepted owner's registered MAT snapshot.  TLB
     // completions retain their registered response payload, as do explicit cancel tokens.
     when(!instructionContext.translationEnabled && !instructionResponse.cancelled) {
-      visibleInstructionResponse.uncached := instructionContext.disableCache ||
-        instructionContext.memoryAttribute === 0
+      if (config.enableInstructionOwnerLateBypassPayload) {
+        val ownerPhysicalAddress = UInt(config.xlen bits)
+        ownerPhysicalAddress := instructionContext.virtualAddress
+        when(instructionContext.dmw0Enabled) {
+          ownerPhysicalAddress := (
+            instructionDmw0PhysicalSegment ## instructionContext.virtualAddress(28 downto 0).asBits
+          ).asUInt
+        }.elsewhen(instructionContext.dmw1Enabled) {
+          ownerPhysicalAddress := (
+            instructionDmw1PhysicalSegment ## instructionContext.virtualAddress(28 downto 0).asBits
+          ).asUInt
+        }
+        val ownerMemoryAttribute = Mux(
+          instructionContext.dmw0Enabled,
+          instructionDmw0MemoryAttribute,
+          Mux(
+            instructionContext.dmw1Enabled,
+            instructionDmw1MemoryAttribute,
+            instructionDirectMemoryAttribute
+          )
+        )
+        visibleInstructionResponse.physicalAddress := ownerPhysicalAddress
+        visibleInstructionResponse.uncached := instructionContext.disableCache ||
+          ownerMemoryAttribute === 0
+      } else {
+        visibleInstructionResponse.uncached := instructionContext.disableCache ||
+          instructionContext.memoryAttribute === 0
+      }
     }
     io.instructionResponse.payload := visibleInstructionResponse
 

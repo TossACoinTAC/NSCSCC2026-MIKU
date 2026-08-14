@@ -104,6 +104,7 @@ final case class OooCoreConfig(
     enableFrontendHistoryTurnover: Boolean = true,
     enableBalancedFrontendPredictionSelect: Boolean = true,
     enableFrontendCacheHitTurnover: Boolean = true,
+    enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,
     enableL2WriteBack: Boolean = true,
     resetVector: BigInt = BigInt("1c000000", 16),
