@@ -26,7 +26,7 @@
 - `test-impact` 根据版本化路径映射给出最低定向测试集合。
 - `soc-archive` 只接收 experiment manifest 明确引用且 hash 匹配的证据。
 
-## R1：周期透明时序候选
+## R1：时序候选与周期验证
 
 按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积。每个节点独立提交，并执行受影响
 suite、完整 `cpu-check`、完整 perf20 20/20 和相对前一节点的 A/B。五项结束后运行 func58
@@ -51,7 +51,12 @@ fully routed 和 bitstream 成功。正 WNS 不用于升频。
   测试及完整 `cpu-check` 通过；perf20 相对 MT01 20 项逐项精确相等，总周期
   `5,306,558`、几何平均 `1.000000000x`。每个 MSHR 的窄 pending 位现已独立
   资格化 L2 read request；cache/L2 路径效果待 R1 matching route。
-- `FT02`：下一节点，尚未形成候选 RTL。
+- `FT02 @ bcce5fe`：OooFrontend 定向 23 项、完整 `cpu-check` 和 perf20 通过。turnover
+  token 由匹配且成功的 translation response 资格化，下一次翻译仍保持同拍启动；相对
+  MT02 总周期 `5,306,558 -> 5,299,059`（`-0.141316%`），几何平均加速 `1.006239125x`。
+  该节点出现可归因的分项周期变化，已从“周期透明”转为 R1 性能候选；FT03 将在此节点
+  上继续验证，最终组合仍按平均性能门槛和 direct implementation 判定。
+- `FT03`：下一节点，尚未形成候选 RTL。
 
 ## IPC 第 1 至第 3 轮
 

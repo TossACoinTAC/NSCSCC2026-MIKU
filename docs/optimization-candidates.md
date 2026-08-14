@@ -30,9 +30,9 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 
 ## 2. 当前默认组合与本轮证据
 
-当前默认启用的主要候选包括 F01/H03 frontend turnover、B03-full、L05、L08、W02、H01、Q01，以及本轮新增的 E02 与 FT01；E01、W01、L07 默认关闭。当前 RTL 已通过完整 `make cpu-check`（39 suites、213 tests）、perf20 20/20 和 func58 random-AXI seeds `240/255/141`。
+当前默认启用的主要候选包括 F01/H03 frontend turnover、B03-full、L05、L08、W02、H01、Q01，以及本轮新增的 E02、FT01 与 FT02；E01、W01、L07 默认关闭。当前 RTL 已通过完整 `make cpu-check`（39 suites、213 tests）和 perf20 20/20；func58 seeds `240/255/141` 是最近一次 matching 基线证据，R1 最终组合需重新运行。
 
-本轮 perf20 总周期为 `5,306,558`：相对本轮原始 baseline `5,543,953` 减少 `237,395`（`-4.282053%`）。其中 frontend history turnover 的配对贡献为 `-0.582274%`，E02 相对 frontend-only 再减少 `205,114`（`-3.721448%`）；FT01 与 E02 的 timing-aware 重构均保持 20 项逐项周期不变。matching 100 MHz full implementation 已产生 fully-routed bitstream，hold `+0.018 ns` 且 DRC 0 error/critical warning，但 setup `-0.552 ns`，因此归档为 candidate；首轮同 DCP P02 post-route 将 setup 改善到 `-0.125 ns`。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
+本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。FT02 的逐项变化已单独记录，不能把累计收益拆分给其他候选。matching 100 MHz full implementation 已产生 fully-routed bitstream，hold `+0.018 ns` 且 DRC 0 error/critical warning，但 setup `-0.552 ns`，因此归档为 candidate；首轮同 DCP P02 post-route 将 setup 改善到 `-0.125 ns`。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
 
 ## 3. 候选总表
 
@@ -104,7 +104,7 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | BT01 | IQ payload 与全局 redirect 解耦 | flush/redirect 只控制 occupancy 和输出可见性，宽 payload 由局部 next-state 更新，避免全局 redirect 进入所有 IQ payload CE | flush 当拍和下一拍不得发出旧 uop；无条件 payload 写会增加局部翻转，必须确认恢复延迟不变 | IssueQueue flush/compaction 定向测试、完整 perf20 A/B、IQ top-N、LUT/FF | 已实现并纳入 R1 | `fc73f5b` 的定向测试和完整 `cpu-check` 通过；perf20 `5,306,558 -> 5,306,558`，20 项逐项精确相等、几何平均 `1.000000000x`。IQ top-N 与资源效果待 R1 matching route。 |
 | MT01 | LSQ translation owner 更新局部化 | resident LQ entry 的物理地址写入仅由已注册 owner tuple one-hot 资格化，把 scheduled-load 选择从宽 entry CE 中移开 | owner、ROB pointer、epoch、flush/cancel 与 slot reuse 必须严格匹配，不能增加 response-to-request 延迟 | LSQ translation/cancel/reuse 测试、完整 perf20 A/B、LSQ top-N | 已实现并纳入 R1 | `9838c9d` 的 LSQ 定向测试和完整 `cpu-check` 通过；生成 RTL 中 resident LQ 地址 CE 只由 owner tuple 资格化。perf20 `5,306,558 -> 5,306,558`，20 项逐项精确相等、几何平均 `1.000000000x`；matching LSQ top-N 待组合 route。 |
 | MT02 | L1 miss 到 L2 lookup 请求资格局部化 | 每个 MSHR 以窄 `readRequestPending` 驱动 L2 仲裁，地址和 critical beat 继续来自已注册 payload，缩短 miss-state 到仲裁的控制锥 | 同拍置位不得增加一拍；多个 MSHR 等待、handshake 清除、writeback 后重入及仲裁顺序必须保持 | L1D MSHR/backpressure/多 miss 测试、完整 perf20 A/B、cache/L2 top-N | 已实现并纳入 R1 | `e0e503c` 的 L1D MSHR/backpressure、dirty writeback、refill error 定向测试及完整 `cpu-check` 通过；perf20 `5,306,558 -> 5,306,558`，20 项逐项精确相等、几何平均 `1.000000000x`。cache/L2 top-N 与资源效果待 R1 matching route。 |
-| FT02 | 前端预测更新反馈解耦 | translation response 接受时形成窄 turnover token，使下一次翻译和 predictor speculative update 不再依赖 L1I tag-hit 回授 | token 必须完整保存 next PC、GHR、RAS、link 和预测上下文；不能改变热命中 fetch-group 启动间隔 | frontend/predictor correction、RAS、redirect 测试、完整 perf20 A/B、predictor top-N | R1 待实现 | 尚无；目标为周期透明。 |
+| FT02 | 前端预测更新反馈解耦 | translation response 接受时形成窄 turnover token，使下一次翻译和 predictor speculative update 不再依赖 L1I tag-hit 回授 | token 必须完整携带 next PC、GHR、RAS、link 和预测上下文；不能改变热命中 fetch-group 启动间隔，也不能在 translation cancel/redirect 后留下状态 | frontend/predictor correction、RAS、redirect 测试、完整 perf20 A/B、predictor top-N | 已实现；R1 性能候选 | `bcce5fe` 的 OooFrontend 23 项定向测试、完整 `cpu-check` 和 perf20 通过；相对 MT02 总周期 `5,306,558 -> 5,299,059`（`-0.141316%`），几何平均 `1.006239125x`。bitcount `-7.87691%`、dhrystone `-2.55075%`、fireye_D1 `-1.61731%`，fireye_B2 `+0.75767%`、fireye_I2 `+0.38345%`；逐项变化见 `build/reports/comparisons/R1-FT02.json`，需在 R1 matching route 复核。 |
 | FT03 | L1I response 到 frontend enqueue 去控制化 | 四 lane payload 固定位置写入，taken prefix、valid lane count 与 tail 可见性独立控制，减少 predecode/target 对宽 payload CE 的影响 | 被截断 lane 可写无效槽但绝不能可见；组内 taken、buffer wrap、redirect kill 和 decode 可见周期必须保持 | frontend buffer/taken-prefix/wrap/redirect 测试、完整 perf20 A/B、frontend top-N | R1 待实现 | 尚无；目标为周期透明。 |
 
 ## 4. 当前优先级与下一步
@@ -127,7 +127,7 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 ## 6. 证据入口
 
 - 当前 RTL：`build/rtl/generation-manifest.json`。
-- 当前 perf20：`build/sim/runs/cpu_36a07dccff81_chiplab_c398d274812f/clean-perf20_model_ba17bbd5008c_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`。
+- 当前 perf20：`build/sim/runs/cpu_584b49ecbc8b_chiplab_c398d274812f/clean-perf20_model_c4e4908ff6bf_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`。
 - 当前 func58：`build/sim/runs/cpu_36a07dccff81_chiplab_c398d274812f/clean-func58_model_a84902fd3815_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
 - 当前 full implementation candidate：`Post_Impl_Bundles/cpu_013db4902e57_chiplab_c398d274812f_perf_100mhz_20260814-071827/manifest.json`。
 - 首轮 post-route exploration：`Post_Impl_Bundles/cpu_013db4902e57_chiplab_c398d274812f_perf_postroute_100mhz_20260814-081307/manifest.json`。
