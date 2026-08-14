@@ -198,6 +198,12 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   } else {
     False
   }
+  // A successful translation response is the ownership handoff for this fetch group.  Keep the
+  // predictor turnover token tied to that narrow, matched event instead of the later L1I request
+  // handshake, whose ready/hit feedback otherwise reaches the predictor RAM address path.
+  val translationResponseAcceptedValid = translationResponseFire && translationOutstanding &&
+    translationResponseMatches && !io.translationResponse.cancelled &&
+    !io.translationResponse.exception.valid && !io.redirectValid
   val requestTranslationPc = Mux(
     translationResponseBypassValid,
     io.translationResponse.virtualAddress,
@@ -206,7 +212,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val requestPrediction = Vec(BankedFetchPrediction(config), config.fetchWidth)
   for (lane <- 0 until config.fetchWidth) {
     requestPrediction(lane) := translatedPrediction(lane)
-    when(translationResponseBypassValid) {
+    when(translationResponseAcceptedValid) {
       requestPrediction(lane) := predictionForTranslation(lane)
     }
   }
@@ -279,6 +285,11 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         requestPredictedType =/= PredictedBranchType.call &&
         requestPredictedType =/= PredictedBranchType.ret
     }
+  } else {
+    False
+  }
+  val translationTurnoverTokenValid = if (config.enableFrontendTranslationTurnover) {
+    translationResponseAcceptedValid
   } else {
     False
   }
@@ -380,7 +391,9 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val predictorSpeculativeRasPop = Bool()
   val predictorSpeculativeReturnAddress = UInt(config.xlen bits)
   if (config.enableFrontendHistoryTurnover) {
-    predictorSpeculativeUpdateValid := requestFire
+    // The token is formed at translation acceptance.  This removes L1I tag-hit/request-ready
+    // feedback from the speculative predictor update while retaining the same-cycle lookup fold.
+    predictorSpeculativeUpdateValid := translationTurnoverTokenValid
     predictorSpeculativeHistoryValid := requestHistoryValid
     predictorSpeculativeHistoryTaken := requestPredictedTaken &&
       requestPredictedType === PredictedBranchType.conditional
