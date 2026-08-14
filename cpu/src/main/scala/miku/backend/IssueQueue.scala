@@ -271,12 +271,32 @@ final class IssueQueue(
   }
 
   private def selectLowest(mask: Bits): UInt = {
-    val selected = UInt(log2Up(mask.getWidth) bits)
-    selected := 0
-    for (index <- (0 until mask.getWidth).reverse) {
-      when(mask(index)) { selected := U(index, selected.getWidth bits) }
+    val indexWidth = log2Up(mask.getWidth)
+    if (config.enableBalancedIssueSelection) {
+      def selectRange(first: Int, length: Int): (Bool, UInt) = {
+        if (length == 1) {
+          (mask(first), U(first, indexWidth bits))
+        } else {
+          val lowerLength = length / 2
+          val upperLength = length - lowerLength
+          val (lowerValid, lowerIndex) = selectRange(first, lowerLength)
+          val (upperValid, upperIndex) = selectRange(first + lowerLength, upperLength)
+          val selectedIndex = UInt(indexWidth bits)
+          selectedIndex := upperIndex
+          when(lowerValid) { selectedIndex := lowerIndex }
+          (lowerValid || upperValid, selectedIndex)
+        }
+      }
+
+      selectRange(0, mask.getWidth)._2
+    } else {
+      val selected = UInt(indexWidth bits)
+      selected := 0
+      for (index <- (0 until mask.getWidth).reverse) {
+        when(mask(index)) { selected := U(index, selected.getWidth bits) }
+      }
+      selected
     }
-    selected
   }
 
   val io = new Bundle {

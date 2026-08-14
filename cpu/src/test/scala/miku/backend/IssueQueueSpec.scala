@@ -83,6 +83,54 @@ class IssueQueueSpec extends AnyFunSuite {
     sleep(1)
   }
 
+  test("IQ balanced selection preserves oldest-ready priority") {
+    for (balanced <- Seq(false, true)) {
+      val config = OooCoreConfig.FourIssueThreeCommit.copy(
+        enableBalancedIssueSelection = balanced
+      )
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-iq-balanced-$balanced"
+        )
+        .compile(new IssueQueueProbe(config))
+        .doSim(s"ooo-iq-balanced-$balanced", if (balanced) 0x4971 else 0x4970) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearInputs(dut, config)
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          sample(dut)
+
+          val readyByAge = Seq(false, true, false, true, true, false, true, false)
+          dut.io.enqueueValid #= true
+          for ((ready, age) <- readyByAge.zipWithIndex) {
+            dut.io.enqueue.robPointer #= age
+            dut.io.enqueue.psrc1 #= (age + 1)
+            dut.io.enqueue.source1Ready #= ready
+            dut.io.enqueue.source2Ready #= true
+            sample(dut)
+          }
+          dut.io.enqueueValid #= false
+          dut.io.issueReady #= true
+
+          for (expected <- Seq(1, 3, 4, 6)) {
+            sleep(1)
+            assert(dut.io.issueValid.toBoolean)
+            assert(
+              dut.io.issue.robPointer.toInt == expected,
+              s"balanced=$balanced selected ${dut.io.issue.robPointer.toInt}, expected age $expected"
+            )
+            sample(dut)
+          }
+
+          dut.io.issueReady #= false
+          assert(!dut.io.issueValid.toBoolean)
+          assert(dut.io.occupancy.toInt == 4)
+        }
+    }
+  }
+
   test("IQ randomized compaction preserves payload and wakeup state") {
     val config = OooCoreConfig.FourIssueThreeCommit
     final case class ModelEntry(
