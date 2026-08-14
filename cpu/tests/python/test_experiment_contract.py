@@ -179,6 +179,21 @@ Slack (MET) : 0.100ns
         self.assertIn("miku.privileged.AddressTranslationUnitSpec", result["scala_suites"])
         self.assertIn("miku.core.OooCoreSystemIntegrationSpec", result["scala_suites"])
 
+    def test_backend_completion_and_changed_suite_are_mapped(self) -> None:
+        mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
+        result = calculate_impact(
+            [
+                "cpu/src/main/scala/miku/backend/OooBackendWithExecution.scala",
+                "cpu/src/main/scala/miku/backend/ReorderBuffer.scala",
+                "cpu/src/test/scala/miku/backend/ReorderBufferSpec.scala",
+            ],
+            mapping,
+        )
+        self.assertEqual(result["unmatched_paths"], [])
+        self.assertIn("miku.backend.ReorderBufferSpec", result["scala_suites"])
+        self.assertIn("miku.backend.OooBackendWithDataCacheSpec", result["scala_suites"])
+        self.assertIn("miku.core.OooCoreIntegrationSpec", result["scala_suites"])
+
     def test_unknown_rtl_path_is_reported_unmatched(self) -> None:
         mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
         path = "cpu/src/main/scala/miku/unknown/UnmappedUnit.scala"

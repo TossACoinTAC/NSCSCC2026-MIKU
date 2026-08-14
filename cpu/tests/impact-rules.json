@@ -14,6 +14,12 @@
       "python_contracts": ["tests/python/test_cache_memory_contract.py"]
     },
     {
+      "name": "backend-completion",
+      "paths": ["cpu/src/main/scala/miku/backend/MicroOps.scala", "cpu/src/main/scala/miku/backend/OooBackend.scala", "cpu/src/main/scala/miku/backend/OooBackendWithExecution.scala", "cpu/src/main/scala/miku/backend/ReorderBuffer.scala"],
+      "scala_suites": ["miku.backend.ReorderBufferSpec", "miku.backend.OooBackendDispatchSpec", "miku.backend.OooBackendWithDataCacheSpec", "miku.execute.OooExecutionClusterSpec", "miku.core.OooCoreIntegrationSpec", "miku.core.OooCoreSpec"],
+      "python_contracts": ["tests/python/test_core_interface.py", "tests/python/test_generation_contract.py"]
+    },
+    {
       "name": "cache-hierarchy",
       "paths": ["cpu/src/main/scala/miku/memory/L1*.scala", "cpu/src/main/scala/miku/memory/L2*.scala", "cpu/src/main/scala/miku/memory/Shared*.scala", "cpu/src/main/scala/miku/memory/DataCacheHierarchy.scala"],
       "scala_suites": ["miku.memory.DataCacheHierarchySpec", "miku.memory.L1DataCacheSpec", "miku.memory.L1InstructionCacheSpec", "miku.memory.L2CacheSpec", "miku.memory.SharedCacheHierarchySpec", "miku.backend.OooBackendWithDataCacheSpec"],
