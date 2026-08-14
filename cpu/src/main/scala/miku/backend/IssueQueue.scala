@@ -86,9 +86,14 @@ final case class IssueEntry(config: OooCoreConfig, portIndex: Int) extends Bundl
 
 final class IssueQueue(
     config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit,
-    portIndex: Int = 0
+    portIndex: Int = 0,
+    tokenizedIssueOutput: Boolean = false
 ) extends Component {
   require(portIndex >= 0 && portIndex < config.executionWidth)
+  require(
+    !tokenizedIssueOutput || !config.executionPorts(portIndex).registeredIssueOutput,
+    "an issue port cannot use both tokenized and copied registered outputs"
+  )
 
   private val portCapabilities = config.executionPorts(portIndex).capabilities
   private val portHasAlu = portCapabilities.contains(ExecutionUnitKind.Alu)
@@ -263,9 +268,9 @@ final class IssueQueue(
   }
 
   private def selectLowest(mask: Bits): UInt = {
-    val selected = UInt(log2Up(config.issueQueueEntriesPerPort) bits)
+    val selected = UInt(log2Up(mask.getWidth) bits)
     selected := 0
-    for (index <- (0 until config.issueQueueEntriesPerPort).reverse) {
+    for (index <- (0 until mask.getWidth).reverse) {
       when(mask(index)) { selected := U(index, selected.getWidth bits) }
     }
     selected
@@ -291,16 +296,20 @@ final class IssueQueue(
   // Only the narrow age-order index array compacts after an out-of-order issue;
   // execution backpressure therefore cannot become the CE of every payload bit.
   private val entryCount = config.issueQueueEntriesPerPort
-  private val entryIndexWidth = log2Up(entryCount)
-  val payloadSlots = Vec.fill(entryCount)(Reg(IssueEntry(config, portIndex)))
-  val slotOccupied = Reg(Bits(entryCount bits)) init (0)
+  // A tokenized ordinary output retains the selected slot for the address
+  // stage. The extra physical slot preserves the original eight resident IQ
+  // entries while one older entry is held by execution backpressure.
+  private val physicalSlotCount = entryCount + (if (tokenizedIssueOutput) 1 else 0)
+  private val entryIndexWidth = log2Up(physicalSlotCount)
+  val payloadSlots = Vec.fill(physicalSlotCount)(Reg(IssueEntry(config, portIndex)))
+  val slotOccupied = Reg(Bits(physicalSlotCount bits)) init (0)
   val ageOrder = Vec.fill(entryCount)(Reg(UInt(entryIndexWidth bits)))
   val count = Reg(UInt(log2Up(config.issueQueueEntriesPerPort + 1) bits)) init (0)
 
-  val wakeupSlot1 = Bits(entryCount bits)
-  val wakeupSlot2 = Bits(entryCount bits)
-  val readySlot = Bits(entryCount bits)
-  for (slot <- 0 until entryCount) {
+  val wakeupSlot1 = Bits(physicalSlotCount bits)
+  val wakeupSlot2 = Bits(physicalSlotCount bits)
+  val readySlot = Bits(physicalSlotCount bits)
+  for (slot <- 0 until physicalSlotCount) {
     wakeupSlot1(slot) := False
     wakeupSlot2(slot) := False
     for (write <- 0 until config.writebackWidth) {
@@ -335,8 +344,38 @@ final class IssueQueue(
   val selectedUop = RenamedMicroOp(config)
   unpackIssueEntry(selectedUop, payloadSlots(issueSlot))
   val queueDequeue = Bool()
+  val tokenOutputDequeue = Bool()
+  val tokenOutputSlot = UInt(entryIndexWidth bits)
 
-  if (config.executionPorts(portIndex).registeredIssueOutput) {
+  if (tokenizedIssueOutput) {
+    val outputValid = RegInit(False)
+    val outputSlot = Reg(UInt(entryIndexWidth bits)) init (0)
+    val outputEntry = IssueEntry(config, portIndex)
+    outputEntry := payloadSlots(outputSlot)
+    io.issueValid := outputValid
+    unpackIssueEntry(io.issue, outputEntry)
+
+    val outputDequeue = io.issueValid && io.issueReady
+    tokenOutputDequeue := outputDequeue
+    tokenOutputSlot := outputSlot
+    queueDequeue := (!outputValid || outputDequeue) && readyAge.orR
+    when(io.flush) {
+      outputValid := False
+      outputSlot := 0
+    }.otherwise {
+      when(outputDequeue) { outputValid := False }
+      when(queueDequeue) {
+        outputValid := True
+        outputSlot := issueSlot
+      }
+    }
+    io.occupancy := (count + outputValid.asUInt).resized
+  } else {
+    tokenOutputDequeue := False
+    tokenOutputSlot := 0
+  }
+
+  if (!tokenizedIssueOutput && config.executionPorts(portIndex).registeredIssueOutput) {
     val outputSlots = Vec.fill(2)(Reg(IssueEntry(config, portIndex)))
     val nextOutputSlots = Vec.fill(2)(IssueEntry(config, portIndex))
     val outputReadPointer = RegInit(False)
@@ -381,7 +420,7 @@ final class IssueQueue(
     for (slot <- 0 until 2) outputSlots(slot) := nextOutputSlots(slot)
 
     io.occupancy := (count + outputCount).resized
-  } else {
+  } else if (!tokenizedIssueOutput) {
     io.issueValid := readyAge.orR
     io.issue := selectedUop
     queueDequeue := io.issueValid && io.issueReady
@@ -424,7 +463,13 @@ final class IssueQueue(
     slotOccupied := 0
   }.otherwise {
     count := count + enqueueFire.asUInt - queueDequeue.asUInt
-    when(queueDequeue) { slotOccupied(issueSlot) := False }
+    if (!tokenizedIssueOutput) {
+      when(queueDequeue) { slotOccupied(issueSlot) := False }
+    } else {
+      // The tokenized output owns its payload slot until execution accepts it.
+      // A simultaneous replacement token keeps its independently selected slot.
+      when(tokenOutputDequeue) { slotOccupied(tokenOutputSlot) := False }
+    }
     when(enqueueFire) { slotOccupied(enqueueSlot) := True }
   }
 
@@ -446,7 +491,7 @@ final class IssueQueue(
     ageOrder(age) := nextAgeSlot
   }
 
-  for (slot <- 0 until entryCount) {
+  for (slot <- 0 until physicalSlotCount) {
     when(enqueueFire && enqueueSlot === U(slot, entryIndexWidth bits)) {
       payloadSlots(slot) := enqueued
     }.otherwise {

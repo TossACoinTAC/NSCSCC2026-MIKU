@@ -69,12 +69,11 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val dispatchQueue = new DispatchQueue(config)
   val dispatchWindow = new DispatchWindow(config)
   val router = new DispatchRouter(config)
-  val issueQueues = (0 until config.executionWidth).map(index => new IssueQueue(config, index))
+  val issueQueues = (0 until config.executionWidth).map(index =>
+    new IssueQueue(config, index, tokenizedIssueOutput = index != loadStorePort)
+  )
   val storeDataQueue = new StoreDataQueue(config)
 
-  private val ordinaryIssuePorts = (0 until config.executionWidth).filter(_ != loadStorePort)
-  val issueAddressValid = Vec.fill(ordinaryIssuePorts.size)(RegInit(False))
-  val issueAddressUop = Vec.fill(ordinaryIssuePorts.size)(Reg(RenamedMicroOp(config)))
   val issueOperandValid = RegInit(B(0, config.executionWidth bits))
   val issueOperandUop = Vec.fill(config.executionWidth)(Reg(RenamedMicroOp(config)))
   val issueOperandSource1 = Vec.fill(config.executionWidth)(Reg(Bits(config.xlen bits)))
@@ -436,29 +435,20 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
         }
       }
     } else {
-      val addressPort = ordinaryIssuePorts.indexOf(port)
-      prf.io.readAddress(port * 2) := issueAddressUop(addressPort).psrc1
-      prf.io.readAddress(port * 2 + 1) := issueAddressUop(addressPort).psrc2
+      prf.io.readAddress(port * 2) := issueQueues(port).io.issue.psrc1
+      prf.io.readAddress(port * 2 + 1) := issueQueues(port).io.issue.psrc2
 
       val operandReady = !issueOperandValid(port) || io.issueReady(port)
-      val addressReady = !issueAddressValid(addressPort) || operandReady
-      issueQueues(port).io.issueReady := addressReady
+      issueQueues(port).io.issueReady := operandReady
       when(io.flush) {
-        issueAddressValid(addressPort) := False
         issueOperandValid(port) := False
       }.otherwise {
         when(operandReady) {
-          issueOperandValid(port) := issueAddressValid(addressPort)
-          when(issueAddressValid(addressPort)) {
-            issueOperandUop(port) := issueAddressUop(addressPort)
+          issueOperandValid(port) := issueQueues(port).io.issueValid
+          when(issueQueues(port).io.issueValid) {
+            issueOperandUop(port) := issueQueues(port).io.issue
             issueOperandSource1(port) := operandReadData(port * 2)
             issueOperandSource2(port) := operandReadData(port * 2 + 1)
-          }
-        }
-        when(addressReady) {
-          issueAddressValid(addressPort) := issueQueues(port).io.issueValid
-          when(issueQueues(port).io.issueValid) {
-            issueAddressUop(addressPort) := issueQueues(port).io.issue
           }
         }
       }
