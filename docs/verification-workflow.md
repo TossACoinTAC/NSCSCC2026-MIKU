@@ -169,6 +169,13 @@ forwarding、dirty writeback 或 uncached ordering 问题时，即使只来自�
 拥塞、LSQ/内存服务、DIV latency/throughput、ROB/PRF 容量和 cache critical return。
 最终以 `cycle_count / actual_cpu_mhz` 判断，IPC 只是归因指标。
 
+direct full implementation 的 top-N 路径用于给时序候选排序和验证物理效果，不是候选
+准入的必要条件。若静态结构能够证明一条实时输入或宽控制依赖与已注册 owner/context
+语义等价，且替换后不增加流水级、握手间隔或恢复延迟，即使它尚未出现在 top-N 中，也可
+作为周期透明候选进入验证链。此类候选仍必须覆盖 owner 复用、backpressure、flush/cancel
+等边界，检查生成 RTL 的目标依赖确已移除，完成 perf20 A/B，并由后续 matching direct full
+判断物理价值；不能仅凭 RTL 直觉宣称时序收益。
+
 ## 五、清理规则
 
 `make clean` 只删 `build/` 可再生输出、CPU 编译输出、仿真输出和 Vivado 临时工程；

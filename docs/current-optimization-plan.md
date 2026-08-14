@@ -13,9 +13,11 @@
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
   baseline `5,543,953` 累计 `-8.785879%`。
 - func58：当前 WT02 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
-- WT01 matching 100 MHz direct full implementation：setup `-0.824 ns`、hold `+0.056 ns`、
-  DRC 0 error/critical warning、fully routed、bitstream 成功；资源为 88,850 LUT、54,432 FF、
-  27,681 slice、54.5 BRAM、8 DSP。setup 仍未闭合，因此尚不是里程碑。
+- WT02 matching 100 MHz direct full implementation：setup `-0.641 ns`、hold `+0.050 ns`、
+  DRC 0 error/critical warning、fully routed、bitstream 成功；资源为 87,244 LUT、54,390 FF、
+  56.5 BRAM、8 DSP。相对 WT01 的 setup 改善 `0.183 ns`，但 setup 仍未闭合，因此尚不是
+  里程碑。最新 top-50 全部属于 IQ，平均 route 占比 `79.95%`；主要源是 divider 共享
+  writeback lane 1 的 `stagedPdst_1`，其次包括 lane 3。
 - BT04 相对 MT03+BT03 的器件总 LUT `86,489 -> 89,422`、寄存器
   `54,358 -> 54,881`、slice `26,920 -> 27,745`，BRAM `56.5 -> 54.5`。其 top-50 全部为
   IQ，最差路径 `-1.442 ns`，由 recovery 经另一个 IQ 的 direct wakeup/select 级联到本地复制
@@ -222,7 +224,18 @@ quick_sort 单项 `+9 cycles`（`+0.00331%`）。它仍按时序候选保留，�
 matching route 交叉验证，不按 IPC 候选的 `0.5%` 门槛宣称收益。证据见
 `build/reports/comparisons/R2-WT02.json` 和
 `build/reports/experiments/R2-WT02/experiment-manifest.json`；matching func58 seeds
-`240/255/141` 均为 58/58。
+`240/255/141` 均为 58/58。matching direct full 的 setup/hold 为
+`-0.641/+0.050 ns`，DRC、route 和 bitstream 完整；相对 WT01 改善 `0.183 ns`，资源为
+87,244 LUT、54,390 FF、56.5 BRAM、8 DSP。top-50 已全部转为 IQ，最差路径由
+`stagedPdst_1` 驱动 LSU IQ 输出 payload，说明下一批应优先处理 divider 共享 lane 的重复
+wake echo，同时允许有严格 owner/context 等价证明的非 top-N 周期透明候选一并验证。
+
+下一批候选按线性节点验证，不枚举组合：优先重新启用并复核只抑制真实 direct-wake echo
+的 `W01`，它保留首次 DIV、SC 和其他变长完成；另行评估 multiplier 独立 writeback lane 的
+重复 echo。前端 translation response VA 与已注册 translation owner PC、ATU instruction
+response identity 与已注册 context 是两个不增加拍数即可去掉实时输入依赖的候选，即使未
+进入当前 top-50，也按周期透明合同进入本批。redirect drain 同拍接收新 translation 时的
+owner 安装问题单列为性能候选，必须先用定向失败测试确认机会与正确语义。
 
 ## 系统、归档与发布
 
