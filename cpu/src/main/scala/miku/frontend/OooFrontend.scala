@@ -473,6 +473,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val firstSlot = responseContextPc(fetchGroupOffsetWidth - 1 downto 2)
   val responseSlotCandidateValid = Vec(Bool(), config.fetchWidth)
   val responseSlotValid = Vec(Bool(), config.fetchWidth)
+  val responsePayloadWriteValid = Vec(Bool(), config.fetchWidth)
   val responsePredictionTaken = Vec(Bool(), config.fetchWidth)
   val responseDynamicPredictionHit = Vec(Bool(), config.fetchWidth)
   val responseControlTransfer = Vec(Bool(), config.fetchWidth)
@@ -511,6 +512,12 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       U(lane, config.fetchSlotWidth bits) >= firstSlot &&
       !earlierResponsePredictionTaken(lane)
     responseSlotValid(lane) := responseFire && responseSlotCandidateValid(lane)
+    // Payload storage is intentionally wider than the visible prefix.  A young lane truncated
+    // by a taken branch may be written into a reserved, invisible slot; count/tail alone expose
+    // the surviving prefix to decode.  Keep this enable independent of predecode and predictor
+    // metadata so response control does not fan into every wide FrontendSlot register CE.
+    responsePayloadWriteValid(lane) := responseFire &&
+      U(lane, config.fetchSlotWidth bits) >= firstSlot
     responsePredictionTaken(lane) := responseSlotCandidateValid(lane) &&
       !io.cacheResponse.error && lanePredictionTaken
     earlierResponsePredictionTaken(lane + 1) :=
@@ -787,10 +794,9 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         predictionPendingValid := False
       }
       for (lane <- 0 until config.fetchWidth) {
-        when(responseSlotValid(lane)) {
-          // Valid response slots form one contiguous suffix beginning at firstSlot and ending at
-          // the first predicted-taken lane.  Its compacted offset is therefore lane-firstSlot;
-          // using that identity keeps prediction/predecode out of the dynamic entry-select cone.
+        when(responsePayloadWriteValid(lane)) {
+          // All lanes after firstSlot use the same compacted positions.  The visible prefix is
+          // still bounded by enqueueCount, so post-taken payload writes cannot reach decode.
           val compactedLaneOffset =
             U(lane, enqueueCountWidth bits) - firstSlot.resize(enqueueCountWidth)
           val destination = (tail + compactedLaneOffset).resized
