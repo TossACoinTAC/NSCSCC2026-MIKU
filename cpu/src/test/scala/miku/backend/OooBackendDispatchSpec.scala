@@ -1163,7 +1163,10 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         (false, "legacy", 0x4c61),
         (true, "suppress-echo", 0x4c62)
       )) {
-      val testConfig = config.copy(enableDirectWakeupEchoSuppression = suppressEcho)
+      val testConfig = config.copy(
+        enableDirectWakeupEchoSuppression = suppressEcho,
+        enableOrdinaryRegisteredWakeSelectDecoupling = false
+      )
       SimConfig.withVerilator
         .workspacePath(s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-backend-direct-echo-$name")
         .compile(new OooBackendDispatchProbe(testConfig))
@@ -1258,7 +1261,10 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         (true, "early", 0x4c71, 0),
         (true, "stale-epoch", 0x4c72, 1)
       )) {
-      val testConfig = config.copy(enableLoadCompletionEarlyWakeup = earlyWake)
+      val testConfig = config.copy(
+        enableLoadCompletionEarlyWakeup = earlyWake,
+        enableOrdinaryRegisteredWakeSelectDecoupling = false
+      )
       SimConfig.withVerilator
         .workspacePath(s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-backend-load-wakeup-$name")
         .compile(new OooBackendDispatchProbe(testConfig))
