@@ -10,6 +10,7 @@ object L1DataMshrState extends SpinalEnum {
 final case class L1DataMshr(config: OooCoreConfig) extends Bundle {
   val valid = Bool()
   val state = L1DataMshrState()
+  val readRequestPending = Bool()
   val lineAddress = UInt(config.xlen bits)
   val criticalBeat = UInt(CacheContract.BeatIndexWidth bits)
   val victimWay = UInt(log2Up(config.dataCache.ways) bits)
