@@ -112,6 +112,8 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val cacheDropPending = RegInit(False)
   val cacheResponseContextPending = RegInit(False)
   val predictionCorrectionFlushPending = RegInit(False)
+  val predictionCorrectionNextPc =
+    Reg(UInt(config.xlen bits)) init (U(config.resetVector, config.xlen bits))
   // Preload the single active owner before allocation.  Idle requests track nextFetchPc, while a
   // turnover response installs its predicted successor independently of translator ready.  This
   // preserves the acceptance timing cut without leaving a bank selector on every owner consumer.
@@ -566,6 +568,15 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       responsePredictedTarget := responsePredictionTarget(lane)
     }
   }
+  val responseCorrectedNextPc = Mux(
+    responsePredictedTaken,
+    responsePredictedTarget,
+    groupBase + fetchGroupBytes
+  )
+  // FixBranch already reserves the following cycle for predictor-state recovery.
+  // Capture the corrected target at the response boundary, then install it during
+  // that reserved cycle so response predecode no longer drives the wide next-PC D.
+  predictionCorrectionNextPc := responseCorrectedNextPc
   val earlyLanePredictionTaken = responsePredictionTaken(responseContextPredictedLane)
   val earlyLanePredictionTarget = responsePredictionTarget(responseContextPredictedLane)
   val responsePredictionMatchesRequest = Mux(
@@ -781,11 +792,6 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         cacheResponseContextPending := False
       }
       when(predictionCorrectionOnResponse) {
-        nextFetchPc := Mux(
-          responsePredictedTaken,
-          responsePredictedTarget,
-          groupBase + fetchGroupBytes
-        )
         translatedRequestValid := False
         translatedExceptionValid := False
         translationOutstanding := False
@@ -836,6 +842,11 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     when(cachedCorrectionKillPending) {
       cacheResponseContextPending := False
     }
+    // The flush-pending cycle already blocks translationRequest.valid. Installing
+    // the registered target here preserves the first corrected request cycle.
+    when(predictionCorrectionFlushPending) {
+      nextFetchPc := predictionCorrectionNextPc
+    }
     val translationExceptionCommit = !cacheOutstanding && !translatedRequestValid &&
       !io.redirectValid && freeSlots =/= 0 &&
       (translatedExceptionValid || translationExceptionFire)
@@ -863,7 +874,13 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     count := count + acceptedCount - dequeueCount
   }
 
-  io.fetchPc := nextFetchPc
+  // Preserve the public observation contract on the recovery cycle even though
+  // the internal next-PC register is intentionally updated at its end.
+  io.fetchPc := Mux(
+    predictionCorrectionFlushPending,
+    predictionCorrectionNextPc,
+    nextFetchPc
+  )
   io.occupancy := count
 
   val perfObservationV1Word2 = Bits(PerfObservationV1.WordWidth bits)

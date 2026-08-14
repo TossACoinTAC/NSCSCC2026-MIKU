@@ -1062,6 +1062,8 @@ class OooFrontendSpec extends AnyFunSuite {
         assert(!dut.io.cacheKill.toBoolean)
         assert(dut.io.fetchPc.toBigInt == branchTarget)
         assert(dut.io.occupancy.toBigInt == 2)
+        assert(dut.io.translationRequest.valid.toBoolean)
+        assert(dut.io.translationRequest.virtualAddress.toBigInt == branchTarget)
 
         // The canceled cached request has no response-drain obligation.
         dut.io.translationRequest.ready #= true
