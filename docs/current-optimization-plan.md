@@ -8,20 +8,20 @@
 
 - CPU 开发分支：`dev/ECHO`。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：当前 W01+FT06+MT05 RTL 为 `5,014,520` cycles，20/20 pass；W01 相对 WT02
+- perf20：当前 WT04 RTL 为 `5,014,520` cycles，20/20 pass；W01 相对 WT02
   减少 42,348 cycles（`-0.837435%`），几何平均加速 `1.010598877x`；BR01 相对 L07
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
   baseline `5,543,953` 累计 `-9.549738%`。
-- func58：当前 W01+FT06+MT05 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
-- W01+FT06+MT05 matching 100 MHz direct full implementation：setup `-0.395 ns`、hold
-  `+0.053 ns`、setup TNS `-12.353 ns`、156 个失败 endpoint；DRC 0 error/critical warning、
-  fully routed、bitstream 成功。相对 WT02 的 setup 改善 `0.246 ns`，但仍不是里程碑。
-  placed utilization 为 86,810 LUT、53,760 FF、68.5 BRAM、8 DSP；routed hierarchy
-  summary 为 86,935 LUT、53,822 FF。
-- 最新 top-50 中 IQ 占 38 条，最差 `-0.395 ns`，平均 route 占比 `77.79%`；前六条均由
-  ROB lane 0 的 `stagedPdst_0` 经 wakeup/select 驱动 LSU IQ 宽 issue payload。ROB/CSR
-  占 4 条、cache/L2 占 7 条、predictor 占 1 条，frontend、ATU/LSQ 均未进入 top-50。
-  FT06、MT05 的组合物理目标得到支持，但单次组合 route 不能拆分出各自收益。
+- func58：当前 WT04 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+- WT04 matching 100 MHz direct full implementation：setup `-0.589 ns`、hold `+0.053 ns`、
+  setup TNS `-41.425 ns`、308 个失败 endpoint；DRC 0 error/critical warning、fully routed、
+  bitstream 成功，但仍不是里程碑。placed utilization 为 87,360 LUT、54,225 FF、
+  56.5 BRAM、8 DSP。
+- WT04 将上一节点 top-50 中 38 条 ROB staged wake 到 LSU IQ 的路径全部移除；最新 top-50
+  为 predictor 45 条、IQ 5 条，最差路径改为 BTB bank 输出到 instruction ATU context，
+  setup `-0.589 ns`。剩余 IQ 路径始于 load completion/early wake，最差 `-0.302 ns`。
+  这证明 WT04 的目标锥被切断，同时说明压力已转移到 predictor/ATU，而本次整体 WNS 不可
+  拆分成 WT04 的独立物理收益或退化。
 - BT04 相对 MT03+BT03 的器件总 LUT `86,489 -> 89,422`、寄存器
   `54,358 -> 54,881`、slice `26,920 -> 27,745`，BRAM `56.5 -> 54.5`。其 top-50 全部为
   IQ，最差路径 `-1.442 ns`，由 recovery 经另一个 IQ 的 direct wakeup/select 级联到本地复制
@@ -262,7 +262,17 @@ ALU direct wake 与 load early wake 进入 LSU IQ 同拍 select。IssueQueue/Bac
 完整 perf20 相对 W01+FT06+MT05 为 `5,014,520 -> 5,014,520`，20 项逐项精确相等、几何平均
 `1.000000000x`；func58 random-AXI seeds `240/255/141` 均为 58/58。候选已冻结在
 `build/reports/experiments/R2-WT04/experiment-manifest.json`；是否切断 staged ROB tag 到 LSU IQ
-宽 payload 的物理路径，只由该身份的 matching direct full 判断。
+宽 payload 的物理路径，只由该身份的 matching direct full 判断。该实现现已完成：setup/hold
+为 `-0.589/+0.053 ns`，setup TNS `-41.425 ns`，308 个失败 endpoint；DRC 0 error/critical
+warning、fully routed、bitstream 成功。原先 38 条 ROB staged wake 到 LSU IQ 路径从 top-50
+全部消失，说明结构目标达成；top-50 同时转为 predictor 45 条、IQ 5 条，当前最差路径是 BTB
+bank 到 instruction ATU context。WT04 因软件周期透明且物理目标达成而继续保留，但本次未形成
+时序里程碑。
+
+下一轮时序工作不以单候选直接进入综合。先积累至少两个、通常两个至三个相对独立的候选，
+逐个完成定向测试、完整门禁和 perf20 A/B，再对最终组合只执行一次 direct full implementation。
+当前优先从 BTB/predictor 到 ATU/PHT 的主导路径族选择一项强候选，并搭配至少一个不共享该
+主锥的周期透明候选；若某候选带来平均性能回退，归一化幅度必须小于 `0.5%` 且单独记录。
 
 ## 系统、归档与发布
 
