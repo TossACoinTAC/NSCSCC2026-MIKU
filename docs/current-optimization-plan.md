@@ -10,13 +10,14 @@
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - perf20：`5,299,059` cycles，20/20 pass。
 - func58：BT03 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
-- BT02 matching 100 MHz direct full implementation：setup `-0.678 ns`、hold `+0.053 ns`、DRC
-  0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
-- 相对 BT02 前一份 direct full，器件总 LUT `90,221 -> 86,159`、寄存器
-  `54,233 -> 53,633`、slice `27,096 -> 26,856`，BRAM `56.5 -> 68.5`。旧 IQ payload
-  CE 路径族已从 top-50 消失；当前 top-50 为 LSQ 22、frontend 10、IQ 7、predictor 6、
-  ROB/CSR 5 条。单次 setup 从 `-0.466 ns` 变为 `-0.678 ns`，既未闭合，也暴露了此前被
-  IQ 遮蔽的 LSQ 到 ATU 路径，不能把整个差值直接归为 BT02 的确定性退化。
+- MT03+BT03 matching 100 MHz direct full implementation：setup `-0.694 ns`、hold `+0.053 ns`、
+  DRC 0 error/critical warning、fully routed、bitstream 成功，但 setup 未闭合，因此仍是 candidate。
+- 相对 BT02 matching direct full，器件总 LUT `86,159 -> 86,489`、寄存器
+  `53,633 -> 54,358`、slice `26,856 -> 26,920`，BRAM `68.5 -> 56.5`。MT03 已使原有
+  22 条 LSQ 到 ATU 路径全部移出 top-50；BT03 移除了宽 `issueAddressUop` 寄存器，却把
+  IQ recovery/wakeup/select 到 token slot payload read 的新路径推成 47/50，最差为
+  `-0.694 ns`，其余 3 条为 frontend。setup 相对 BT02 仅变化 `-0.016 ns`，单次 route
+  不足以证明该差值是确定性退化，但 BT03 未达到预期物理目标，需要结构重做或退出组合。
 - post-route `-0.055 ns` 只用于识别路径族，不是正式产物。
 
 本阶段固定 100 MHz，不做升频探索。先让 direct full implementation 闭合，再把正 WNS
@@ -97,8 +98,11 @@ fully routed 和 bitstream 成功。正 WNS 不用于升频。
   `5,299,059 -> 5,299,059`，20 项逐项精确相等、几何平均 `1.000000000x`；func58 seeds
   `240/255/141` 均为 58/58。冻结证据见
   `build/reports/experiments/R1-BT03/experiment-manifest.json`，逐项比较见
-  `build/reports/comparisons/R1-BT03.json`。MT03 与 BT03 已形成两个独立目标路径族的组合，
-  下一步进行一次 100 MHz direct full implementation。
+  `build/reports/comparisons/R1-BT03.json`。组合 direct full 的 setup/hold 为
+  `-0.694/+0.053 ns`，DRC、route 和 bitstream 完整。MT03 已将 LSQ 路径族移出 top-50；
+  BT03 的新 token slot payload read 路径占 47/50，说明其宽 issue-address register 虽已移除，
+  但物理目标未达成。当前实现保留作正确且周期透明的实验节点，下一次 RTL 迭代需切断
+  recovery/wakeup/select 与 9-way payload read 的同拍组合锥，或从后续组合移除 BT03。
 
 ## IPC 第 1 至第 3 轮
 
