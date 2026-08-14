@@ -98,7 +98,10 @@ final class L1InstructionCache(
     val idle = out Bool ()
   }
 
-  val cacheArray = new CacheArray(geometry)
+  val cacheArray = new CacheArray(
+    geometry,
+    decoupleDataReadEnable = config.enableInstructionArrayDataReadDecoupling
+  )
   val state = RegInit(L1InstructionCacheState.idle)
   val invalidateSeen = RegInit(False)
   val invalidatePending = RegInit(False)

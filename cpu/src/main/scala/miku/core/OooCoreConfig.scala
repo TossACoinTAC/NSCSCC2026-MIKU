@@ -110,6 +110,10 @@ final case class OooCoreConfig(
     enableBalancedFrontendPredictionSelect: Boolean = true,
     enableFrontendCacheHitTurnover: Boolean = true,
     enableSpeculativeInstructionArrayRead: Boolean = true,
+    // L1I never performs a lookup and a refill install in the same controller state.  Keep the
+    // data-array read enable independent of the install write qualifier so the BRAM CE cone is
+    // driven by lookup/maintenance acceptance only.
+    enableInstructionArrayDataReadDecoupling: Boolean = true,
     enableDeferredFrontendCorrectionCleanup: Boolean = true,
     enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,

@@ -584,15 +584,18 @@ class L1InstructionCacheSpec extends AnyFunSuite {
   }
 
   test("speculative instruction-array read preserves hit turnover and miss recovery") {
-    for (enabled <- Seq(false, true)) {
-      val testConfig = config.copy(enableSpeculativeInstructionArrayRead = enabled)
+    for ((enabled, decoupled) <- Seq((false, false), (true, false), (true, true))) {
+      val testConfig = config.copy(
+        enableSpeculativeInstructionArrayRead = enabled,
+        enableInstructionArrayDataReadDecoupling = decoupled
+      )
       SimConfig.withVerilator
         .workspacePath(
           sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
-            s"/sim-workspace-ooo-l1i-array-read-$enabled"
+            s"/sim-workspace-ooo-l1i-array-read-$enabled-$decoupled"
         )
         .compile(new L1InstructionCacheProbe(testConfig))
-        .doSim(s"ooo-l1i-array-read-$enabled", if (enabled) 0x4c91 else 0x4c90) { dut =>
+        .doSim(s"ooo-l1i-array-read-$enabled-$decoupled", if (decoupled) 0x4c92 else if (enabled) 0x4c91 else 0x4c90) { dut =>
           dut.clockDomain.forkStimulus(period = 10)
           clearInputs(dut)
           dut.clockDomain.assertReset()
