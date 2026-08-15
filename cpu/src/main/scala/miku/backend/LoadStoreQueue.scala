@@ -225,6 +225,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // load on every cycle.
   val loadBase = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val drainAfterFlush = RegInit(False)
+  val scheduledLoadValid = RegInit(False)
+  val loadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
+  val scheduledLoad = Reg(ScheduledLoad(config))
 
   // Completed loads remain allocated until commit.  The allocator therefore
   // advances the base only on commit, and a rotated priority select preserves
@@ -234,22 +237,47 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     pendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
       !loads(entry).completed
   }
+  // A blocked oldest Load may request one alternate scheduling attempt through a
+  // registered token.  Restrict the alternate selection to younger, translated
+  // cacheable ordinary Loads, then run that one candidate through the unchanged
+  // Store/load ordering cone in the following cycle.
+  val tryYoungerLoad = RegInit(False)
+  val scheduledLoadWasYoungerBypass = RegInit(False)
+  val youngerReadyLoads = Bits(config.loadQueueEntries bits)
+  for (entry <- 0 until config.loadQueueEntries) {
+    val load = loads(entry)
+    youngerReadyLoads(entry) := pendingLoads(entry) && load.addressReady &&
+      load.translationDone && !load.uncached && !load.isLl && scheduledLoadValid &&
+      isOlder(scheduledLoad.robPointer, load.robPointer)
+  }
+  val youngerSearchBase = (loadHead + 1).resize(config.loadQueueIndexWidth)
+  val rotatedYoungerReady = ((youngerReadyLoads ## youngerReadyLoads) |>> youngerSearchBase)
+    .resize(config.loadQueueEntries)
+  val youngerLoadOffset = OHToUInt(OHMasking.first(rotatedYoungerReady))
+  val selectedYoungerLoadHead =
+    (youngerSearchBase + youngerLoadOffset).resize(config.loadQueueIndexWidth)
+  val selectYoungerLoad = if (config.enableYoungerReadyLoadBypass) {
+    tryYoungerLoad && scheduledLoadValid && youngerReadyLoads.orR
+  } else {
+    False
+  }
   val rotatedPending = ((pendingLoads ## pendingLoads) |>> loadBase)
     .resize(config.loadQueueEntries)
   val loadHeadOffset = OHToUInt(OHMasking.first(rotatedPending))
-  val selectedLoadHead = (loadBase + loadHeadOffset).resized
+  val oldestPendingLoadHead =
+    (loadBase + loadHeadOffset).resize(config.loadQueueIndexWidth)
+  val selectedLoadHead = Mux(selectYoungerLoad, selectedYoungerLoadHead, oldestPendingLoadHead)
   val selectedLoadValid = pendingLoads.orR
   // Match the registered uop boundary used by the reference LoadQueue.  The
   // selected index and immutable payload are state: translation, forwarding,
   // and cache request ownership no longer re-read wide queue fields through a
   // second asynchronous loadHead mux.
-  val scheduledLoadValid = RegInit(False)
-  val loadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
-  val scheduledLoad = Reg(ScheduledLoad(config))
   when(io.flush) {
     scheduledLoadValid := False
+    scheduledLoadWasYoungerBypass := False
   }.otherwise {
     scheduledLoadValid := selectedLoadValid
+    scheduledLoadWasYoungerBypass := selectYoungerLoad
     when(selectedLoadValid) {
       loadHead := selectedLoadHead
       val selectedLoad = loads(selectedLoadHead)
@@ -1275,6 +1303,15 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     !scheduledLoad.uncached && !scheduledLoad.isLl && !bufferedCommittedStore &&
     !unknownOlderStore.orR && !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
     (partialOverlapStore.orR || pendingDataStore.orR || forwardingCount > 1)
+  when(io.flush) {
+    tryYoungerLoad := False
+  }.elsewhen(tryYoungerLoad) {
+    // A token is a single attempt even if the candidate disappears before use.
+    tryYoungerLoad := False
+  }.otherwise {
+    tryYoungerLoad := oldestLoadLocalAliasBlocked && !scheduledLoadWasYoungerBypass &&
+      youngerReadyLoads.orR
+  }
   perfObservationV1Word5(49) := rawLoadCompletion
   perfObservationV1Word5(50) := rawOrdinaryLoadCompletion
   perfObservationV1Word5(51) := rawOrdinaryLoadCompletion &&

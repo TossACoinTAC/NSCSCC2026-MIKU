@@ -361,6 +361,149 @@ class LoadStoreQueueSpec extends AnyFunSuite {
     dut.io.agu.uop.decoded.writesGpr #= true
   }
 
+  private def populateYoungerLoadBypassScenario(
+      dut: LoadStoreQueueProbe,
+      storePointer: BigInt = 0,
+      oldestLoadPointer: BigInt = 1,
+      youngerLoadPointer: BigInt = 2,
+      storeAddressReady: Boolean = true,
+      youngerAddress: BigInt = 0x300,
+      youngerIsLl: Boolean = false
+  ): Unit = {
+    dut.io.allocateValid #= 7
+    dut.io.allocate(0).robPointer #= storePointer
+    dut.io.allocate(0).isStore #= true
+    dut.io.allocate(0).storeQueueIndex #= 0
+    dut.io.allocate(1).robPointer #= oldestLoadPointer
+    dut.io.allocate(1).isLoad #= true
+    dut.io.allocate(1).loadQueueIndex #= 0
+    dut.io.allocate(2).robPointer #= youngerLoadPointer
+    dut.io.allocate(2).isLoad #= true
+    dut.io.allocate(2).loadQueueIndex #= 1
+    sample(dut)
+    dut.io.allocateValid #= 0
+
+    dut.io.translationBypassEligible #= true
+    dut.io.storeDataEnable #= false
+    if (storeAddressReady) {
+      dut.io.translationBypassPhysicalAddress #= 0x200
+      setStoreAgu(dut, storePointer, 0x200, BigInt("12345678", 16), storeIndex = 0)
+      sample(dut)
+      dut.io.aguValid #= false
+    }
+
+    dut.io.translationBypassPhysicalAddress #= 0x200
+    setLoadAgu(dut, oldestLoadPointer, 0x200, loadIndex = 0)
+    sample(dut)
+    dut.io.aguValid #= false
+
+    dut.io.translationBypassPhysicalAddress #= youngerAddress
+    setLoadAgu(
+      dut,
+      youngerLoadPointer,
+      youngerAddress,
+      isLl = youngerIsLl,
+      loadIndex = 1,
+      pdst = 8
+    )
+    sample(dut)
+    dut.io.aguValid #= false
+  }
+
+  private def waitForDataRequest(dut: LoadStoreQueueProbe, limit: Int = 16): Boolean = {
+    var wait = 0
+    while (!dut.io.dataRequestValid.toBoolean && wait < limit) {
+      sample(dut)
+      wait += 1
+    }
+    dut.io.dataRequestValid.toBoolean
+  }
+
+  test("a local Store alias may retry one younger independent cached Load") {
+    for ((enabled, name, seed) <- Seq(
+        (false, "oldest-only", 0x4c80),
+        (true, "younger-retry", 0x4c81)
+      )) {
+      val testConfig = config.copy(enableYoungerReadyLoadBypass = enabled)
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-lsq-younger-load-$name"
+        )
+        .compile(new LoadStoreQueueProbe(testConfig))
+        .doSim(s"ooo-lsq-younger-load-$name", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          SimTimeout(3000)
+          clearInputs(dut)
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          sample(dut)
+
+          populateYoungerLoadBypassScenario(dut)
+          val requestSeen = waitForDataRequest(dut)
+          assert(requestSeen == enabled)
+          if (enabled) {
+            assert(!dut.io.dataRequest.isWrite.toBoolean)
+            assert(dut.io.dataRequest.robPointer.toBigInt == 2)
+            assert(dut.io.dataRequest.physicalAddress.toBigInt == 0x300)
+          }
+        }
+    }
+  }
+
+  test("younger Load retry preserves alias, unknown-Store, LL, and wraparound rules") {
+    val testConfig = config.copy(enableYoungerReadyLoadBypass = true)
+    val compiled = SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-lsq-younger-load-safety"
+      )
+      .compile(new LoadStoreQueueProbe(testConfig))
+
+    def runBlocked(name: String, seed: Int, storeReady: Boolean, address: BigInt, isLl: Boolean): Unit = {
+      compiled.doSim(name, seed) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        SimTimeout(3000)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+        populateYoungerLoadBypassScenario(
+          dut,
+          storeAddressReady = storeReady,
+          youngerAddress = address,
+          youngerIsLl = isLl
+        )
+        assert(!waitForDataRequest(dut))
+      }
+    }
+
+    runBlocked("ooo-lsq-younger-load-same-alias", 0x4c82, storeReady = true, 0x200, isLl = false)
+    runBlocked("ooo-lsq-younger-load-unknown-store", 0x4c83, storeReady = false, 0x300, isLl = false)
+    runBlocked("ooo-lsq-younger-load-ll", 0x4c84, storeReady = true, 0x300, isLl = true)
+
+    compiled.doSim("ooo-lsq-younger-load-wraparound", 0x4c85) { dut =>
+      dut.clockDomain.forkStimulus(period = 10)
+      SimTimeout(3000)
+      clearInputs(dut)
+      dut.clockDomain.assertReset()
+      dut.clockDomain.waitSampling(2)
+      dut.clockDomain.deassertReset()
+      sample(dut)
+      populateYoungerLoadBypassScenario(
+        dut,
+        storePointer = 62,
+        oldestLoadPointer = 63,
+        youngerLoadPointer = 0
+      )
+      assert(waitForDataRequest(dut))
+      assert(dut.io.dataRequest.robPointer.toBigInt == 0)
+      assert(dut.io.dataRequest.physicalAddress.toBigInt == 0x300)
+    }
+  }
+
   test("direct and DMW preview translates Load, Store, and SC before owner allocation") {
     val compiled = SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-lsq-translation-bypass")
