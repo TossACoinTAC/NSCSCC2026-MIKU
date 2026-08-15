@@ -84,6 +84,28 @@
   Load 原始完成命中 head `354,260` 次（`6.9396%`）以及 oldest Load 阻塞但存在另一个
   地址已就绪 pending Load `364,380` 次（`7.1379%`）。三者都是一拍或调度机会的上界；
   只有 branch 项已具备不跨越 LSU 数据寄存边界的低侵入实现路径。
+- R5 matching instrumented perf20 为 `5,014,776` cycles，20 项与 clean matrix 逐项
+  精确相等；ROI 为 `5,014,756` cycles、退休 `3,608,034`、IPC `0.719483`。ROB
+  非空零退休占 `53.45%`，其中 head Load/Store 未完成分别占 `26.55%/15.40%`；ROB
+  空和满分别占 `6.90%/3.75%`。普通 Load 原始完成命中 ROB head `382,202` 次
+  （`7.6215%` ROI），构成 R6 `L10` 的一拍上界。oldest Load 被阻塞且存在另一个
+  地址已就绪 Load 的 `340,689` 次只表示调度暴露，未知老 Load 仍可能解析为 SUC，
+  因而不能直接视为 L02 的安全可回收周期。branch recovery 只占 `0.97%`，本轮不优先
+  扩大分支恢复机制。汇总证据为 `build/reports/observations/R6-baseline.json`。
+
+## R6：Load head completion 提前退休
+
+首项 `L10` 使用 LSQ 原始 ordinary cached Load completion 产生窄身份 token；ROB 只在
+当前 epoch、准确命中下一拍 head 时保存 token。Load 数据仍由现有 LSQ completion 寄存器
+提供，下一拍 token 与该固定延迟数据配对，使 head Load 可与既有 completion 写回同拍退休，
+避免把 cache response/forwarding 的组合数据路径直接拉入 ROB 提交控制。异常、LL、SUC、
+translation completion、flush、旧 epoch 和非 head completion 全部保留原路径。
+
+`L10` 的动态上界为 `382,202/5,014,756 = 7.6215%`，不是预期收益；实际保留门槛仍为
+完整 perf20 归一化几何平均至少改善 `0.5%`。实现必须覆盖 cache response、Store forwarding、
+同拍 completion 冲突、pointer/epoch 复用和 flush，并在 clean perf20 后重采 matching
+instrumented 计数器。该候选会跨 LSQ/ROB，但控制只走窄 token；数据使用已经存在的 LSQ
+寄存边界，以保护当前 `+0.028 ns` 的有限时序预算。
 
 ## R1：时序候选与周期验证
 
