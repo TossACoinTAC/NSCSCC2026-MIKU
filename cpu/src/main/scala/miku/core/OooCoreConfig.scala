@@ -98,6 +98,9 @@ final case class OooCoreConfig(
     enableOrdinaryRegisteredWakeSelectDecoupling: Boolean = true,
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableBalancedIssueSelection: Boolean = true,
+    // Flexible ALU lanes reserve a port needed exclusively by a younger lane in the same group.
+    // Disabling this flag preserves the historical lowest-port greedy dispatch for A/B.
+    enableCapabilityAwareDispatchReservation: Boolean = true,
     enableBankedLoadForwardCompletion: Boolean = true,
     // Retry one younger, already translated cached Load when the oldest pending Load is blocked
     // only by a local Store alias.  The alternate still traverses the ordinary LSQ order checks.
