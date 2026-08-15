@@ -275,15 +275,26 @@ class BranchPredictorSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(132)
+        dut.clockDomain.waitSampling(BankedFetchPredictor.InitializationWaitCycles)
 
         val returnPc = BigInt("1c004000", 16)
         val fallbackTarget = BigInt("1c008000", 16)
+        val formerlyConflictingPc = returnPc + 0x800
+        val formerlyConflictingTarget = BigInt("1c009000", 16)
         val olderReturnAddress = BigInt("1c00a004", 16)
         val recoveryReturnAddress = BigInt("1c00c004", 16)
         dut.io.btbUpdatePc #= returnPc
         dut.io.btbUpdateTarget #= fallbackTarget
         dut.io.btbUpdateType #= 3
+        dut.io.btbUpdateValid #= true
+        dut.clockDomain.waitSampling()
+        dut.io.btbUpdateValid #= false
+
+        // With 128 rows per bank these PCs occupied the same row and the second update evicted
+        // the return.  The expanded BTB must retain both exact-tag entries.
+        dut.io.btbUpdatePc #= formerlyConflictingPc
+        dut.io.btbUpdateTarget #= formerlyConflictingTarget
+        dut.io.btbUpdateType #= 1
         dut.io.btbUpdateValid #= true
         dut.clockDomain.waitSampling()
         dut.io.btbUpdateValid #= false
@@ -304,6 +315,16 @@ class BranchPredictorSpec extends AnyFunSuite {
         assert(dut.io.responseValid.toBoolean)
         assert(dut.io.prediction(0).hit.toBoolean)
         assert(dut.io.prediction(0).target.toBigInt == recoveryReturnAddress)
+
+        dut.io.lookupPc #= formerlyConflictingPc
+        dut.io.lookupValid #= true
+        dut.clockDomain.waitSampling()
+        dut.io.lookupValid #= false
+        sleep(1)
+        assert(dut.io.responseValid.toBoolean)
+        assert(dut.io.prediction(0).hit.toBoolean)
+        assert(dut.io.prediction(0).target.toBigInt == formerlyConflictingTarget)
+
         dut.io.lookupPc #= returnPc + 0x1000
         dut.clockDomain.waitSampling()
         sleep(1)

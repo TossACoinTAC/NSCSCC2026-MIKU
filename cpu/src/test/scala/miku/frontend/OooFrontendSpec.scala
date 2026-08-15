@@ -313,7 +313,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(132)
+        dut.clockDomain.waitSampling(BankedFetchPredictor.InitializationWaitCycles)
         sleep(1)
 
         val branchPc = config.resetVector + 0x200
@@ -401,7 +401,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(132)
+        dut.clockDomain.waitSampling(BankedFetchPredictor.InitializationWaitCycles)
         sleep(1)
 
         val callPc = config.resetVector + 0x300 + callLane * 4
@@ -488,7 +488,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(132)
+        dut.clockDomain.waitSampling(BankedFetchPredictor.InitializationWaitCycles)
         sleep(1)
 
         val callPc = config.resetVector + 0x30c
@@ -1572,7 +1572,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.deassertReset()
 
         // Wait for BTB invalidation, then train a direct prediction for the older group.
-        dut.clockDomain.waitSampling(134)
+        dut.clockDomain.waitSampling(BankedFetchPredictor.InitializationWaitCycles + 2)
         sleep(1)
         val firstPc = config.resetVector + 0x200
         val predictedTarget = firstPc + 0x40
@@ -1848,9 +1848,9 @@ class OooFrontendSpec extends AnyFunSuite {
         // A precise mispredict update overrides forward-not-taken on the next visit.
         val learnedPc = base + 0x200
         val learnedTarget = learnedPc + 0x10
-        // The BRAM-backed predictor clears the 128 BTB rows after reset; PHT payload does not need
+        // The BRAM-backed predictor clears its BTB rows after reset; PHT payload does not need
         // reset because an explicit trained bit guards every read.
-        dut.clockDomain.waitSampling(134)
+        dut.clockDomain.waitSampling(BankedFetchPredictor.InitializationWaitCycles + 2)
         sleep(1)
         dut.io.predictorUpdatePc #= learnedPc
         dut.io.predictorUpdateTaken #= true
