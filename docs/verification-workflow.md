@@ -37,6 +37,10 @@
    LabAgent job、UART/VIO、结果和 artifact hash。板卡队列冲突是基础设施结果，不能
    当作 DUT 通过或失败。
 
+阶段发布采用分支分工：`dev/*` 保存候选级提交、失败尝试和 manifest 关联的完整溯源；
+阶段性门禁通过后同步 `main` 可以使用 squash，`main` 只表示可复现的里程碑状态，不作为
+候选级实验记录。squash 前必须确认开发分支上的 matching RTL、测试和实现证据已归档。
+
 ## 二、并行与流水线
 
 模型缓存未命中时，模型编译、SBT 和 Vivado implementation 遵守独占约束。模型编译完成

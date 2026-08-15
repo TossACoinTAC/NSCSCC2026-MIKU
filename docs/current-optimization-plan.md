@@ -2,7 +2,8 @@
 
 本文是动态执行清单，随候选和 matching implementation 结果更新。长期不变的测试、归档、
 并发和发布合同见 [verification-workflow.md](verification-workflow.md)，候选机制、状态与实测
-效果见 [optimization-candidates.md](optimization-candidates.md)。
+效果见 [optimization-candidates.md](optimization-candidates.md)；本轮 top-50 之外的静态时序审计见
+[timing-static-audit-r5.md](timing-static-audit-r5.md)。
 
 ## 当前基线与目标
 
@@ -348,6 +349,7 @@ direct implementation：
 
 MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其他候选在每个时序闭合
 里程碑运行 Linux。若若干候选已形成细粒度提交、完整软件证据和清楚的阶段结论，可在轮次
-中途推送远端 `dev/ECHO` 备份阶段成果，不要求先闭合时序。`main` 只在 matching 100 MHz
-direct full 的 setup/hold WNS 均严格大于零、DRC/route/bitstream 完整且 Linux 门禁通过后
-fast-forward 到同一提交。板侧服务器恢复后补做板测；此前只标记本地稳定里程碑。
+中途推送远端 `dev/ECHO` 备份阶段成果，不要求先闭合时序。`dev/ECHO` 保留候选级提交、
+失败尝试和完整证据链；满足 matching 100 MHz direct full 的 setup/hold WNS 均严格大于零、
+DRC/route/bitstream 完整且 Linux 门禁通过后，`main` 可将该阶段 squash 成一个里程碑提交，
+不要求保留候选级提交拓扑。板侧服务器恢复后补做板测；此前只标记本地稳定里程碑。
