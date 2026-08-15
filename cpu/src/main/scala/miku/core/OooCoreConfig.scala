@@ -105,6 +105,9 @@ final case class OooCoreConfig(
     // Keep the retirement qualification field beside ROB state instead of reading it through
     // the wide payload bank.  The legacy payload path remains available for timing A/B.
     enableRobSystemOperationState: Boolean = true,
+    // Keep the retirement PC beside ROB state so commit/recovery do not read it through the
+    // wide payload bank.  The legacy payload path remains available for timing A/B.
+    enableRobPcState: Boolean = true,
     // Register speculative RAS operations before they drive the RAS array write enable.  The
     // direct input path remains available for predictor timing A/B and older configurations.
     enableRegisteredSpeculativeRasUpdate: Boolean = false,
@@ -123,6 +126,9 @@ final case class OooCoreConfig(
     // data-array read enable independent of the install write qualifier so the BRAM CE cone is
     // driven by lookup/maintenance acceptance only.
     enableInstructionArrayDataReadDecoupling: Boolean = true,
+    // L1D/L2 arbitration keeps lookup response and line installation mutually exclusive.  Keep
+    // data-array reads qualified by lookup/maintenance acceptance independently of write enable.
+    enableDataArrayDataReadDecoupling: Boolean = true,
     enableDeferredFrontendCorrectionCleanup: Boolean = true,
     enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,

@@ -78,7 +78,10 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     val idle = out Bool ()
   }
 
-  val cacheArray = new CacheArray(geometry)
+  val cacheArray = new CacheArray(
+    geometry,
+    decoupleDataReadEnable = config.enableDataArrayDataReadDecoupling
+  )
   val state = RegInit(L2CacheState.normal)
   val misses = Vec.fill(config.mshrEntries)(Reg(L2Mshr(config)))
   val lineMemories = Array.fill(CacheContract.BeatsPerLine)(

@@ -130,7 +130,10 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     val idle = out Bool ()
   }
 
-  val cacheArray = new CacheArray(geometry)
+  val cacheArray = new CacheArray(
+    geometry,
+    decoupleDataReadEnable = config.enableDataArrayDataReadDecoupling
+  )
   val state = RegInit(L1DataCacheState.normal)
   val misses = Vec.fill(config.mshrEntries)(Reg(L1DataMshr(config)))
   val waiters = Vec.fill(config.loadQueueEntries)(Reg(L1DataMshrWaiter(config)))

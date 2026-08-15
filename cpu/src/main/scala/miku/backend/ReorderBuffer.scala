@@ -28,6 +28,7 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   val decodedExceptionValid = Bool()
   val serializing = Bool()
   val systemOperation = UInt(SystemOperation.Width bits)
+  val pc = UInt(config.xlen bits)
   // Retirement and LSU ownership metadata is read every commit cycle.  Keeping it beside the
   // validity/completion state avoids routing these narrow fields through the wide payload-bank
   // read and commit crossbar.
@@ -105,6 +106,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     entry.decodedExceptionValid.init(False)
     entry.serializing.init(False)
     entry.systemOperation.init(SystemOperation.none)
+    entry.pc.init(0)
   }
   private val payloadBankCount = 4
   private val payloadBankWidth = log2Up(payloadBankCount)
@@ -178,6 +180,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.allocate(lane).uop.decoded.serializing
       entries(destination(config.robIndexWidth - 1 downto 0)).systemOperation :=
         io.allocate(lane).uop.decoded.systemOperation
+      entries(destination(config.robIndexWidth - 1 downto 0)).pc :=
+        io.allocate(lane).uop.decoded.pc
       entries(destination(config.robIndexWidth - 1 downto 0)).isLoad :=
         io.allocate(lane).uop.decoded.isLoad
       entries(destination(config.robIndexWidth - 1 downto 0)).isStore :=
@@ -361,7 +365,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         predictorHasCapacity
     }
     io.commitValid(lane) := canCommit(lane)
-    io.commit(lane).pc := candidates(lane).payload.pc
+    io.commit(lane).pc := (if (config.enableRobPcState) {
+      candidates(lane).state.pc
+    } else {
+      candidates(lane).payload.pc
+    })
     io.commit(lane).instruction := candidates(lane).payload.instruction
     io.commit(lane).robPointer := candidates(lane).state.pointer
     io.commit(lane).rd := candidates(lane).payload.rd
@@ -426,7 +434,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   when(recoveryMask.orR) {
     val recoveryIndex = selectLowest(recoveryMask, log2Up(config.commitWidth))
     io.recovery.robPointer := candidates(recoveryIndex).state.pointer
-    io.recovery.pc := candidates(recoveryIndex).payload.pc
+    io.recovery.pc := (if (config.enableRobPcState) {
+      candidates(recoveryIndex).state.pc
+    } else {
+      candidates(recoveryIndex).payload.pc
+    })
     io.recovery.taken := effectiveBranchTaken(recoveryIndex)
     io.recovery.target := effectiveBranchTarget(recoveryIndex)
     io.recovery.exception := candidates(recoveryIndex).exception
