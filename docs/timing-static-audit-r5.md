@@ -115,18 +115,18 @@ AXI bridge 的宽数据寄存器和 ready/valid mux 可能造成平台路径压�
 
 ## 下一步门禁顺序
 
-1. 先对当前工作区 RT02 完成 ReorderBuffer 定向和完整软件门禁，确认它没有改变
-   serial/ERTN/commit 语义。
-2. 为 PT02 增加逐周期 RAS trace 合同；在该合同通过前不把 PT02 与其他候选组合。
-3. MT08 的 data probe preload 已在当前工作树实现；HierarchicalTlb/ATU、LSQ 和
-   OooCore 定向回归通过，完整 `cpu-check` 为 39 suites/230 tests。MT08 on/off 的
-   perf20 均为 20/20、总周期 `5,014,776` 且逐项精确相等，已确认周期透明；仍待
-   matching direct implementation 判断物理时序收益。
-4. 独立实现 CT03，并增加 L1D/L2 的 read/write mutual-exclusion assertion；若软件
-   周期透明，再与 MT08/RT02 做一次组合 RTL 生成和 matching full implementation。
-5. RT03 只复制 PC 状态，暂不删除 payload PC；通过 RTL/资源/时序 A/B 后，再决定是否
-   进入下一轮组合。
+1. RT02、MT08 已完成源码、定向回归、完整 `cpu-check` 和 perf20 周期透明验证；MT08
+   on/off 与当前组合均为 `5,014,776`，但仍待 matching direct implementation 判断物理收益。
+2. CT03、RT03 已在 `c47f7fb` 完成；L1D 12/12、L2 8/8、ROB 17/17、commit adapter
+   1/1，完整门禁 39 suites/230 tests 通过。组合 perf20 20/20 且相对 `5,014,776`
+   基线逐项精确相等；证据为 `build/reports/comparisons/CT03-RT03-perf20.json`。
+3. CT03 的正确性前提由 L1D/L2 controller 的 `!lookupResponse` 安装互斥和现有
+   store-hit/refill/maintenance 定向 suite 覆盖；若后续引入并行 install 或 hit-under-miss，
+   必须重新建立显式冲突合同，不能沿用本次结论。
+4. PT02 仍保持默认关闭；逐周期 RAS trace 合同未通过前不得加入组合。
+5. 下一步只对 CT03/RT03 与已通过的 RT02/MT08 组合执行一次 direct full implementation；
+   记录真实资源、top-50、setup/hold/TNS 和 bitstream 结果，再决定是否进入下一轮 IPC 候选。
 
-本审计没有发现可以在不验证周期语义的情况下直接提交的“纯布线技巧”。优先级应由
-MT08、CT03、RT02/RT03 的实际 RTL cone 和完整门禁结果更新，而不是由旧 top-50 的
-排名或静态 fanout 数字单独决定。
+本审计没有发现可以在不验证周期语义的情况下直接提交的“纯布线技巧”。MT08、CT03、
+RT02/RT03 当前均已完成源码和软件门禁，后续优先级由 matching direct full 的真实 RTL
+cone、WNS/TNS 和资源变化更新，而不是由旧 top-50 的排名或静态 fanout 数字单独决定。

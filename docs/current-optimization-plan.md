@@ -7,7 +7,7 @@
 
 ## 当前基线与目标
 
-- CPU 开发分支：`dev/ECHO`。
+- CPU 开发分支：`dev/ECHO`，当前源码提交 `c47f7fb`（CT03 + RT03）。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - perf20：当前 R5 RTL 为 `5,014,776` cycles，20/20 pass；R4 前三项保持
   `5,014,520`，FT08 增加 26 cycles（`+0.000518%`），归一化几何平均性能回退
@@ -17,7 +17,8 @@
   减少 42,348 cycles（`-0.837435%`），几何平均加速 `1.010598877x`；BR01 相对 L07
   `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
   baseline `5,543,953` 累计 `-9.549269%`。
-- func58：当前 R5 matching RTL 的 random-AXI seeds `240/255/141` 均为 58/58。
+- func58：当前 `c47f7fb` RTL 的 random-AXI seeds `240/255/141` 均为 58/58；证据为
+  `build/sim/runs/cpu_4e6d37b21365_chiplab_c398d274812f/clean-func58_model_2d816b9020b0_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
 - 历史 R3 matching 100 MHz direct full implementation：setup `-0.440 ns`、hold `+0.009 ns`、
   setup TNS `-13.390 ns`、128 个失败 endpoint；DRC 0 error/critical warning、fully routed、
   bitstream 成功，但仍不是里程碑。placed utilization 为 88,048 LUT、54,595 FF、
@@ -321,7 +322,7 @@ R4 不再把 RTL 文本变短或显式条件消失当作时序成功，而是按
   该微小而可归因的周期代价由 matching route 是否真正移除 frontend correction 路径来裁决。
 
 R4 最终组合 func58 三 seed 均已通过；matching direct full 已完成但 setup 仍差 `0.106 ns`。
-R5 已积累两个相互独立、直接对应 routed path cone 的候选，只在组合软件证据完整后启动一次
+R5 已积累四个相互独立、直接对应候选路径锥的候选，只在组合软件证据完整后启动一次
 direct implementation：
 
 - `WT05 @ 0e47e4b`：ordinary IQ 只用 direct/fast wake 做同拍 select bypass，ROB/LSQ 的 registered wake
@@ -338,6 +339,12 @@ direct implementation：
   `36bb4a4514302411f72997a6cf965f86d601e7b88330bd3bc29fbad9fa1e95ac`。生成 RTL 已确认
   目标条件从 L1I data RAM 读使能中消失；完整 perf20 相对 WT05 20 项逐项精确相等，
   func58 random-AXI seeds `240/255/141` 均为 58/58。
+- `CT03 + RT03 @ c47f7fb`：CT03 将 L1D/L2 data-array 的同步读使能与宽控制条件解耦，
+  RT03 为 ROB 提交/恢复保存独立的注册 PC 状态。L1D 12/12、L2 8/8、ROB 17/17、
+  commit adapter 1/1，完整 `cpu-check` 为 39 suites/230 tests；func58 三 seed 通过。
+  CT03/RT03 组合 perf20 为 `5,014,776`，与 RT02+MT08 的匹配基线逐项精确相等，证据为
+  `build/reports/comparisons/CT03-RT03-perf20.json`。这批尚未有 matching direct implementation，
+  因而不能继承旧 WNS、TNS 或资源结果。
 - `MT07`：在 MT06 的 forwarding owner 边界前把 one-hot owner 编码为 3-bit registered index，
   completion 侧只做已注册 index 的局部 data select。只有新的 LSQ 路径重新进入 top-50 时才实施，
   避免为已变成正 slack 的路径增加寄存器。
