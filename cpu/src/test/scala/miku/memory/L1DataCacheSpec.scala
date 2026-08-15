@@ -114,7 +114,8 @@ class L1DataCacheSpec extends AnyFunSuite {
       mask: BigInt,
       robPointer: BigInt,
       pdst: BigInt,
-      recoveryEpoch: BigInt = 0
+      recoveryEpoch: BigInt = 0,
+      loadQueueIndex: Int = 0
   ): Unit = {
     dut.io.requestValid #= true
     dut.io.request.virtualAddress #= address
@@ -127,15 +128,15 @@ class L1DataCacheSpec extends AnyFunSuite {
     dut.io.request.robPointer #= robPointer
     dut.io.request.recoveryEpoch #= recoveryEpoch
     dut.io.request.pdst #= pdst
-    dut.io.request.loadQueueIndex #= 0
+    dut.io.request.loadQueueIndex #= loadQueueIndex
   }
 
   private def refillLine(
       dut: L1DataCacheProbe,
       expectedAddress: BigInt,
       beatData: Int => BigInt
-  ): (BigInt, BigInt, BigInt) = {
-    var response = Option.empty[(BigInt, BigInt, BigInt)]
+  ): (BigInt, BigInt, BigInt, BigInt) = {
+    var response = Option.empty[(BigInt, BigInt, BigInt, BigInt)]
     def captureResponse(): Unit = {
       if (dut.io.responseValid.toBoolean) {
         assert(response.isEmpty)
@@ -143,7 +144,8 @@ class L1DataCacheSpec extends AnyFunSuite {
           (
             dut.io.response.robPointer.toBigInt,
             dut.io.response.pdst.toBigInt,
-            dut.io.response.data.toBigInt
+            dut.io.response.data.toBigInt,
+            dut.io.response.loadQueueIndex.toBigInt
           )
         )
       }
@@ -195,6 +197,44 @@ class L1DataCacheSpec extends AnyFunSuite {
     }
     assert(dut.io.requestReady.toBoolean)
     response.get
+  }
+
+  test("L1D preserves a four-bit load queue identity through a miss") {
+    val expandedConfig = config.copy(loadQueueEntries = 16)
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1d-ldq16")
+      .compile(new L1DataCacheProbe(expandedConfig))
+      .doSim("ooo-l1d-ldq16-response-identity", 0x4c61) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling(expandedConfig.dataCache.sets + 8)
+        sleep(1)
+
+        setRequest(
+          dut,
+          0x10c,
+          isWrite = false,
+          data = 0,
+          mask = 0xf,
+          robPointer = 3,
+          pdst = 9,
+          loadQueueIndex = 15
+        )
+        sample(dut)
+        dut.io.requestValid #= false
+        val response = refillLine(
+          dut,
+          expectedAddress = 0x100,
+          beat => if (beat == 1) BigInt("1122334455667788", 16) else BigInt(beat + 1)
+        )
+        assert(response._1 == 3)
+        assert(response._2 == 9)
+        assert(response._3 == BigInt("11223344", 16))
+        assert(response._4 == 15)
+      }
   }
 
   private def maintain(

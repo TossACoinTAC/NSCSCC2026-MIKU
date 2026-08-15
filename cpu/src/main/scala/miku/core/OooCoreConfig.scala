@@ -81,7 +81,7 @@ final case class OooCoreConfig(
     instructionBufferEntries: Int = 16,
     dispatchQueueEntries: Int = 8,
     issueQueueEntriesPerPort: Int = 8,
-    loadQueueEntries: Int = 8,
+    loadQueueEntries: Int = 16,
     storeQueueEntries: Int = 8,
     mshrEntries: Int = 4,
     enableDivideFastPath: Boolean = false,
