@@ -101,7 +101,7 @@ final case class OooCoreConfig(
     enableBankedLoadForwardCompletion: Boolean = true,
     // Retry one younger, already translated cached Load when the oldest pending Load is blocked
     // only by a local Store alias.  The alternate still traverses the ordinary LSQ order checks.
-    enableYoungerReadyLoadBypass: Boolean = false,
+    enableYoungerReadyLoadBypass: Boolean = true,
     enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,
     enableBranchHeadCompletionBypass: Boolean = true,
