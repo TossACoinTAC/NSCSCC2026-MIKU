@@ -800,7 +800,64 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         assert(dut.io.loadWakeupValid.toBoolean)
         assert(dut.io.loadWakeupPdst.toBigInt == 8)
         assert(dut.io.loadWakeupRecoveryEpoch.toBigInt == 0)
-      }
+        }
+    }
+
+  test("the scheduler advances past a load held in the request buffer") {
+    for (enabled <- Seq(false, true)) {
+      val testConfig = config.copy(enableLoadRequestReservationScheduling = enabled)
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-lsq-request-reservation-$enabled"
+        )
+        .compile(new LoadStoreQueueProbe(testConfig))
+        .doSim(s"ooo-lsq-request-reservation-$enabled", 0x4c80 + enabled.hashCode()) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          SimTimeout(2000)
+          clearInputs(dut)
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          sample(dut)
+
+          dut.io.allocateValid #= 3
+          for (lane <- 0 until 2) {
+            dut.io.allocate(lane).robPointer #= lane
+            dut.io.allocate(lane).isLoad #= true
+            dut.io.allocate(lane).loadQueueIndex #= lane
+          }
+          sample(dut)
+          dut.io.allocateValid #= 0
+
+          dut.io.translationBypassEligible #= true
+          dut.io.translationBypassPhysicalAddress #= 0x100
+          setLoadAgu(dut, pointer = 0, address = 0x100, loadIndex = 0, pdst = 8)
+          sample(dut)
+          dut.io.translationBypassPhysicalAddress #= 0x180
+          setLoadAgu(dut, pointer = 1, address = 0x180, loadIndex = 1, pdst = 9)
+          sample(dut)
+          dut.io.aguValid #= false
+
+          // Keep the first request buffered long enough for the enabled scheduler to
+          // register the second owner, then measure accepted-request spacing.
+          dut.clockDomain.waitSampling(2)
+          dut.io.dataRequestReady #= true
+          val requests = scala.collection.mutable.ArrayBuffer.empty[(BigInt, Int)]
+          var cycle = 0
+          while (requests.size < 2 && cycle < 12) {
+            if (dut.io.dataRequestValid.toBoolean) {
+              requests += ((dut.io.dataRequest.robPointer.toBigInt, cycle))
+            }
+            sample(dut)
+            cycle += 1
+          }
+
+          assert(requests.map(_._1).toSeq == Seq(BigInt(0), BigInt(1)))
+          val expectedGap = if (enabled) 2 else 3
+          assert(requests(1)._2 - requests(0)._2 == expectedGap)
+        }
+    }
   }
 
   test("a data read error reports precise ADEM metadata") {

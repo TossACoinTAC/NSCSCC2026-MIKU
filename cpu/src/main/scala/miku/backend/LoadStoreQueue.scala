@@ -218,6 +218,12 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     entry.completed.init(False)
     entry.translationDone.init(False)
   }
+  // The request buffer is declared before scheduling so its single owner can be excluded from
+  // the next pending-load selection without changing the cache-facing registered cut.
+  val requestBufferValid = RegInit(False)
+  val requestBuffer = Reg(CacheRequest(config))
+  val requestBufferLoadIndex = Reg(UInt(config.loadQueueIndexWidth bits))
+  val requestBufferStoreIndex = Reg(UInt(config.storeQueueIndexWidth bits))
   val storeHead = Reg(UInt(config.storeQueueIndexWidth bits)) init (0)
   // Completion may run ahead of the ordered side-effect drain. This mirrors
   // the StoreQueue/StoreBuffer split in ysyx while keeping one narrow indexed
@@ -247,8 +253,11 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val loadBypassSkipMask = Reg(Bits(config.loadQueueEntries bits)) init (0)
   val pendingLoads = Bits(config.loadQueueEntries bits)
   for (entry <- 0 until config.loadQueueEntries) {
+    val bufferedOwner = requestBufferValid && !requestBuffer.isWrite &&
+      requestBufferLoadIndex === U(entry, config.loadQueueIndexWidth bits)
     pendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
-      !loads(entry).completed
+      !loads(entry).completed &&
+      (if (config.enableLoadRequestReservationScheduling) !bufferedOwner else True)
   }
   val unskippedPendingLoads = pendingLoads & ~loadBypassSkipMask
   val selectablePendingLoads = if (config.enableStoreBlockedLoadBypass) {
@@ -525,10 +534,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // Cut the oldest-load/store-ordering cone before cache and AXI backpressure.  A buffered
   // committed store remains represented in the SQ until the hierarchy accepts it, so CACOP
   // ordering and recovery still observe that store as pending.
-  val requestBufferValid = RegInit(False)
-  val requestBuffer = Reg(CacheRequest(config))
-  val requestBufferLoadIndex = Reg(UInt(config.loadQueueIndexWidth bits))
-  val requestBufferStoreIndex = Reg(UInt(config.storeQueueIndexWidth bits))
   // Cache readiness includes tag/MSHR arbitration. Keep that long cone out of the
   // dynamically indexed store-entry clear network: acceptance advances the ordered
   // head immediately, while this sidecar retires the accepted slot one cycle later.

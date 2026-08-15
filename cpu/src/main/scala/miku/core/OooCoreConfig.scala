@@ -87,6 +87,9 @@ final case class OooCoreConfig(
     enableDivideFastPath: Boolean = false,
     enableFastStoreCompletion: Boolean = true,
     enableDecoupledStoreCompletion: Boolean = true,
+    // Let the load scheduler skip the load already held by the registered request buffer.
+    // The request itself remains registered; this only removes a duplicate selection bubble.
+    enableLoadRequestReservationScheduling: Boolean = true,
     enableStoreTranslationLookahead: Boolean = true,
     // When a translated cached Load waits only for overlapping Store data, scan younger
     // Load entries one at a time instead of expanding Store disambiguation across the LDQ.
