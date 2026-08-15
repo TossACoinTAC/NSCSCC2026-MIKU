@@ -509,15 +509,20 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     requestCandidate.loadQueueIndex := 0
   }
 
-  // Cut the oldest-load/store-ordering cone before cache and AXI backpressure.
-  val requestCapture = !io.flush && !requestBufferValid &&
-    (storeRequest || cacheLoadCandidate)
-  val earlyCachedStoreRelease = requestCapture && storeRequest && !headStore.uncached
   io.dataRequestValid := requestBufferValid && !io.flush
   io.dataRequest := requestBuffer
   val dataRequestFire = io.dataRequestValid && io.dataRequestReady
   val storeRequestFire = dataRequestFire && requestBuffer.isWrite
   val loadRequestFire = dataRequestFire && !requestBuffer.isWrite
+  // A retired cached Store has already left the speculative SQ, so accepting it
+  // can replace the registered request with the next committed Store on the same
+  // edge. Loads and uncached Stores retain the empty-buffer boundary because
+  // their resident queue state is not updated until this fire is registered.
+  val cachedStoreTurnover = dataRequestFire && bufferedCommittedStore
+  // Cut the oldest-load/store-ordering cone before cache and AXI backpressure.
+  val requestCapture = !io.flush && (!requestBufferValid || cachedStoreTurnover) &&
+    (storeRequest || cacheLoadCandidate)
+  val earlyCachedStoreRelease = requestCapture && storeRequest && !headStore.uncached
 
   // The accepted cache request carries its LQ owner through cached and uncached
   // response paths. Keep ROB pointer and epoch checks as the authoritative stale-
@@ -855,6 +860,11 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       aguExceptionIsSc := io.agu.uop.decoded.isSc
       aguExceptionBadVAddr := io.agu.virtualAddress
     }
+    when(dataRequestFire) {
+      requestBufferValid := False
+    }
+    // Capture has priority over dequeue so cached Store turnover keeps valid
+    // asserted and exposes the replacement payload on the following cycle.
     when(requestCapture) {
       requestBufferValid := True
       requestBuffer := requestCandidate
@@ -869,9 +879,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       headStore.committed := False
       headStore.requestSent := False
       headStore.translationDone := False
-    }
-    when(dataRequestFire) {
-      requestBufferValid := False
     }
     completionValid := generatedCompletionValid && !fastStoreCompletionValid
     // responseLoadAccepted and forwardFire already include live LQ identity
