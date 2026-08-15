@@ -225,13 +225,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // load on every cycle.
   val loadBase = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val drainAfterFlush = RegInit(False)
-  val committedStorePresent = stores
-    .map(entry => entry.valid && (entry.committed || (entry.uncached && entry.requestSent)))
-    .reduce(_ || _)
-  io.storeDrainBusy := drainAfterFlush
-  io.olderStorePending := stores
-    .map(entry => entry.valid && isOlder(entry.robPointer, io.orderingRobPointer))
-    .reduce(_ || _)
 
   // Completed loads remain allocated until commit.  The allocator therefore
   // advances the base only on commit, and a rotated priority select preserves
@@ -341,6 +334,23 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
   val headStore = stores(storeHead)
   val headLoadState = loads(loadHead)
+  // A retired cached Store owns this buffer after leaving the speculative SQ.
+  // Its payload remains stable under backpressure and survives recovery, which
+  // lets the allocator reuse the SQ slot without widening the ordering CAM.
+  val requestBufferValid = RegInit(False)
+  val requestBuffer = Reg(CacheRequest(config))
+  val requestBufferLoadIndex = Reg(UInt(config.loadQueueIndexWidth bits))
+  val requestBufferStoreIndex = Reg(UInt(config.storeQueueIndexWidth bits))
+  val bufferedCommittedStore = requestBufferValid && requestBuffer.isWrite &&
+    !requestBuffer.uncached
+  val committedStorePresent = stores
+    .map(entry => entry.valid && (entry.committed || (entry.uncached && entry.requestSent)))
+    .reduce(_ || _) || bufferedCommittedStore
+  io.storeDrainBusy := drainAfterFlush
+  io.olderStorePending := stores
+    .map(entry => entry.valid && isOlder(entry.robPointer, io.orderingRobPointer))
+    .reduce(_ || _) ||
+    (bufferedCommittedStore && isOlder(requestBuffer.robPointer, io.orderingRobPointer))
   val loadHeadReady = scheduledLoadValid && headLoadState.valid &&
     headLoadState.robPointer === scheduledLoad.robPointer && headLoadState.addressReady &&
     !headLoadState.requestSent && !headLoadState.completed &&
@@ -383,8 +393,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
   val forwardingCount = CountOne(forwardingStore)
   val forwardingId = OHToUInt(OHMasking.first(forwardingStore))
-  val loadOrderClear = !unknownOlderStore.orR && !olderUncachedStore.orR &&
-    !olderLoadOrderBlock.orR && !partialOverlapStore.orR && !pendingDataStore.orR
+  val loadOrderClear = !bufferedCommittedStore && !unknownOlderStore.orR &&
+    !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
+    !partialOverlapStore.orR && !pendingDataStore.orR
   val forwardCandidate = loadHeadReady && scheduledLoad.translationDone &&
     !scheduledLoad.uncached && !scheduledLoad.isLl && loadOrderClear &&
     forwardingCount === 1
@@ -498,20 +509,10 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     requestCandidate.loadQueueIndex := 0
   }
 
-  // Cut the oldest-load/store-ordering cone before cache and AXI backpressure.  A buffered
-  // committed store remains represented in the SQ until the hierarchy accepts it, so CACOP
-  // ordering and recovery still observe that store as pending.
-  val requestBufferValid = RegInit(False)
-  val requestBuffer = Reg(CacheRequest(config))
-  val requestBufferLoadIndex = Reg(UInt(config.loadQueueIndexWidth bits))
-  val requestBufferStoreIndex = Reg(UInt(config.storeQueueIndexWidth bits))
-  // Cache readiness includes tag/MSHR arbitration. Keep that long cone out of the
-  // dynamically indexed store-entry clear network: acceptance advances the ordered
-  // head immediately, while this sidecar retires the accepted slot one cycle later.
-  val acceptedStoreValid = RegInit(False)
-  val acceptedStoreIndex = Reg(UInt(config.storeQueueIndexWidth bits))
+  // Cut the oldest-load/store-ordering cone before cache and AXI backpressure.
   val requestCapture = !io.flush && !requestBufferValid &&
     (storeRequest || cacheLoadCandidate)
+  val earlyCachedStoreRelease = requestCapture && storeRequest && !headStore.uncached
   io.dataRequestValid := requestBufferValid && !io.flush
   io.dataRequest := requestBuffer
   val dataRequestFire = io.dataRequestValid && io.dataRequestReady
@@ -860,15 +861,17 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       requestBufferLoadIndex := loadHead
       requestBufferStoreIndex := storeHead
     }
+    when(earlyCachedStoreRelease) {
+      headStore.valid := False
+      headStore.addressReady := False
+      headStore.dataReady := False
+      headStore.completed := False
+      headStore.committed := False
+      headStore.requestSent := False
+      headStore.translationDone := False
+    }
     when(dataRequestFire) {
       requestBufferValid := False
-    }
-    when(acceptedStoreValid) {
-      acceptedStoreValid := False
-    }
-    when(storeRequestFire && !requestBuffer.uncached) {
-      acceptedStoreValid := True
-      acceptedStoreIndex := requestBufferStoreIndex
     }
     completionValid := generatedCompletionValid && !fastStoreCompletionValid
     // responseLoadAccepted and forwardFire already include live LQ identity
@@ -970,11 +973,11 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       }
     }
   }
-  val failedScReleaseFire = failedScRelease && !acceptedStoreValid
+  val failedScReleaseFire = failedScRelease
   val uncachedStoreRelease = headStore.valid && headStore.uncached &&
     headStore.requestSent && headStore.completed && headStore.committed
   storeReleaseValid(0) := !io.flush &&
-    (acceptedStoreValid || failedScReleaseFire || uncachedStoreRelease)
+    (earlyCachedStoreRelease || failedScReleaseFire || uncachedStoreRelease)
   io.releaseLoadValid := loadReleaseValid
   io.releaseStoreValid := storeReleaseValid
 
@@ -1165,15 +1168,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     when(forwardFire) {
       loads(loadHead).completed := True
     }
-    when(acceptedStoreValid) {
-      stores(acceptedStoreIndex).valid := False
-      stores(acceptedStoreIndex).addressReady := False
-      stores(acceptedStoreIndex).dataReady := False
-      stores(acceptedStoreIndex).completed := False
-      stores(acceptedStoreIndex).committed := False
-      stores(acceptedStoreIndex).requestSent := False
-      stores(acceptedStoreIndex).translationDone := False
-    }
     when(failedScReleaseFire) {
       stores(storeHead).valid := False
       stores(storeHead).addressReady := False
@@ -1196,7 +1190,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       stores(storeHead).requestSent := False
       stores(storeHead).translationDone := False
     }
-    when((storeRequestFire && !requestBuffer.uncached) || failedScReleaseFire ||
+    when(earlyCachedStoreRelease || failedScReleaseFire ||
       uncachedStoreRelease) {
       storeHead := storeHead + 1
     }
@@ -1241,7 +1235,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   perfObservationV1Word5(33) := io.olderStorePending
   perfObservationV1Word5(34) := io.storeDrainBusy
   perfObservationV1Word5(35) := requestBufferValid
-  perfObservationV1Word5(36) := acceptedStoreValid
+  perfObservationV1Word5(36) := storeRequestFire && !requestBuffer.uncached
   perfObservationV1Word5(37) := loadHeadReady
   perfObservationV1Word5(38) := loadNeedsTranslation
   perfObservationV1Word5(39) := loadHeadReady && unknownOlderStore.orR
