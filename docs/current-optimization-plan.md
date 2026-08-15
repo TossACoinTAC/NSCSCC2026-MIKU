@@ -193,6 +193,13 @@ baseline `4,423,675 -> 4,320,785`（总周期 `-2.326%`，几何平均 `0.986232
 `fireye_B2 +0.35%` 是最大回退。该结果只是短路径 perf20，下一步必须补 matching
 func58 三 seed、Linux 固定窗口和 direct full 时序，通过后再决定是否进入组合板测。
 
+`L15` 作为同一分支上的第二个独立候选已实现：L1D 在 victim writeback/writebackWait
+期间不再全局拒绝其他 set 的新 lookup，只保留 `setConflictMask` 的同 set 串行保护。
+本地短路径 A/B 相对 L03 为 `4,320,785 -> 4,316,663`（`-0.095%`），主要改善
+`inner_product/loop_induction/fireye_D1`，无明显回退；完整 Scala 39 suites/233 tests
+通过。该候选理想仿真收益小，目标是板级写响应延迟下的行为，必须与 L03 一起做
+matching direct full，若时序或资源恶化则优先保留 L03 单项。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
