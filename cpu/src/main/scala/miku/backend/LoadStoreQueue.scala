@@ -242,6 +242,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // cacheable ordinary Loads, then run that one candidate through the unchanged
   // Store/load ordering cone in the following cycle.
   val tryYoungerLoad = RegInit(False)
+  val youngerRetryIndex = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val scheduledLoadWasYoungerBypass = RegInit(False)
   val youngerReadyLoads = Bits(config.loadQueueEntries bits)
   for (entry <- 0 until config.loadQueueEntries) {
@@ -257,7 +258,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val selectedYoungerLoadHead =
     (youngerSearchBase + youngerLoadOffset).resize(config.loadQueueIndexWidth)
   val selectYoungerLoad = if (config.enableYoungerReadyLoadBypass) {
-    tryYoungerLoad && scheduledLoadValid && youngerReadyLoads.orR
+    tryYoungerLoad && scheduledLoadValid && pendingLoads(youngerRetryIndex)
   } else {
     False
   }
@@ -266,7 +267,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val loadHeadOffset = OHToUInt(OHMasking.first(rotatedPending))
   val oldestPendingLoadHead =
     (loadBase + loadHeadOffset).resize(config.loadQueueIndexWidth)
-  val selectedLoadHead = Mux(selectYoungerLoad, selectedYoungerLoadHead, oldestPendingLoadHead)
+  val selectedLoadHead = Mux(selectYoungerLoad, youngerRetryIndex, oldestPendingLoadHead)
   val selectedLoadValid = pendingLoads.orR
   // Match the registered uop boundary used by the reference LoadQueue.  The
   // selected index and immutable payload are state: translation, forwarding,
@@ -1309,8 +1310,15 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     // A token is a single attempt even if the candidate disappears before use.
     tryYoungerLoad := False
   }.otherwise {
-    tryYoungerLoad := oldestLoadLocalAliasBlocked && !scheduledLoadWasYoungerBypass &&
+    val armYoungerRetry = oldestLoadLocalAliasBlocked && !scheduledLoadWasYoungerBypass &&
       youngerReadyLoads.orR
+    tryYoungerLoad := armYoungerRetry
+    when(armYoungerRetry) {
+      // Terminate the rotated ready-map and priority select at a narrow state
+      // boundary. The following cycle reads the wide Load payload through this
+      // stable index, keeping the selection network out of every payload D path.
+      youngerRetryIndex := selectedYoungerLoadHead
+    }
   }
   perfObservationV1Word5(49) := rawLoadCompletion
   perfObservationV1Word5(50) := rawOrdinaryLoadCompletion
