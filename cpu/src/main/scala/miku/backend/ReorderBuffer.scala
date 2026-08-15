@@ -480,10 +480,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   // wakeup latency while keeping currentEpoch out of the IQ select-to-uop
   // write path.
   val stagedCompletionCurrent = Reg(Bits(config.writebackWidth bits)) init (0)
-  // A head Load may retire one cycle before its ordinary completion reaches
-  // this stage.  Preserve only that already-architectural PRF write across a
-  // following recovery flush; speculative completions remain suppressed.
-  val stagedCompletionMustWrite = Reg(Bits(config.writebackWidth bits)) init (0)
   val stagedStoreCompletionValid = RegInit(False)
   val stagedStoreCompletionCurrent = RegInit(False)
   val stagedStoreCompletionRobPointer = Reg(UInt(config.robPointerWidth bits))
@@ -519,30 +515,18 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     io.completionWakeupCandidateValid(lane) := stagedCompletionCurrent(lane) &&
       stagedWritesPdst(lane) && stagedPdst(lane) =/= 0
     io.completionWakeupValid(lane) :=
-      (!io.flush || stagedCompletionMustWrite(lane)) &&
-        io.completionWakeupCandidateValid(lane)
+      !io.flush && io.completionWakeupCandidateValid(lane)
     io.completionWakeupPdst(lane) := stagedPdst(lane)
     io.completionWakeupData(lane) := stagedResult(lane)
     when(io.flush) {
       stagedCompletionValid(lane) := False
       stagedCompletionCurrent(lane) := False
-      stagedCompletionMustWrite(lane) := False
     }.otherwise {
       stagedCompletionValid(lane) := io.completionValid(lane)
       stagedRobPointer(lane) := io.completion(lane).robPointer
       stagedRecoveryEpoch(lane) := io.completion(lane).recoveryEpoch
       stagedCompletionCurrent(lane) :=
         io.completionValid(lane) && io.completion(lane).recoveryEpoch === io.currentEpoch
-      stagedCompletionMustWrite(lane) :=
-        (if (lane == loadStorePort && config.enableHeadLoadCompletionBypass) {
-          stagedHeadLoadCompletionBypassValid && io.commitValid(0) &&
-            io.commit(0).retired && io.commit(0).isLoad &&
-            io.completionValid(lane) &&
-            io.completion(lane).recoveryEpoch === io.currentEpoch &&
-            io.completion(lane).robPointer === io.commit(0).robPointer
-        } else {
-          False
-        })
       // Valid and pointer define payload validity. Capturing each lane avoids
       // turning completionValid into a wide payload-register enable.
       stagedResult(lane) := io.completion(lane).data

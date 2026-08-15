@@ -1189,7 +1189,6 @@ class ReorderBufferSpec extends AnyFunSuite {
         def driveCompletion(pointer: BigInt, valid: Boolean): Unit = {
           val validMask = if (valid) BigInt(1) << loadStorePort else BigInt(0)
           dut.io.completionValid #= validMask
-          dut.io.completionWritesPdst #= validMask
           dut.io.completionRobPointer(loadStorePort) #= pointer
           dut.io.completionRecoveryEpoch(loadStorePort) #= 2
         }
@@ -1236,18 +1235,6 @@ class ReorderBufferSpec extends AnyFunSuite {
         sample()
         driveCompletion(fastPointer, valid = false)
         assert(dut.io.occupancy.toBigInt == 0)
-        assert(
-          (dut.io.completionWakeupCandidateValid.toBigInt &
-            (BigInt(1) << loadStorePort)) != 0
-        )
-        dut.io.flush #= true
-        sleep(1)
-        assert(
-          (dut.io.completionWakeupValid.toBigInt & (BigInt(1) << loadStorePort)) != 0
-        )
-        sample()
-        dut.io.flush #= false
-        assert(dut.io.completionWakeupValid.toBigInt == 0)
 
         // Old-epoch tokens and flushes cannot create an architectural commit.
         val stalePointer = allocateLoad(0x1c000208)
