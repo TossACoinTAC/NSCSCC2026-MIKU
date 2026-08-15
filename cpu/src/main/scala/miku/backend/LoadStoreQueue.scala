@@ -1269,6 +1269,12 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val oldestLoadAddressNotReady = scheduledLoadValid && headLoadState.valid &&
     headLoadState.robPointer === scheduledLoad.robPointer && !headLoadState.addressReady
   val oldestLoadOrderBlocked = loadHeadReady && !loadOrderClear
+  val multipleForwardingStoresBlock = loadHeadReady && scheduledLoad.translationDone &&
+    !scheduledLoad.uncached && !scheduledLoad.isLl && forwardingCount > 1
+  val oldestLoadLocalAliasBlocked = loadHeadReady && scheduledLoad.translationDone &&
+    !scheduledLoad.uncached && !scheduledLoad.isLl && !bufferedCommittedStore &&
+    !unknownOlderStore.orR && !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
+    (partialOverlapStore.orR || pendingDataStore.orR || forwardingCount > 1)
   perfObservationV1Word5(49) := rawLoadCompletion
   perfObservationV1Word5(50) := rawOrdinaryLoadCompletion
   perfObservationV1Word5(51) := rawOrdinaryLoadCompletion &&
@@ -1278,5 +1284,18 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   perfObservationV1Word5(54) :=
     (oldestLoadAddressNotReady || oldestLoadOrderBlocked) &&
       alternatePendingLoadAddressReady.orR
+  // Emit configured-capacity and progressively qualified bypass observations
+  // from the DUT so the external monitor never guesses microarchitectural sizes.
+  perfObservationV1Word5(55) := CountOne(observationLoadsValid) === config.loadQueueEntries
+  perfObservationV1Word5(56) := CountOne(observationStoresValid) === config.storeQueueEntries
+  perfObservationV1Word5(57) := oldestLoadAddressNotReady &&
+    alternatePendingLoadAddressReady.orR
+  perfObservationV1Word5(58) := oldestLoadOrderBlocked &&
+    alternatePendingLoadAddressReady.orR
+  perfObservationV1Word5(59) := oldestLoadLocalAliasBlocked &&
+    alternatePendingLoadAddressReady.orR
+  perfObservationV1Word5(60) := multipleForwardingStoresBlock
+  perfObservationV1Word5(61) := multipleForwardingStoresBlock &&
+    alternatePendingLoadAddressReady.orR
   PerfObservationV1.expose(perfObservationV1Word5, 5)
 }
