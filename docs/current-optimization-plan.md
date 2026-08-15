@@ -93,7 +93,7 @@
   因而不能直接视为 L02 的安全可回收周期。branch recovery 只占 `0.97%`，本轮不优先
   扩大分支恢复机制。汇总证据为 `build/reports/observations/R6-baseline.json`。
 
-## R6：Load head completion 提前退休实验
+## R6：Load/SQ 归因与性能实验
 
 首项 `L10` 使用 LSQ 原始 ordinary cached Load completion 产生窄身份 token；ROB 只在
 当前 epoch、准确命中下一拍 head 时保存 token。Load 数据仍由现有 LSQ completion 寄存器
@@ -114,11 +114,23 @@ ReorderBuffer 18/18、完整 `cpu-check` 39 suites/231 tests、RTL/Yosys/合同�
 `4cdfd21`、`baca0c6` 已依次撤回修复与实现，当前默认 RTL 回到 R5。比较证据为
 `build/reports/comparisons/R6-L10.json`。
 
-R6 下一项优先处理 SQ full：matching observer 中 Store Queue 满占 ROI `9.1629%`。
-候选应在 committed cached Store 已完整捕获到现有 request buffer 时释放原 SQ 槽，并让
-buffer 自身继续承担恢复、顺序和 drain 所有权；这比直接把 STQ 从 8 扩到 16 更少增加
-关联地址比较和 forwarding 时序压力。正式实现前须证明 buffered Store 会继续阻塞所有
-可能越过它的年轻访存，并在 flush、cache backpressure、CACOP/barrier 下保持架构可见。
+`L11 @ fe4028c` 处理 matching observer 中占 ROI `9.1629%` 的 SQ-full 暴露：ordinary
+cached Store 在退休且完整捕获到既有 request buffer 的边沿释放原 SQ 槽；buffer 随后作为
+已提交架构状态，在 cache backpressure 和 recovery flush 下保持请求并参与 Store drain、
+`olderStorePending` 与 barrier 排空。为避免把新的地址比较锥接回已闭合的 LSQ 时序路径，
+buffer 占用期间暂时不发出年轻 Load；该限制不会阻止已被 buffer 占用的单一 cache request
+端口，只会推迟原本可能由 SQ entry 直接完成的同址 forwarding。
+
+定向测试覆盖提前 release、稳定 backpressure、年轻 Load 顺序、flush 后继续 drain 与槽位
+复用；完整 `cpu-check` 为 39 suites/231 tests、58 项 Python 合同，发布 RTL hash 为
+`057eb73a39c98e97b59b1fd7b0cfc28a0495ca622f7bc7fd4fa57b9e193d70bb`。clean perf20
+20/20，总周期 `5,014,776 -> 4,865,310`（`-2.980512%`），归一化几何平均加速
+`1.034213285x`；`stringsearch -16.38779%`、`fireye_D1 -13.61335%`、
+`my_memcmp -10.27449%`，主要回退为 `bubble_sort +0.78006%`。func58 random-AXI
+seeds `240/255/141` 均通过。逐项比较见 `build/reports/comparisons/R6-L11.json`；该候选
+达到性能保留门槛。相同源码身份的 Linux random-AXI seed `5570815` 已完成固定 50 ms
+窗口且 exit code 为 0。后续以 matching instrumented observer 判断剩余 SQ 压力和是否值得
+扩展为多项退休 Store buffer，暂不直接把 STQ 从 8 扩到 16。
 
 ## R1：时序候选与周期验证
 
@@ -396,7 +408,7 @@ R5 已完成四个相互独立候选的组合 direct implementation：
   completion 侧只做已注册 index 的局部 data select。只有新的 LSQ 路径重新进入 top-50 时才实施，
   避免为已变成正 slack 的路径增加寄存器。
 
-下一步先运行当前 RTL 的版本化 `PerfObservationV1`，按真实周期权重选择首轮 IPC 候选。
+下一步运行 L11 matching RTL 的版本化 `PerfObservationV1`，按真实周期权重选择 R6 下一候选。
 新 top-50 的最差路径是 BTB prediction 到 instruction TLB request 的 `+0.028 ns`；ROB/CSR
 最差为 `+0.051 ns`，IQ 最差 `+0.099 ns`，cache/L2 最差 `+0.097 ns`。下一轮实现候选时
 必须同时控制这些路径锥，不能把当前很小的正裕量视为可随意消耗的空间。
