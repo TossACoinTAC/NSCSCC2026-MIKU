@@ -45,7 +45,11 @@ final case class TlbEntryState() extends Bundle {
   * priority over invalidation for the selected entry, and every mutation drops cached micro-TLB
   * state before a redirected request can be accepted.
   */
-final class HierarchicalTlb(microEntries: Int = 4, walkEntriesPerCycle: Int = 4)
+final class HierarchicalTlb(
+    microEntries: Int = 4,
+    walkEntriesPerCycle: Int = 4,
+    preloadDataProbeKey: Boolean = false
+)
     extends Component {
   require(microEntries == 4, "the timing-oriented micro-TLB currently has four entries")
   require(walkEntriesPerCycle == 4, "the main TLB currently walks four entries per cycle")
@@ -265,11 +269,22 @@ final class HierarchicalTlb(microEntries: Int = 4, walkEntriesPerCycle: Int = 4)
     when(io.instructionRequest.fire) {
       instructionProbePending := True
     }
-    when(io.dataRequest.fire) {
-      dataProbePending := True
-      dataVppn := io.dataRequest.vppn
-      dataOddPage := io.dataRequest.oddPage
-      dataAsid := io.dataRequest.asid
+    if (preloadDataProbeKey) {
+      when(io.dataRequest.ready) {
+        dataVppn := io.dataRequest.vppn
+        dataOddPage := io.dataRequest.oddPage
+        dataAsid := io.dataRequest.asid
+      }
+      when(io.dataRequest.fire) {
+        dataProbePending := True
+      }
+    } else {
+      when(io.dataRequest.fire) {
+        dataProbePending := True
+        dataVppn := io.dataRequest.vppn
+        dataOddPage := io.dataRequest.oddPage
+        dataAsid := io.dataRequest.asid
+      }
     }
 
     val instructionMicroMatch = Bits(microEntries bits)

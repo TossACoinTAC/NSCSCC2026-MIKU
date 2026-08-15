@@ -94,7 +94,7 @@ final class AddressTranslationUnit(
   )
 
   val area = new ClockingArea(domain) {
-    val tlb = new HierarchicalTlb()
+    val tlb = new HierarchicalTlb(preloadDataProbeKey = config.enableDataTranslationProbePreload)
     tlb.io.clk := io.clk
     tlb.io.reset := io.reset
     tlb.io.writeValid := io.tlbFillValid || io.tlbWriteValid

@@ -169,13 +169,37 @@ final class BankedFetchPredictor(
       architecturalRas(entry) := architecturalRasStage(config.commitWidth)(entry)
     }
   }
-  when(io.speculativeRasPush && !io.speculativeRasPop) {
+  val effectiveSpeculativeRasPush = Bool()
+  val effectiveSpeculativeRasPop = Bool()
+  val effectiveSpeculativeReturnAddress = UInt(config.xlen bits)
+  if (config.enableRegisteredSpeculativeRasUpdate) {
+    val stagedRasPush = RegInit(False)
+    val stagedRasPop = RegInit(False)
+    val stagedReturnAddress = Reg(UInt(config.xlen bits)) init (0)
+    when(io.flush) {
+      stagedRasPush := False
+      stagedRasPop := False
+      stagedReturnAddress := 0
+    }.otherwise {
+      stagedRasPush := io.speculativeRasPush
+      stagedRasPop := io.speculativeRasPop
+      stagedReturnAddress := io.speculativeReturnAddress
+    }
+    effectiveSpeculativeRasPush := stagedRasPush
+    effectiveSpeculativeRasPop := stagedRasPop
+    effectiveSpeculativeReturnAddress := stagedReturnAddress
+  } else {
+    effectiveSpeculativeRasPush := io.speculativeRasPush
+    effectiveSpeculativeRasPop := io.speculativeRasPop
+    effectiveSpeculativeReturnAddress := io.speculativeReturnAddress
+  }
+  when(effectiveSpeculativeRasPush && !effectiveSpeculativeRasPop) {
     when(speculativeRasCount =/= U(rasDepth, rasCountWidth bits)) {
       speculativeRas(speculativeRasCount(rasIndexWidth - 1 downto 0)) :=
-        io.speculativeReturnAddress
+        effectiveSpeculativeReturnAddress
       speculativeRasCount := speculativeRasCount + 1
     }
-  }.elsewhen(io.speculativeRasPop && !io.speculativeRasPush) {
+  }.elsewhen(effectiveSpeculativeRasPop && !effectiveSpeculativeRasPush) {
     when(speculativeRasCount =/= 0) {
       speculativeRasCount := speculativeRasCount - 1
     }

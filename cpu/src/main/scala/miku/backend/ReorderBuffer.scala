@@ -27,6 +27,7 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   val payloadReady = Bool()
   val decodedExceptionValid = Bool()
   val serializing = Bool()
+  val systemOperation = UInt(SystemOperation.Width bits)
   // Retirement and LSU ownership metadata is read every commit cycle.  Keeping it beside the
   // validity/completion state avoids routing these narrow fields through the wide payload-bank
   // read and commit crossbar.
@@ -103,6 +104,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     entry.payloadReady.init(False)
     entry.decodedExceptionValid.init(False)
     entry.serializing.init(False)
+    entry.systemOperation.init(SystemOperation.none)
   }
   private val payloadBankCount = 4
   private val payloadBankWidth = log2Up(payloadBankCount)
@@ -174,6 +176,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.allocate(lane).uop.decoded.exception.valid
       entries(destination(config.robIndexWidth - 1 downto 0)).serializing :=
         io.allocate(lane).uop.decoded.serializing
+      entries(destination(config.robIndexWidth - 1 downto 0)).systemOperation :=
+        io.allocate(lane).uop.decoded.systemOperation
       entries(destination(config.robIndexWidth - 1 downto 0)).isLoad :=
         io.allocate(lane).uop.decoded.isLoad
       entries(destination(config.robIndexWidth - 1 downto 0)).isStore :=
@@ -377,7 +381,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     } else {
       io.commit(lane).result := candidates(lane).state.result
     }
-    io.commit(lane).systemOperation := candidates(lane).payload.systemOperation
+    io.commit(lane).systemOperation := (if (config.enableRobSystemOperationState) {
+      candidates(lane).state.systemOperation
+    } else {
+      candidates(lane).payload.systemOperation
+    })
     io.commit(lane).csrAddress := candidates(lane).payload.csrAddress
     io.commit(lane).csrWrite := candidates(lane).payload.csrWrite
     io.commit(lane).csrMask := candidates(lane).payload.csrMask
@@ -600,19 +608,24 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     // Ordinary current-epoch completions and, when enabled, fully resolved branches
     // may bypass the final entry.complete register. Serializing/system operations and
     // either decoded or completion exceptions retain the precise retirement boundary.
+    val candidateSystemOperation = if (config.enableRobSystemOperationState) {
+      candidates(0).state.systemOperation
+    } else {
+      candidates(0).payload.systemOperation
+    }
     headCompletionBypass := !io.flush && candidates(0).state.payloadReady &&
       stagedHeadCompletionBypassValid &&
       candidates(0).state.valid && !candidates(0).state.complete &&
       !candidates(0).exception.valid && !candidates(0).state.serializing &&
       !candidates(0).state.isBranch &&
-      candidates(0).payload.systemOperation === SystemOperation.none
+      candidateSystemOperation === SystemOperation.none
     headCompletionBypassResult := stagedHeadCompletionBypassResult
     if (config.enableBranchHeadCompletionBypass) {
       headBranchBypass := !io.flush && candidates(0).state.payloadReady &&
         stagedHeadBranchBypassValid && candidates(0).state.valid &&
         !candidates(0).state.complete && !candidates(0).exception.valid &&
         !candidates(0).state.serializing && candidates(0).state.isBranch &&
-        candidates(0).payload.systemOperation === SystemOperation.none
+        candidateSystemOperation === SystemOperation.none
     } else {
       headBranchBypass := False
     }
@@ -687,7 +700,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   perfObservationV1Word4(48) := candidates(0).state.isStore
   perfObservationV1Word4(49) := candidates(0).state.isBranch
   perfObservationV1Word4(50) :=
-    candidates(0).payload.systemOperation =/= SystemOperation.none
+    (if (config.enableRobSystemOperationState) {
+      candidates(0).state.systemOperation =/= SystemOperation.none
+    } else {
+      candidates(0).payload.systemOperation =/= SystemOperation.none
+    })
   perfObservationV1Word4(51) := headCompletionBypass
   val observationIncomingHeadBranchCompletion = Bits(config.writebackWidth bits)
   val observationIncomingHeadMispredictCompletion = Bits(config.writebackWidth bits)

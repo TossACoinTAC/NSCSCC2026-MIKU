@@ -102,8 +102,17 @@ final case class OooCoreConfig(
     enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,
     enableBranchHeadCompletionBypass: Boolean = true,
+    // Keep the retirement qualification field beside ROB state instead of reading it through
+    // the wide payload bank.  The legacy payload path remains available for timing A/B.
+    enableRobSystemOperationState: Boolean = true,
+    // Register speculative RAS operations before they drive the RAS array write enable.  The
+    // direct input path remains available for predictor timing A/B and older configurations.
+    enableRegisteredSpeculativeRasUpdate: Boolean = false,
     enableDirectDmwPretranslation: Boolean = true,
     enableLoadCompletionEarlyWakeup: Boolean = true,
+    // Preload the data-side micro-TLB probe key while the request stream is ready.  The request
+    // fire still owns probe state; disabling this flag preserves the legacy fire-time key capture.
+    enableDataTranslationProbePreload: Boolean = true,
     enableFrontendTranslationResponseBypass: Boolean = true,
     enableFrontendTranslationTurnover: Boolean = true,
     enableFrontendHistoryTurnover: Boolean = true,
