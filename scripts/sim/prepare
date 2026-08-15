@@ -185,6 +185,8 @@ m01_patch_lock="$m01_patch_file.sha256"
 m01_source_lock="$workspace/scripts/sim/manifest.sha256"
 official_patch_file="$workspace/scripts/sim/official-software-switch.patch"
 official_patch_lock="$official_patch_file.sha256"
+commit_endpoint_file="$workspace/scripts/sim/commit_endpoint_observer.h"
+commit_endpoint_lock="$commit_endpoint_file.sha256"
 simulation_patch_file="$workspace/scripts/sim/confreg-simulation-mode.patch"
 simulation_patch_lock="$simulation_patch_file.sha256"
 
@@ -194,9 +196,12 @@ patch_sha=none
 m01_patch_sha=none
 m01_source_sha=none
 official_patch_sha=none
+commit_endpoint_sha=none
 if [[ $suite != standard ]]; then
   (cd "$workspace" && sha256sum -c "$official_patch_lock")
+  (cd "$workspace" && sha256sum -c "$commit_endpoint_lock")
   official_patch_sha=$(sha256sum "$official_patch_file" | awk '{print $1}')
+  commit_endpoint_sha=$(sha256sum "$commit_endpoint_file" | awk '{print $1}')
 fi
 if [[ $profile == instrumented ]]; then
   (cd "$workspace" && sha256sum -c "$patch_lock")
@@ -222,6 +227,7 @@ model_key=$({
   printf 'config_args_sha256=%s\nextra_libs_sha256=%s\n' "$config_args_sha" "$extra_libs_sha"
   printf 'simulation_patch_sha256=%s\nofficial_patch_sha256=%s\n' \
     "$simulation_patch_sha" "$official_patch_sha"
+  printf 'commit_endpoint_observer_sha256=%s\n' "$commit_endpoint_sha"
   printf 'instrumentation_patch_sha256=%s\nm01_patch_sha256=%s\nm01_source_sha256=%s\n' \
     "$patch_sha" "$m01_patch_sha" "$m01_source_sha"
   printf 'verilator_sha256=%s\nverilator_version=%s\nverilator_home=%s\n' \
@@ -253,6 +259,8 @@ if [[ $rebuild == 1 || $model_valid == 0 ]]; then
   TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$simulation_patch_file"
   if [[ $suite != standard ]]; then
     TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$official_patch_file"
+    install -m 0444 "$commit_endpoint_file" \
+      "$model_staging/sims/verilator/testbench/include/commit_endpoint_observer.h"
   fi
   if [[ $profile == instrumented ]]; then
     TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$patch_file"
@@ -299,6 +307,7 @@ model_sha256=$model_sha
 difftest_sha256=$difftest_sha
 instrumentation_patch_sha256=$patch_sha
 official_software_patch_sha256=$official_patch_sha
+commit_endpoint_observer_sha256=$commit_endpoint_sha
 simulation_patch_sha256=$simulation_patch_sha
 m01_patch_sha256=$m01_patch_sha
 m01_source_manifest_sha256=$m01_source_sha
@@ -474,6 +483,7 @@ model_sha256=$model_sha
 difftest_sha256=$difftest_sha
 instrumentation_patch_sha256=$patch_sha
 official_software_patch_sha256=$official_patch_sha
+commit_endpoint_observer_sha256=$commit_endpoint_sha
 simulation_patch_sha256=$simulation_patch_sha
 m01_patch_sha256=$m01_patch_sha
 m01_source_manifest_sha256=$m01_source_sha

@@ -24,11 +24,12 @@ diff --git a/sims/verilator/testbench/include/cpu_tool.h b/sims/verilator/testbe
 index 4b7a64f..ca36eb8 100644
 --- a/sims/verilator/testbench/include/cpu_tool.h
 +++ b/sims/verilator/testbench/include/cpu_tool.h
-@@ -31,6 +31,7 @@ public:
+@@ -31,6 +31,8 @@ public:
      static int simu_wait;
      static int simu_bus_delay;
      static int simu_bus_delay_random_seed;
 +    static unsigned int switch_value;
++    static int completion_profile;
  
      static int64_t save_bp_time;
      static int64_t restore_bp_time;
@@ -36,18 +37,20 @@ diff --git a/sims/verilator/testbench/cpu_tool.cpp b/sims/verilator/testbench/cp
 index d67dca6..9cb606e 100644
 --- a/sims/verilator/testbench/cpu_tool.cpp
 +++ b/sims/verilator/testbench/cpu_tool.cpp
-@@ -7,5 +7,6 @@ int CpuTool::simu_wait = 0;
+@@ -7,5 +7,7 @@ int CpuTool::simu_wait = 0;
  int CpuTool::simu_bus_delay = 0;
  int CpuTool::simu_bus_delay_random_seed = 0x5500ff;
 +unsigned int CpuTool::switch_value = 0xff;
++int CpuTool::completion_profile = 0;
  
  int64_t CpuTool::time_limit = 30000;
  int CpuTool::time_check = 0;
-@@ -76,6 +77,7 @@ void CpuTool::parse_args(int argc, char **argv, char **env) {
+@@ -76,6 +78,8 @@ void CpuTool::parse_args(int argc, char **argv, char **env) {
          PARSE_FLAG(simu_wait ,"--simu-wait"  )
          PARSE_FLAG(simu_bus_delay ,"--simu-bus-delay")
          PARSE_INT(simu_bus_delay_random_seed, "--simu-bus-delay-random-seed")
 +        PARSE_HEX(switch_value, "--switch")
++        PARSE_INT(completion_profile, "--completion-profile")
  
          PARSE_INT64(time_limit,"--time-limit")
          PARSE_FLAG(time_check,"--time-check")
@@ -55,33 +58,66 @@ diff --git a/sims/verilator/testbench/testbench.cpp b/sims/verilator/testbench/t
 index ead750c..55c76d4 100644
 --- a/sims/verilator/testbench/testbench.cpp
 +++ b/sims/verilator/testbench/testbench.cpp
-@@ -103,7 +103,7 @@ void CpuTestbench::simulate(vluint64_t& main_time) {
+@@ -1,6 +1,7 @@
+ #include <sys/time.h>
+ #include "testbench.h"
+ #include <chrono>
++#include "commit_endpoint_observer.h"
+ 
+ CpuTestbench::CpuTestbench(int argc, char **argv, char **env, vluint64_t *main_time) : CpuTool(nullptr) {
+     m_trace = NULL;
+@@ -103,7 +104,8 @@ void CpuTestbench::simulate(vluint64_t& main_time) {
      auto start = std::chrono::steady_clock::now();
      double timer;
  
 -#define EVAL ((clock=!clock),main_time+=1,this->eval(main_time))
 +#define EVAL ((top->switch_pins = switch_value),(clock=!clock),main_time+=1,this->eval(main_time))
++    miku_sim::configureCommitEndpoint(end_pc);
  
      if (restore_bp_time == 0) {
          reset = reset_valid;
-@@ -226,6 +227,9 @@ void CpuTestbench::simulate(vluint64_t& main_time) {
+@@ -226,6 +228,11 @@ void CpuTestbench::simulate(vluint64_t& main_time) {
              if(EVAL)break;
              emask |= time_limit->process(main_time);
              emask |= emu->process();
-+            if (end_pc != 0 && top->debug0_wb_rf_wen != 0 && end_pc == top->debug0_wb_pc) {
++            if (miku_sim::simulationCompletionReached(
++                    completion_profile, top->num_data,
++                    top->led_rg0, top->led_rg1)) {
 +                emask |= status_test_end;
 +            }
      #ifdef TRACE_COMP
              if(emu->dm->check_end()) {
                  emask |= status_test_end;
-@@ -251,5 +255,7 @@
+@@ -251,5 +258,9 @@
      printf("\n==============================================================\n");
      printf("total clock \t\tis %lld\n", clock_total);
      printf("total instruction \tis %lld\n", inst_total);
 +    printf("debug PC snapshot \tis %08x\n", top->debug0_wb_pc);
++    printf("commit endpoint lane \tis %u\n", miku_sim::commitEndpointLane());
++    printf("completion source \tis %s\n", miku_sim::completionSourceName());
 +    printf("switch/num/led snapshot \tis %02x / %08x / %x / %x\n", top->switch_pins, top->num_data, top->led_rg0, top->led_rg1);
      printf("instruction per cycle\tis %lf\n", (double) inst_total / clock_total);
      printf("simulation time \tis %lf s\n", std::chrono::nanoseconds(end-start).count() / 1000000000.0);
+diff --git a/sims/verilator/testbench/interface.cpp b/sims/verilator/testbench/interface.cpp
+index 8c4c1bd..d216d96 100644
+--- a/sims/verilator/testbench/interface.cpp
++++ b/sims/verilator/testbench/interface.cpp
+@@ -15,12 +15,15 @@
+ ***************************************************************************************/
+ 
+ #include "interface.h"
++#include "commit_endpoint_observer.h"
+ 
+ #define RETURN_NO_NULL \
+   if (difftest == NULL) return;
+ 
+ extern Difftest** difftest;
+ 
+ INTERFACE_INSTR_COMMIT {
++    miku_sim::observeCommit(static_cast<unsigned int>(index), valid != 0,
++                            static_cast<std::uint64_t>(pc));
+     RETURN_NO_NULL
+     auto packet = difftest[coreid]->get_instr_commit(index);
 diff --git a/sims/verilator/testbench/include/golden_trace.h b/sims/verilator/testbench/include/golden_trace.h
 index 4d663b6..810746f 100644
 --- a/sims/verilator/testbench/include/golden_trace.h

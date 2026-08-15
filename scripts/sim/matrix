@@ -139,6 +139,12 @@ if [[ $suite != standard ]]; then
     printf 'prepared official-software harness patch is stale; run make sim-prepare again\n' >&2
     exit 1
   fi
+  expected_endpoint_sha=$(awk -F= '$1 == "commit_endpoint_observer_sha256" {print $2}' "$manifest")
+  actual_endpoint_sha=$(sha256sum "$workspace/scripts/sim/commit_endpoint_observer.h" | awk '{print $1}')
+  if [[ -z $expected_endpoint_sha || $actual_endpoint_sha != "$expected_endpoint_sha" ]]; then
+    printf 'prepared commit-endpoint observer is stale; run make sim-prepare again\n' >&2
+    exit 1
+  fi
 fi
 if ! (cd "$software_dir" && sha256sum -c software-files.sha256 >/dev/null); then
   printf 'prepared software cache hash mismatch; run make sim-prepare again\n' >&2
@@ -231,15 +237,7 @@ run_one() {
       awk '$8 == "test_finish" && !found {print $2; found = 1}')
     if [[ $test_finish =~ ^[0-9a-fA-F]+$ ]]; then
       end_pc_strategy=test_finish
-      if [[ $suite == perf20 ]]; then
-        # The platform debug port exposes only commit lane 0.  A three-wide core can
-        # retire test_finish itself on lane 1/2.  The repeated finish loop turns
-        # over behind its back edge, placing the load at +0x18 on the visible lane.
-        printf -v end_pc '%x' "$((16#$test_finish + 24))"
-        end_pc_strategy=test_finish_loop_lane0_load
-      else
-        printf -v end_pc '%x' "$((16#$test_finish))"
-      fi
+      printf -v end_pc '%x' "$((16#$test_finish))"
     fi
   fi
   {
@@ -265,17 +263,24 @@ run_one() {
     cd "$lane_dir"
     bus_args=()
     switch_args=()
+    completion_args=()
     if [[ $memory_mode == random ]]; then
       bus_args=(--simu-bus-delay --simu-bus-delay-random-seed "$seed")
     fi
     if [[ $suite != standard ]]; then
       switch_args=(--switch "$runtime_switch_value")
+      if [[ $suite == perf20 ]]; then
+        completion_args=(--completion-profile 1)
+      else
+        completion_args=(--completion-profile 2)
+      fi
     fi
     set +e
     CHIPLAB_HOME="$model_dir" PATH="$sim_path:$PATH" /usr/bin/time -v \
       "$model" \
       "${bus_args[@]}" \
       "${switch_args[@]}" \
+      "${completion_args[@]}" \
       --dump-delay 0 --dump-waveform 0 --time-limit "$time_limit" \
       --save-bp-time 0 --ram-save-bp-file none --top-save-bp-file none \
       --restore-bp-time 0 --ram-restore-bp-file none --top-restore-bp-file none \
