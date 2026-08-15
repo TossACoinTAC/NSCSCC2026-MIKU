@@ -9,6 +9,9 @@ CPU_DIR ?= $(ROOT_DIR)/cpu
 CHIPLAB_HOME ?= $(ROOT_DIR)/chiplab
 LINUX_KERNEL_DIR ?= $(ROOT_DIR)/nscscc-linux-kernel
 LABAGENT_DIR ?= $(ROOT_DIR)/fpga-lab-agent
+LABAGENT_HOST ?= 10.19.75.72
+LABAGENT_SSH_KEY ?= $(HOME)/.ssh/id_ed25519
+BOARDCTL ?= $(ROOT_DIR)/scripts/board/boardctl
 BUILD_ROOT ?= $(ROOT_DIR)/build
 DOCKER_IMAGE ?= nscscc-dev:ubuntu24.04-v1
 DOCKERFILE ?= $(ROOT_DIR)/docker/nscscc-dev.Dockerfile
@@ -51,6 +54,7 @@ PERF_OBSERVATION_MATRIX ?=
 PERF_OBSERVATION_OUT ?= $(BUILD_ROOT)/reports/observations/perf20-$(shell date +%Y%m%d-%H%M%S).json
 TEST_BASE ?= HEAD
 TEST_IMPACT_OUT ?= $(BUILD_ROOT)/reports/test-impact/$(shell date +%Y%m%d-%H%M%S).json
+BOARD_JOB ?=
 POST_ROUTE_INPUT_DCP ?= $(BUILD_ROOT)/chiplab-perf/fpga/nscscc-team/run_vivado/project/loongson.runs/impl_1/soc_top_routed.dcp
 POST_ROUTE_OUTPUT ?= $(BUILD_ROOT)/vivado/postroute-$(shell date +%Y%m%d-%H%M%S)
 CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
@@ -66,6 +70,7 @@ CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-l
 .PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
+  board-queue board-status board-result \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
 help:
@@ -91,15 +96,29 @@ help:
 		'  make func58-sim         全 func58 固定 seeds' \
 		'  make perf20-sim         完整 perf20（包含 stringsearch）' \
 		'  make linux-sim          Linux 软件仿真入口' \
+		'  make board-queue        查询远程 LabAgent 队列' \
+		'  make board-status BOARD_JOB=<id>  查询板测状态' \
+		'  make board-result BOARD_JOB=<id>  查询板测终态证据' \
 		'  make soc-impl           Vivado 宿主机完整 SoC 实现' \
 		'  make soc-postroute-opt  复用 routed DCP 做时序探索（非竞赛产物）' \
 		'  make soc-archive        校验并归档当前完整 SoC 实现' \
 		'  make wave WAVE=...      用宿主机 Surfer 查看波形' \
 		'  make clean              清理可再生构建输出，保留 IDE 状态' \
 		'  make clean-all          额外清理显式 IDE 状态' '' \
-		'路径覆盖：VIVADO_HOME VIVADO SURFER DOCKER_IMAGE JOBS SIM_LANES' \
+		'路径覆盖：VIVADO_HOME VIVADO SURFER LABAGENT_HOST LABAGENT_SSH_KEY DOCKER_IMAGE JOBS SIM_LANES' \
 		'实现归档：SOC_EXPERIMENT_MANIFEST=... SOC_ARCHIVE_CLASS=auto|candidate|stable' \
 		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项'
+
+board-queue:
+	@LABAGENT_HOST="$(LABAGENT_HOST)" LABAGENT_SSH_KEY="$(LABAGENT_SSH_KEY)" $(BOARDCTL) queue
+
+board-status:
+	@test -n "$(BOARD_JOB)" || { echo "BOARD_JOB is required" >&2; exit 2; }
+	@LABAGENT_HOST="$(LABAGENT_HOST)" LABAGENT_SSH_KEY="$(LABAGENT_SSH_KEY)" $(BOARDCTL) status "$(BOARD_JOB)"
+
+board-result:
+	@test -n "$(BOARD_JOB)" || { echo "BOARD_JOB is required" >&2; exit 2; }
+	@LABAGENT_HOST="$(LABAGENT_HOST)" LABAGENT_SSH_KEY="$(LABAGENT_SSH_KEY)" $(BOARDCTL) result "$(BOARD_JOB)"
 
 doctor:
 	@WORKSPACE_ROOT=$(ROOT_DIR) VIVADO=$(VIVADO) SURFER=$(SURFER) DOCKER_IMAGE=$(DOCKER_IMAGE) \

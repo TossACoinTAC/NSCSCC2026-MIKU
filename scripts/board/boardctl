@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -z "${LABAGENT_HOST:-}" ]]; then
+  echo "LABAGENT_HOST is required" >&2
+  exit 2
+fi
+
+ssh_key="${LABAGENT_SSH_KEY:-${HOME}/.ssh/id_ed25519}"
+exec ssh -T -o IdentitiesOnly=yes -i "$ssh_key" \
+  "fpga-agent@${LABAGENT_HOST}" boardctl "$@"
