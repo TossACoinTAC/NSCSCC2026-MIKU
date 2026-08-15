@@ -7,9 +7,10 @@
 
 ## 当前基线与目标
 
-- CPU 开发分支：`dev/ECHO`；最近稳定 100 MHz 里程碑证据提交 `fbc9634`，R6 当前
-  软件候选提交为 `0c771bd`（L13）。后者尚未重新执行 direct full implementation，不能
-  继承稳定归档的 WNS/资源/bitstream 证据。
+- CPU 开发分支：`dev/ECHO`；最近稳定 100 MHz 里程碑的开发分支证据提交为
+  `fbc9634`，已 squash 发布到 `main @ 6b559ec`。R6 `L11+L13` matching 源码身份为
+  `6bbf9ed`；它已经完成新的 direct full implementation，但 setup 未闭合，因此仍是候选，
+  不替代 R5 稳定里程碑。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - perf20：R6 L13 clean RTL 为 `4,423,675` cycles，20/20 pass，相对 L11 `4,865,310`
   下降 `9.077222%`，几何平均加速 `1.085725368x`；20 项全部改善。L13 的 clean
@@ -31,7 +32,16 @@
   `3687124f745a95398ffbf282897cec62b2b380454c0f99bbea269439b34d2ec7`，bitstream
   SHA-256 为 `4c9b4d0ccadd032e305f8acbdb03ec1a3538c7a2e5e65fce559a789d849448ba`；
   证据位于稳定归档的 `board/20260815-114325-2bc00a63/`。该结果只属于 R5，不能继承
-  给尚未实现的 R6 L13。
+  给 R6 L13 或后续 RTL。
+- R6 `L11+L13` matching 100 MHz direct full 已完成：setup WNS `-0.057 ns`、setup
+  TNS `-0.138 ns`、hold WNS `+0.048 ns`，fully routed、DRC 0 error/critical warning、
+  bitstream 成功；placed utilization 为 91,002 LUT、55,869 FF、66.5 BRAM、8 DSP。
+  该结果距 setup 门禁仍差 57 ps，故只归档为 candidate：
+  `Post_Impl_Bundles/cpu_6bbf9edcdd36_chiplab_c398d274812f_perf_100mhz_20260815-205104/`。
+  top-50 为 cache/L2 18、frontend 17、ROB/CSR 10、IQ 3、predictor 1、LSQ 1；最差
+  cache/L2、frontend、ROB/CSR 分别为 `-0.057/-0.003/-0.017 ns`，LSQ 最差仍为
+  `+0.094 ns`。这说明当前 setup 缺口主要是 cache/L2 的高布线占比路径，不能归为
+  L11/L13 引入的 LSQ 面积膨胀。
 - Linux clean random-AXI seed `5570815` 的固定 50 ms 窗口在 L13 通过，exit code 为 0；摘要为
   `build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/clean_model_7735f43e91c7_software_d3ce90aca67c/random/matrix_517ad2574f10_summary.txt`。
   该证据只表示固定窗口回归通过，不表示已进入用户态。
@@ -152,8 +162,10 @@ matching instrumented 观测显示 `load_candidate_buffer_busy` 从 `887,069` �
 ROI IPC 从 `0.741587` 升至 `0.815623`。观测汇总为
 `build/reports/observations/R6-L13.json`，instrumented matrix 为
 `build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/instrumented-perf20_model_73548b35df4a_software_f6e7c20f71a4/ideal/matrix_7fead17be770_perf20.csv`。
-Linux 固定窗口已通过；这是当前 R6 的软件性能基线，仍需新的 direct full implementation，
-不能继承旧 R5 WNS。
+Linux 固定窗口已通过；这是当前 R6 的软件性能基线。matching direct full 已在
+`6bbf9ed` 完成，结果为 setup/hold `-0.057/+0.048 ns`、setup TNS `-0.138 ns`，
+fully routed、DRC 0 error/critical warning 且 bitstream 成功。由于 setup 仍为负，R6
+保留为高性能候选，不晋级 100 MHz 里程碑，也不覆盖 R5 的 Stable_Backup。
 
 随后两类局部实验均未进入 R6 组合。`L14 @ 28bbe94` 允许 request buffer 中已提交 Store
 向年轻 Load 转发，以降低 L11 保守顺序边界的代价；完整 perf20 仅从 `4,423,675` 降到
@@ -163,6 +175,13 @@ predictor 容量实验中，`B02-B @ 2b428d6` 扩大 PHT 后总周期反而增�
 4,409,791`（`-0.313857%`，几何平均加速 `1.002553477x`），但低于 `0.5%` 保留
 门槛且增加 predictor memory bits，`6eda207` 已回退。三项均无 matching Vivado 证据，
 后续实现仍以 L13 的 `4,423,675` cycles 为 R6 baseline。
+
+R6 observer 同时暴露出一项 harness 归因错误：当前硬件 `loadQueueEntries=8`，旧 monitor
+却用 `load_occupancy >= 16` 推导 LDQ full，导致该字段恒为零；其他
+`oldest blocked + alternate address ready` 计数也只是宽松上界，不能证明年轻 Load 已满足
+alias、MAT、LL/SUC 和顺序条件。下一步先以 `M02` 从 DUT 的版本化 observation word 输出
+真实容量 full 和分层旁路资格，再决定 `L02` younger-ready Load bypass 或 `L03` LDQ 扩容，
+避免基于错误计数修改正式 RTL。
 
 ## R1：时序候选与周期验证
 
