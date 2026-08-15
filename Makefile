@@ -56,6 +56,7 @@ POST_ROUTE_OUTPUT ?= $(BUILD_ROOT)/vivado/postroute-$(shell date +%Y%m%d-%H%M%S)
 CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
 PERF20_TIME_LIMIT ?= 600000000
 FUNC58_TIME_LIMIT ?= 30000000
+LINUX_TIME_LIMIT ?= 50000000
 PERF20_WORKLOADS := perf20/bitcount,perf20/bubble_sort,perf20/coremark,perf20/crc32,perf20/dhrystone,perf20/quick_sort,perf20/select_sort,perf20/sha,perf20/stream_copy,perf20/stringsearch,perf20/fireye_A0,perf20/fireye_B2,perf20/fireye_C0,perf20/fireye_D1,perf20/fireye_I2,perf20/inner_product,perf20/lookup_table,perf20/loop_induction,perf20/my_memcmp,perf20/minmax_sequence
 FUNC58_WORKLOADS := func58
 
@@ -233,7 +234,8 @@ perf20-sim:
 		--sim-path "$(CONTAINER_SIM_PATH)" --allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
 
 linux-sim:
-	@$(MAKE) sim RUN_SOFTWARE=linux SIM_WORKLOADS=linux
+	@$(MAKE) sim RUN_SOFTWARE=linux SIM_WORKLOADS=linux \
+		TIME_LIMIT="$(LINUX_TIME_LIMIT)" SIM_LANES=1
 
 wave:
 	@test -f "$(SURFER)" || { printf 'Surfer 不存在: %s\n' "$(SURFER)" >&2; exit 1; }

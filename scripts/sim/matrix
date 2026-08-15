@@ -307,6 +307,8 @@ run_one() {
       if ! grep -Fq 'Time limit exceeded.' run.stderr.log; then
         result=1
         verdict=linux-window-did-not-reach-time-limit
+      else
+        verdict=linux-time-window-complete
       fi
     elif ! grep -Fq 'Reached test end PC.' run.stderr.log; then
       result=1

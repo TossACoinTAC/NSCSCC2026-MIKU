@@ -107,6 +107,9 @@ suite、memory mode、software key 与 workload/seed 集合一致。模型和 CP
   正常干净 Chiplab 的 patch 文件为空。`runs/` 再按 model/software/workload/seed/memory
   mode 隔离运行输出。
 
+`linux-sim` 默认固定运行 50 ms、单 lane；正常跑满窗口的结构化结束原因为
+`linux-time-window-complete`。普通 smoke 使用的短 `TIME_LIMIT` 不能作为 Linux 里程碑证据。
+
 缓存命中前必须复核 manifest、模型 hash、软件文件 hash 和当前 RTL hash。任何不一致都
 归为 `artifact`，不得启动仿真。`SIM_REBUILD=1 make sim-prepare ...` 可显式重建当前身份的
 平台、模型和软件项；`make clean-sim` 才会删除整套仿真缓存。cache key 只包含实际编译或
