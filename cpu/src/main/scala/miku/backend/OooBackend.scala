@@ -36,6 +36,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     val completion = in Vec (Completion(config), config.writebackWidth)
     val storeCompletionBypassValid = in Bool ()
     val storeCompletionBypass = in(StoreCompletionIdentity(config))
+    val headLoadCompletionBypassValid = in Bool ()
+    val headLoadCompletionBypass = in(LoadCompletionIdentity(config))
     val directWakeupValid = in Bits (config.executionWidth bits)
     val directWakeupPdst =
       in Vec (UInt(config.physicalRegIndexWidth bits), config.executionWidth)
@@ -535,6 +537,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   rob.io.completion := io.completion
   rob.io.storeCompletionBypassValid := io.storeCompletionBypassValid
   rob.io.storeCompletionBypass := io.storeCompletionBypass
+  rob.io.headLoadCompletionBypassValid := io.headLoadCompletionBypassValid
+  rob.io.headLoadCompletionBypass := io.headLoadCompletionBypass
   for (write <- 0 until config.writebackWidth) {
     prf.io.writeValid(write) := rob.io.completionWakeupValid(write)
     prf.io.write(write).pdst := rob.io.completionWakeupPdst(write)

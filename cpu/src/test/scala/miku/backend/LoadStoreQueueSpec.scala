@@ -40,6 +40,8 @@ private final class LoadStoreQueueProbe(config: OooCoreConfig) extends Component
     val completion = out(Completion(config))
     val storeCompletionBypassValid = out Bool ()
     val storeCompletionBypass = out(StoreCompletionIdentity(config))
+    val headLoadCompletionBypassValid = out Bool ()
+    val headLoadCompletionBypass = out(LoadCompletionIdentity(config))
     val loadWakeupValid = out Bool ()
     val loadWakeupPdst = out UInt (config.physicalRegIndexWidth bits)
     val loadWakeupRecoveryEpoch = out UInt (config.recoveryEpochWidth bits)
@@ -140,6 +142,8 @@ private final class LoadStoreQueueProbe(config: OooCoreConfig) extends Component
   }
   io.storeCompletionBypassValid := lsq.io.storeCompletionBypassValid
   io.storeCompletionBypass := lsq.io.storeCompletionBypass
+  io.headLoadCompletionBypassValid := lsq.io.headLoadCompletionBypassValid
+  io.headLoadCompletionBypass := lsq.io.headLoadCompletionBypass
   io.loadWakeupValid := lsq.io.loadWakeupValid
   io.loadWakeupPdst := lsq.io.loadWakeupPdst
   io.loadWakeupRecoveryEpoch := lsq.io.loadWakeupRecoveryEpoch
@@ -775,6 +779,8 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         // not complete either entry.
         dut.io.dataResponse.loadQueueIndex #= 0
         dut.io.dataResponse.data #= BigInt("11111111", 16)
+        sleep(1)
+        assert(!dut.io.headLoadCompletionBypassValid.toBoolean)
         sample(dut)
         assert(!dut.io.completionValid.toBoolean)
 
@@ -782,6 +788,10 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         sample(dut)
         dut.io.dataResponseValid #= true
         dut.io.dataResponse.loadQueueIndex #= 1
+        sleep(1)
+        assert(dut.io.headLoadCompletionBypassValid.toBoolean)
+        assert(dut.io.headLoadCompletionBypass.robPointer.toBigInt == 1)
+        assert(dut.io.headLoadCompletionBypass.recoveryEpoch.toBigInt == 0)
         sample(dut)
         assert(dut.io.completionValid.toBoolean)
         assert(dut.io.completion.robPointer.toBigInt == 1)
@@ -793,6 +803,9 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         dut.io.dataResponse.robPointer #= 0
         dut.io.dataResponse.loadQueueIndex #= 0
         dut.io.dataResponse.data #= BigInt("01010101", 16)
+        sleep(1)
+        assert(dut.io.headLoadCompletionBypassValid.toBoolean)
+        assert(dut.io.headLoadCompletionBypass.robPointer.toBigInt == 0)
         sample(dut)
         assert(dut.io.completionValid.toBoolean)
         assert(dut.io.completion.robPointer.toBigInt == 0)
@@ -840,6 +853,8 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         dut.io.dataResponse.robPointer #= 3
         dut.io.dataResponse.pdst #= 9
         dut.io.dataResponse.error #= true
+        sleep(1)
+        assert(!dut.io.headLoadCompletionBypassValid.toBoolean)
         sample(dut)
         dut.io.dataResponseValid #= false
         assert(dut.io.completionValid.toBoolean)
@@ -1402,13 +1417,20 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         sample(dut)
         dut.io.aguValid #= false
         var forwardingWait = 0
+        var earlyCompletionSeen = false
         while (
           (!dut.io.completionValid.toBoolean || dut.io.completion.robPointer.toBigInt != 1) &&
           forwardingWait < 8
         ) {
+          if (dut.io.headLoadCompletionBypassValid.toBoolean) {
+            earlyCompletionSeen = true
+            assert(dut.io.headLoadCompletionBypass.robPointer.toBigInt == 1)
+            assert(dut.io.headLoadCompletionBypass.recoveryEpoch.toBigInt == 0)
+          }
           sample(dut)
           forwardingWait += 1
         }
+        assert(earlyCompletionSeen)
         assert(dut.io.completionValid.toBoolean)
         assert(dut.io.completion.robPointer.toBigInt == 1)
         assert(dut.io.completion.pdst.toBigInt == 7)

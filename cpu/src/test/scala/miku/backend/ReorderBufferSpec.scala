@@ -34,6 +34,9 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     val storeCompletionBypassValid = in Bool ()
     val storeCompletionBypassRobPointer = in UInt (config.robPointerWidth bits)
     val storeCompletionBypassRecoveryEpoch = in UInt (config.recoveryEpochWidth bits)
+    val headLoadCompletionBypassValid = in Bool ()
+    val headLoadCompletionBypassRobPointer = in UInt (config.robPointerWidth bits)
+    val headLoadCompletionBypassRecoveryEpoch = in UInt (config.recoveryEpochWidth bits)
     val currentEpoch = in UInt (config.recoveryEpochWidth bits)
     val predictorUpdateCapacity = in UInt (log2Up(config.commitWidth + 1) bits)
     val completionWakeupValid = out Bits (config.writebackWidth bits)
@@ -84,6 +87,10 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
   rob.io.storeCompletionBypassValid := io.storeCompletionBypassValid
   rob.io.storeCompletionBypass.robPointer := io.storeCompletionBypassRobPointer
   rob.io.storeCompletionBypass.recoveryEpoch := io.storeCompletionBypassRecoveryEpoch
+  rob.io.headLoadCompletionBypassValid := io.headLoadCompletionBypassValid
+  rob.io.headLoadCompletionBypass.robPointer := io.headLoadCompletionBypassRobPointer
+  rob.io.headLoadCompletionBypass.recoveryEpoch :=
+    io.headLoadCompletionBypassRecoveryEpoch
   for (lane <- 0 until config.writebackWidth) {
     val completion = rob.io.completion(lane)
     completion.robPointer := io.completionRobPointer(lane)
@@ -146,6 +153,9 @@ class ReorderBufferSpec extends AnyFunSuite {
     dut.io.storeCompletionBypassValid #= false
     dut.io.storeCompletionBypassRobPointer #= 0
     dut.io.storeCompletionBypassRecoveryEpoch #= 0
+    dut.io.headLoadCompletionBypassValid #= false
+    dut.io.headLoadCompletionBypassRobPointer #= 0
+    dut.io.headLoadCompletionBypassRecoveryEpoch #= 0
     dut.io.currentEpoch #= 0
     dut.io.predictorUpdateCapacity #= config.commitWidth
     dut.io.allocateSerializing #= 0
@@ -1142,6 +1152,106 @@ class ReorderBufferSpec extends AnyFunSuite {
           assert(dut.io.commitValid.toBigInt == 0)
           assert(dut.io.completionWakeupValid.toBigInt == 0)
         }
+      }
+  }
+
+  test("early Load identity retires only with the following registered LSU completion") {
+    val config = OooCoreConfig.FourIssueThreeCommit.copy(
+      enableHeadCompletionCommitBypass = true,
+      enableHeadLoadCompletionBypass = true
+    )
+    val loadStorePort = config.executionPorts.indexWhere(
+      _.capabilities.contains(ExecutionUnitKind.LoadStore)
+    )
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-rob-load-completion")
+      .compile(new ReorderBufferProbe(config))
+      .doSim("ooo-rob-early-load-completion", 0x4f4f55) { dut =>
+        def sample(): Unit = {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+        }
+
+        def allocateLoad(pc: Int): BigInt = {
+          dut.io.allocateValid #= 1
+          dut.io.allocateAccept #= true
+          dut.io.allocateIsLoad #= 1
+          dut.io.allocatePc(0) #= pc
+          sleep(1)
+          val pointer = dut.io.allocatedPointer(0).toBigInt
+          sample()
+          dut.io.allocateValid #= 0
+          dut.io.allocateAccept #= false
+          dut.io.allocateIsLoad #= 0
+          pointer
+        }
+
+        def driveCompletion(pointer: BigInt, valid: Boolean): Unit = {
+          val validMask = if (valid) BigInt(1) << loadStorePort else BigInt(0)
+          dut.io.completionValid #= validMask
+          dut.io.completionRobPointer(loadStorePort) #= pointer
+          dut.io.completionRecoveryEpoch(loadStorePort) #= 2
+        }
+
+        dut.clockDomain.forkStimulus(period = 10)
+        initialize(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample()
+        dut.io.currentEpoch #= 2
+
+        // A token alone cannot retire or invent result data.  Once it expires,
+        // the ordinary completion path remains available.
+        val delayedPointer = allocateLoad(0x1c000200)
+        dut.io.headLoadCompletionBypassRobPointer #= delayedPointer
+        dut.io.headLoadCompletionBypassRecoveryEpoch #= 2
+        dut.io.headLoadCompletionBypassValid #= true
+        sample()
+        dut.io.headLoadCompletionBypassValid #= false
+        assert(dut.io.commitValid.toBigInt == 0)
+        sample()
+        assert(dut.io.commitValid.toBigInt == 0)
+        driveCompletion(delayedPointer, valid = true)
+        sample()
+        driveCompletion(delayedPointer, valid = false)
+        assert((dut.io.commitValid.toBigInt & 1) == 1)
+        sample()
+        assert(dut.io.occupancy.toBigInt == 0)
+
+        // The current-epoch token pairs with the fixed-latency registered LSU
+        // completion and retires with its result on the next edge.
+        val fastPointer = allocateLoad(0x1c000204)
+        dut.io.headLoadCompletionBypassRobPointer #= fastPointer
+        dut.io.headLoadCompletionBypassRecoveryEpoch #= 2
+        dut.io.headLoadCompletionBypassValid #= true
+        sample()
+        dut.io.headLoadCompletionBypassValid #= false
+        driveCompletion(fastPointer, valid = true)
+        sleep(1)
+        assert((dut.io.commitValid.toBigInt & 1) == 1)
+        assert((dut.io.commitIsLoad.toBigInt & 1) == 1)
+        assert(dut.io.commitResult(0).toBigInt == 0x100 + loadStorePort)
+        sample()
+        driveCompletion(fastPointer, valid = false)
+        assert(dut.io.occupancy.toBigInt == 0)
+
+        // Old-epoch tokens and flushes cannot create an architectural commit.
+        val stalePointer = allocateLoad(0x1c000208)
+        dut.io.headLoadCompletionBypassRobPointer #= stalePointer
+        dut.io.headLoadCompletionBypassRecoveryEpoch #= 1
+        dut.io.headLoadCompletionBypassValid #= true
+        sample()
+        dut.io.headLoadCompletionBypassValid #= false
+        driveCompletion(stalePointer, valid = true)
+        sleep(1)
+        assert(dut.io.commitValid.toBigInt == 0)
+        dut.io.flush #= true
+        sample()
+        dut.io.flush #= false
+        driveCompletion(stalePointer, valid = false)
+        assert(dut.io.empty.toBoolean)
+        assert(dut.io.commitValid.toBigInt == 0)
       }
   }
 

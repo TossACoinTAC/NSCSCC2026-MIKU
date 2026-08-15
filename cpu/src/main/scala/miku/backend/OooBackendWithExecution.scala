@@ -202,6 +202,9 @@ final class OooBackendWithExecution(
   backend.io.completion := execution.io.completion
   backend.io.storeCompletionBypassValid := loadStoreQueue.io.storeCompletionBypassValid
   backend.io.storeCompletionBypass := loadStoreQueue.io.storeCompletionBypass
+  backend.io.headLoadCompletionBypassValid :=
+    loadStoreQueue.io.headLoadCompletionBypassValid
+  backend.io.headLoadCompletionBypass := loadStoreQueue.io.headLoadCompletionBypass
   backend.io.directWakeupValid := execution.io.directWakeupValid
   backend.io.directWakeupPdst := execution.io.directWakeupPdst
   backend.io.loadWakeupValid := loadStoreQueue.io.loadWakeupValid

@@ -55,6 +55,10 @@ final case class ReorderBufferEntry(config: OooCoreConfig) extends Bundle {
 }
 
 final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) extends Component {
+  private val loadStorePort =
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
+  require(loadStorePort >= 0)
+
   private def selectLowest(mask: Bits, width: Int): UInt = {
     val selected = UInt(width bits)
     selected := 0
@@ -76,6 +80,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val completion = in Vec (Completion(config), config.writebackWidth)
     val storeCompletionBypassValid = in Bool ()
     val storeCompletionBypass = in(StoreCompletionIdentity(config))
+    val headLoadCompletionBypassValid = in Bool ()
+    val headLoadCompletionBypass = in(LoadCompletionIdentity(config))
     val completionWakeupValid = out Bits (config.writebackWidth bits)
     val completionWakeupCandidateValid = out Bits (config.writebackWidth bits)
     val completionWakeupPdst =
@@ -309,6 +315,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   // the writeback-lane compare tree and result mux out of the commit prefix.
   val stagedHeadCompletionBypassValid = Reg(Bool()) init (False)
   val stagedHeadCompletionBypassResult = Reg(Bits(config.xlen bits)) init (0)
+  val stagedHeadLoadCompletionBypassValid = Reg(Bool()) init (False)
   val headCompletionBypass = Bool()
   val headCompletionBypassResult = Bits(config.xlen bits)
   val stagedHeadBranchBypassValid = Reg(Bool()) init (False)
@@ -540,13 +547,27 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val incomingHeadStoreCompletionBypass = io.storeCompletionBypassValid &&
       io.storeCompletionBypass.recoveryEpoch === io.currentEpoch &&
       io.storeCompletionBypass.robPointer === payloadReadPointer(0)
+    val incomingHeadLoadCompletionBypass =
+      (if (config.enableHeadLoadCompletionBypass) {
+        io.headLoadCompletionBypassValid &&
+          io.headLoadCompletionBypass.recoveryEpoch === io.currentEpoch &&
+          io.headLoadCompletionBypass.robPointer === payloadReadPointer(0)
+      } else {
+        False
+      })
     val incomingHeadCompletionBypassResult = Bits(config.xlen bits)
     incomingHeadCompletionBypassResult := 0
     for (lane <- 0 until config.writebackWidth) {
+      val repeatsEarlyLoadCompletion = if (lane == loadStorePort) {
+        stagedHeadLoadCompletionBypassValid
+      } else {
+        False
+      }
       incomingHeadCompletionBypassMask(lane) := io.completionValid(lane) &&
         io.completion(lane).recoveryEpoch === io.currentEpoch &&
         io.completion(lane).robPointer === payloadReadPointer(0) &&
-        !io.completion(lane).exception.valid && !io.completion(lane).branchResolved
+        !io.completion(lane).exception.valid && !io.completion(lane).branchResolved &&
+        !repeatsEarlyLoadCompletion
       incomingHeadBranchBypassMask(lane) := io.completionValid(lane) &&
         io.completion(lane).recoveryEpoch === io.currentEpoch &&
         io.completion(lane).robPointer === payloadReadPointer(0) &&
@@ -557,10 +578,13 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     }
     when(io.flush) {
       stagedHeadCompletionBypassValid := False
+      stagedHeadLoadCompletionBypassValid := False
       stagedHeadBranchBypassValid := False
     }.otherwise {
       stagedHeadCompletionBypassValid :=
-        incomingHeadCompletionBypassMask.orR || incomingHeadStoreCompletionBypass
+        incomingHeadCompletionBypassMask.orR || incomingHeadStoreCompletionBypass ||
+          incomingHeadLoadCompletionBypass
+      stagedHeadLoadCompletionBypassValid := incomingHeadLoadCompletionBypass
       stagedHeadCompletionBypassResult := Mux(
         incomingHeadStoreCompletionBypass,
         B(0, config.xlen bits),
@@ -586,6 +610,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     }
   } else {
     stagedHeadCompletionBypassValid := False
+    stagedHeadLoadCompletionBypassValid := False
     stagedHeadBranchBypassValid := False
     stagedHeadBranchBypassResult := 0
     stagedHeadBranchBypassTaken := False
@@ -627,11 +652,16 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     }
     headCompletionBypass := !io.flush && candidates(0).state.payloadReady &&
       stagedHeadCompletionBypassValid &&
+      (!stagedHeadLoadCompletionBypassValid || io.completionValid(loadStorePort)) &&
       candidates(0).state.valid && !candidates(0).state.complete &&
       !candidates(0).exception.valid && !candidates(0).state.serializing &&
       !candidates(0).state.isBranch &&
       candidateSystemOperation === SystemOperation.none
-    headCompletionBypassResult := stagedHeadCompletionBypassResult
+    headCompletionBypassResult := Mux(
+      stagedHeadLoadCompletionBypassValid,
+      io.completion(loadStorePort).data,
+      stagedHeadCompletionBypassResult
+    )
     if (config.enableBranchHeadCompletionBypass) {
       headBranchBypass := !io.flush && candidates(0).state.payloadReady &&
         stagedHeadBranchBypassValid && candidates(0).state.valid &&
