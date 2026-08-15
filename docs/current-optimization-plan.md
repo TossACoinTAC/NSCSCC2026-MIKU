@@ -23,6 +23,15 @@
   3,011/1,318，BRAM/DSP 不变。top-50 为 predictor 3、IQ 12、ROB/CSR 14、cache/L2 17，
   frontend 4，LSQ/platform 为 0；所有路径均为正 slack。稳定本地归档位于
   `Stable_Backup/cpu_fbc96342366c_chiplab_c398d274812f_perf_100mhz_20260815-112750/`。
+- 同一 R5 direct-full bitstream 已在远程 LabAgent `10.19.75.72` 完成 matching perf20
+  板测：job `20260815-114325-2bc00a63`、`nscscc-system-reset-v1`、20/20 通过，40 次
+  原始双跑全部通过。保守选中结果合计 `cpu_count=43,489,002`、
+  `soc_count=43,501,239`；相对上一份可比板测 `627aca6` 的 `50,772,461` CPU cycles，
+  合计下降 `14.345294%`，逐项几何平均加速 `1.168457245x`。上传包 SHA-256 为
+  `3687124f745a95398ffbf282897cec62b2b380454c0f99bbea269439b34d2ec7`，bitstream
+  SHA-256 为 `4c9b4d0ccadd032e305f8acbdb03ec1a3538c7a2e5e65fce559a789d849448ba`；
+  证据位于稳定归档的 `board/20260815-114325-2bc00a63/`。该结果只属于 R5，不能继承
+  给尚未实现的 R6 L13。
 - Linux clean random-AXI seed `5570815` 的固定 50 ms 窗口在 L13 通过，exit code 为 0；摘要为
   `build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/clean_model_7735f43e91c7_software_d3ce90aca67c/random/matrix_517ad2574f10_summary.txt`。
   该证据只表示固定窗口回归通过，不表示已进入用户态。
@@ -435,4 +444,5 @@ MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其
 中途推送远端 `dev/ECHO` 备份阶段成果，不要求先闭合时序。`dev/ECHO` 保留候选级提交、
 失败尝试和完整证据链；满足 matching 100 MHz direct full 的 setup/hold WNS 均严格大于零、
 DRC/route/bitstream 完整且 Linux 门禁通过后，`main` 可将该阶段 squash 成一个里程碑提交，
-不要求保留候选级提交拓扑。板侧服务器恢复后补做板测；此前只标记本地稳定里程碑。
+不要求保留候选级提交拓扑。R5 稳定 bitstream 已完成 matching perf20 板测；后续每个新的
+时序闭合里程碑仍须使用自己的 matching bitstream 重新板测，R6 当前不能继承该结果。

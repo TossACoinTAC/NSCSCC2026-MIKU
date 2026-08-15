@@ -58,7 +58,7 @@ T = cycle_count / f_cpu
 | 更早参考实现 | `60fba481... + c398d274...` 的 setup `+0.044 ns` 及 `d9bab16... + 68c20a5...` 均为历史网表证据 |
 | 器件 / 工具 | `xc7a200tfbg676-2` / Vivado 2023.2 |
 | Linux 状态 | 历史候选已有 Linux 5.14 early console/memory initialization；当前 RTL 本轮未重跑 Linux，且仍没有 shell 验收 |
-| 当前候选板测 | 板侧服务器暂不可用；当前 RTL 没有 matching 板测证据 |
+| 当前候选板测 | R5 `fbc9634` 的 matching 100 MHz direct-full bitstream 已在 LabAgent job `20260815-114325-2bc00a63` 完成 perf20 20/20；当前 R6 L13 尚无 matching implementation 或板测 |
 
 ### 2.2 宽度与容量
 
@@ -168,7 +168,7 @@ Standalone 最差路径是 P2 乘法输入到结果寄存器，数据路径 9.46
 | Chiplab perf20 | WT01 为 20/20、`5,057,854` cycles | 相对 BR01 20 项逐项精确相等；详细单项归因见候选总账 |
 | Linux | 本轮未重跑 | 历史 Linux 无 mismatch 不能跨 RTL 继承 |
 | 完整 SoC | WT01 matching direct full：setup/hold `-0.824/+0.056 ns`，DRC 0 error/critical warning、fully routed、bitstream 成功 | recovery 到 IQ 路径已移出 top-50，但 setup 未闭合；post-route 永远仅作物理探索，不具备竞赛产物资格 |
-| 团队板 | 板侧服务器暂不可用 | 本轮边界止于完整 SoC 实现 |
+| 团队板 | R5 `fbc9634` matching bitstream：perf20 20/20，40 次双跑均通过，保守选中 CPU 总周期 `43,489,002` | job `20260815-114325-2bc00a63`；该证据不属于本表较早的 WT01 节点，也不能继承给 R6 |
 
 ## 3. 全局心智模型
 
