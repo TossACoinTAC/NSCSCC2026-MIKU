@@ -1643,6 +1643,80 @@ class OooBackendDispatchSpec extends AnyFunSuite {
       }
   }
 
+  test("multiply direct wake cannot release stale Store data") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
+      .compile(new OooBackendDispatchProbe(config))
+      .doSim("ooo-backend-store-data-multiply-wakeup", 0x4c75) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearControl(dut)
+        dut.io.issueReady #= 0xf
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        val producerPc = BigInt("1c000000", 16)
+        val storePc = producerPc + 4
+        dut.io.inputValid #= 3
+        dut.io.pc(0) #= producerPc
+        dut.io.instruction(0) #= BigInt("001c000d", 16) // mul.w r13,r0,r0
+        dut.io.pc(1) #= storePc
+        dut.io.instruction(1) #= BigInt("2980000d", 16) // st.w r13,r0,0
+        dut.clockDomain.waitSampling()
+        dut.io.inputValid #= 0
+
+        var producerPdst = BigInt(0)
+        var producerRobPointer = BigInt(0)
+        var storeIssued = false
+        for (_ <- 0 until 16 if producerPdst == 0 || !storeIssued) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          for (port <- 0 until config.executionWidth) {
+            if ((dut.io.issueValid.toBigInt & (BigInt(1) << port)) != 0) {
+              if (dut.io.issuePc(port).toBigInt == producerPc) {
+                producerPdst = dut.io.issuePdst(port).toBigInt
+                producerRobPointer = dut.io.issueRobPointer(port).toBigInt
+              }
+              if (dut.io.issuePc(port).toBigInt == storePc) storeIssued = true
+            }
+          }
+        }
+        assert(producerPdst != 0)
+        assert(storeIssued)
+        assert(!dut.io.storeDataValid.toBoolean)
+
+        // This is only the multiply pipe acceptance tag.  No result has been
+        // written to the PRF yet, so StoreData must remain resident.
+        dut.io.fixedPortWakeupValid #= true
+        dut.io.fixedPortWakeupPdst #= producerPdst
+        dut.clockDomain.waitSampling()
+        dut.io.fixedPortWakeupValid #= false
+        sleep(1)
+        assert(!dut.io.storeDataValid.toBoolean)
+
+        val product = BigInt("76543210", 16)
+        dut.io.completionValid #= BigInt(1) << config.executionWidth
+        dut.io.completionLane #= config.executionWidth
+        dut.io.completionRobPointer #= producerRobPointer
+        dut.io.completionPdst #= producerPdst
+        dut.io.completionWritesPdst #= true
+        dut.io.completionData #= product
+
+        var observed = false
+        for (_ <- 0 until 6 if !observed) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          if (dut.io.storeDataValid.toBoolean) {
+            observed = true
+            assert(dut.io.storeData.toBigInt == product)
+          }
+        }
+        assert(observed, "Store data did not become available after multiply completion")
+        dut.io.completionValid #= 0
+      }
+  }
+
   test("flush advances the recovery epoch carried by newly issued uops") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")

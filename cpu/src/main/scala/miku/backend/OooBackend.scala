@@ -10,6 +10,9 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   private val loadStorePort =
     config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
   require(loadStorePort >= 0)
+  private val multiplyPort =
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Multiply))
+  require(multiplyPort >= 0)
   // Multiply results use their own writeback lane.  For an execution-port-indexed lane whose
   // remaining operations are ALU/Branch, every physical-register producer already emits a direct
   // wake at issue acceptance; its staged ROB wake is therefore only an IQ echo.
@@ -432,7 +435,22 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     // Store data only needs the producer tag here. The registered output stage
     // reaches the PRF on the following cycle, together with the same write-through
     // boundary used by ordinary direct-wakeup consumers.
-    storeDataQueue.io.wakeupValid := earlyWakeupValid
+    val storeDataWakeupValid = Bits(config.writebackWidth bits)
+    storeDataWakeupValid := earlyWakeupValid
+    // The multiply port broadcasts a tag when the fixed-latency pipe accepts a
+    // multiply, but its value is not in the PRF until the dedicated completion
+    // lane.  Do not let a Store consume that tag one cycle too early.  A
+    // registered wake on the same port (or the later completion lane) remains
+    // available, and ordinary ALU direct wakeups are unchanged.
+    val multiplyDirectWake =
+      io.directWakeupValid(multiplyPort) &&
+        io.issue(multiplyPort).decoded.fuType === ExecutionUnitType.multiply &&
+        earlyWakeupValid(multiplyPort) &&
+        earlyWakeupPdst(multiplyPort) === io.directWakeupPdst(multiplyPort)
+    when(multiplyDirectWake) {
+      storeDataWakeupValid(multiplyPort) := False
+    }
+    storeDataQueue.io.wakeupValid := storeDataWakeupValid
     for (write <- 0 until config.writebackWidth) {
       storeDataQueue.io.wakeupPdst(write) := earlyWakeupPdst(write)
     }
