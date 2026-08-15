@@ -86,9 +86,6 @@ final case class OooCoreConfig(
     mshrEntries: Int = 4,
     enableDivideFastPath: Boolean = false,
     enableFastStoreCompletion: Boolean = true,
-    // A committed cached Store may forward to a younger Load from the request buffer while its
-    // external write is backpressured. The buffer payload is already complete and architectural.
-    enableBufferedStoreForwarding: Boolean = true,
     enableStoreTranslationLookahead: Boolean = true,
     // Keep first-time variable-latency completions while suppressing only the
     // registered echo of a tag that was already broadcast by a direct wake.
