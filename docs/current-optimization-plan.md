@@ -155,6 +155,15 @@ ROI IPC 从 `0.741587` 升至 `0.815623`。观测汇总为
 Linux 固定窗口已通过；这是当前 R6 的软件性能基线，仍需新的 direct full implementation，
 不能继承旧 R5 WNS。
 
+随后两类局部实验均未进入 R6 组合。`L14 @ 28bbe94` 允许 request buffer 中已提交 Store
+向年轻 Load 转发，以降低 L11 保守顺序边界的代价；完整 perf20 仅从 `4,423,675` 降到
+`4,422,920`（`-0.017067%`，几何平均加速 `1.000096047x`），`2b6a697` 已回退。
+predictor 容量实验中，`B02-B @ 2b428d6` 扩大 PHT 后总周期反而增加 `0.028800%`，
+`8071454` 已回退；`B02-C @ efb6572` 将每 bank BTB 扩容后为 `4,423,675 ->
+4,409,791`（`-0.313857%`，几何平均加速 `1.002553477x`），但低于 `0.5%` 保留
+门槛且增加 predictor memory bits，`6eda207` 已回退。三项均无 matching Vivado 证据，
+后续实现仍以 L13 的 `4,423,675` cycles 为 R6 baseline。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
@@ -431,8 +440,9 @@ R5 已完成四个相互独立候选的组合 direct implementation：
   completion 侧只做已注册 index 的局部 data select。只有新的 LSQ 路径重新进入 top-50 时才实施，
   避免为已变成正 slack 的路径增加寄存器。
 
-下一步以 L13 为新的软件 baseline，先完成 Linux 固定窗口，再在积累至少一项独立且有明确
-周期上界的候选后统一启动一次 direct full implementation。旧稳定归档中 BTB prediction
+R6 已以 L13 为软件 baseline 完成完整门禁、perf20、func58、Linux 固定窗口和 matching
+observer；L14、PHT 扩容与 BTB 扩容均已完成 A/B 并退出组合。下一步冻结 L11+L13 身份并
+启动一次 direct full implementation。旧稳定归档中 BTB prediction
 到 instruction TLB request 的 `+0.028 ns`、ROB/CSR `+0.051 ns`、IQ `+0.099 ns`、
 cache/L2 `+0.097 ns` 只属于旧 RTL 组合；L13 改变 LSQ 请求控制后必须重新读取 top-50，
 不能把这些 WNS 当作当前预算。
