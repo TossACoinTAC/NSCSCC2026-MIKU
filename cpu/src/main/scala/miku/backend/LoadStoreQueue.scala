@@ -167,8 +167,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     val completion = out(Completion(config))
     val storeCompletionBypassValid = out Bool ()
     val storeCompletionBypass = out(StoreCompletionIdentity(config))
-    val headLoadCompletionBypassValid = out Bool ()
-    val headLoadCompletionBypass = out(LoadCompletionIdentity(config))
     val loadWakeupValid = out Bool ()
     val loadWakeupPdst = out UInt (config.physicalRegIndexWidth bits)
     val loadWakeupRecoveryEpoch = out UInt (config.recoveryEpochWidth bits)
@@ -587,21 +585,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val storeCompletionFire = storeCompletionCandidate && !io.dataResponseValid
   val forwardFire = forwardCandidate && !io.dataResponseValid &&
     !storeCompletionCandidate
-  val ordinaryResponseLoadCompletion = responseLoadAccepted &&
-    !io.dataResponse.error && !responseLoadUncached && !responseLoadIsLl
-  val ordinaryLoadCompletion = ordinaryResponseLoadCompletion || forwardFire
-  io.headLoadCompletionBypassValid :=
-    (if (config.enableHeadLoadCompletionBypass) !io.flush && ordinaryLoadCompletion else False)
-  io.headLoadCompletionBypass.robPointer := Mux(
-    ordinaryResponseLoadCompletion,
-    responseLoadRobPointer,
-    scheduledLoad.robPointer
-  )
-  io.headLoadCompletionBypass.recoveryEpoch := Mux(
-    ordinaryResponseLoadCompletion,
-    responseLoadRecoveryEpoch,
-    scheduledLoad.recoveryEpoch
-  )
   val baseCompletionBusy = io.dataResponseValid || forwardCandidate ||
     storeCompletionCandidate
   io.translationResponse.ready := translationCancelPending ||
@@ -1273,7 +1256,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   perfObservationV1Word5(48) := cacheLoadCandidate && storeRequest
   val rawLoadCompletion = responseLoadAccepted || forwardFire ||
     (translationCompletionFire && !translationOwnerStore)
-  val rawOrdinaryLoadCompletion = ordinaryLoadCompletion
+  val rawOrdinaryLoadCompletion =
+    (responseLoadAccepted && !io.dataResponse.error && !responseLoadUncached && !responseLoadIsLl) ||
+      forwardFire
   val rawOrdinaryLoadCompletionRobPointer = Mux(
     responseLoadAccepted,
     responseLoadRobPointer,

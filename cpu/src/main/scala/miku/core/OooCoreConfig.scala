@@ -86,7 +86,6 @@ final case class OooCoreConfig(
     mshrEntries: Int = 4,
     enableDivideFastPath: Boolean = false,
     enableFastStoreCompletion: Boolean = true,
-    enableHeadLoadCompletionBypass: Boolean = true,
     enableStoreTranslationLookahead: Boolean = true,
     // Keep first-time variable-latency completions while suppressing only the
     // registered echo of a tag that was already broadcast by a direct wake.

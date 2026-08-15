@@ -161,12 +161,6 @@ final case class StoreCompletionIdentity(config: OooCoreConfig) extends Bundle {
   val recoveryEpoch = UInt(config.recoveryEpochWidth bits)
 }
 
-/** Identity token emitted one cycle before an ordinary registered Load completion. */
-final case class LoadCompletionIdentity(config: OooCoreConfig) extends Bundle {
-  val robPointer = UInt(config.robPointerWidth bits)
-  val recoveryEpoch = UInt(config.recoveryEpochWidth bits)
-}
-
 final case class RecoveryRequest(config: OooCoreConfig) extends Bundle {
   val cause = UInt(RecoveryCause.Width bits)
   val robPointer = UInt(config.robPointerWidth bits)
