@@ -125,7 +125,8 @@ class PerfObservationSummaryTest(unittest.TestCase):
             self.assertEqual(raw["score_cycles"], 20000)
             self.assertEqual(raw["roi_cycles"], 19980)
             self.assertEqual(raw["retired_instructions"], 10000)
-            self.assertEqual(result["source_schema"], "miku-perf-observation-v7")
+            self.assertEqual(result["source_schema"], "miku-perf-observation-v8")
+            self.assertEqual(raw["load_queue_capacity"], 8)
             self.assertIn("cached_store_request_fire", raw["lsq_events"])
             self.assertIn("load_queue_full", raw["lsq_events"])
             self.assertIn(
@@ -163,6 +164,31 @@ class PerfObservationSummaryTest(unittest.TestCase):
             self.assertEqual(result["source_schema"], "miku-perf-observation-v6")
             self.assertIn("cached_store_request_fire", result["summary"]["raw"]["lsq_events"])
             self.assertNotIn("load_queue_full", result["summary"]["raw"]["lsq_events"])
+
+    def test_summarizes_existing_v7_matrix_without_capacity_field(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            matrix = write_observation_matrix(Path(directory))
+            for path in Path(directory).glob("perf20__*/seed_0/limit_1ns/m01-counters.json"):
+                counters = json.loads(path.read_text(encoding="utf-8"))
+                counters["schema_version"] = "miku-perf-observation-v7"
+                counters["lsq"].pop("load_capacity")
+                path.write_text(json.dumps(counters), encoding="utf-8")
+                manifest = path.with_name("run-manifest.txt")
+                lines = manifest.read_text(encoding="utf-8").splitlines()
+                counter_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+                manifest.write_text(
+                    "\n".join(
+                        f"m01_counters_sha256={counter_hash}"
+                        if line.startswith("m01_counters_sha256=")
+                        else line
+                        for line in lines
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            result = summarize_matrix(matrix)
+            self.assertEqual(result["source_schema"], "miku-perf-observation-v7")
+            self.assertEqual(result["summary"]["raw"]["load_queue_capacity"], 8)
 
     def test_rejects_tampered_counter_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

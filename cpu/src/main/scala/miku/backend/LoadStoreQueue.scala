@@ -1334,5 +1334,13 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   perfObservationV1Word5(60) := multipleForwardingStoresBlock
   perfObservationV1Word5(61) := multipleForwardingStoresBlock &&
     alternatePendingLoadAddressReady.orR
+  // Encode log2(capacity) - 3 so the observation harness follows the elaborated DUT.
+  // Codes 0..3 represent 8, 16, 32 and 64 entries respectively.
+  require(
+    config.loadQueueEntries >= 8 && config.loadQueueEntries <= 64,
+    "PerfObservationV1 supports load queues from 8 through 64 entries"
+  )
+  perfObservationV1Word5(63 downto 62) :=
+    B(log2Up(config.loadQueueEntries) - 3, 2 bits)
   PerfObservationV1.expose(perfObservationV1Word5, 5)
 }

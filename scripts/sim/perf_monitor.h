@@ -176,6 +176,7 @@ private:
     std::uint64_t store_queue_occupancy_sum_ = 0;
     std::uint64_t load_queue_full_cycles_ = 0;
     std::uint64_t store_queue_full_cycles_ = 0;
+    unsigned load_queue_capacity_ = 0;
     std::uint64_t lsq_events_[kLsqEventCount] = {};
     std::uint64_t cache_events_[20] = {};
     std::uint64_t cache_occupancy_sum_[3] = {};

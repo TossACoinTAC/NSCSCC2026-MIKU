@@ -24,7 +24,7 @@ OBSERVATION_SOURCES = (
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v7",
+        "schema_version": "miku-perf-observation-v8",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
         "roi": {
             "mode": "outermost-counter-read-pair",
@@ -100,6 +100,7 @@ def valid_document() -> dict:
             "head_mispredict_opportunity": 0,
         },
         "lsq": {
+            "load_capacity": 8,
             "load_occupancy_sum": 0,
             "store_occupancy_sum": 0,
             "load_full_cycles": 0,
@@ -199,6 +200,36 @@ class PerfObservationContractTest(unittest.TestCase):
         document["lsq"]["events"] = document["lsq"]["events"][:46]
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_accepts_existing_v7_evidence_without_capacity_field(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v7"
+        document["lsq"].pop("load_capacity")
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_accepts_self_described_sixteen_entry_load_queue(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["lsq"]["load_capacity"] = 16
+        document["lsq"]["load_occupancy_sum"] = 16
+        document["lsq"]["load_full_cycles"] = 1
+        document["lsq"]["events"][46] = 1
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_missing_self_described_load_queue_capacity(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["lsq"].pop("load_capacity")
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("load queue capacity", result.stdout)
+
+    def test_rejects_unsupported_load_queue_capacity(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["lsq"]["load_capacity"] = 12
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("load queue capacity", result.stdout)
 
     def test_accepts_dut_reported_queue_full_counts(self) -> None:
         document = copy.deepcopy(valid_document())

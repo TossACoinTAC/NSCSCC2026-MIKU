@@ -482,6 +482,13 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
 
     const unsigned load_occupancy = static_cast<unsigned>(field(lsq, 0, 5));
     const unsigned store_occupancy = static_cast<unsigned>(field(lsq, 5, 4));
+    const unsigned observed_load_capacity =
+        1U << (3U + static_cast<unsigned>(field(lsq, 62, 2)));
+    if (load_queue_capacity_ == 0) {
+        load_queue_capacity_ = observed_load_capacity;
+    } else if (load_queue_capacity_ != observed_load_capacity) {
+        abi_errors_++;
+    }
     load_queue_occupancy_sum_ += load_occupancy;
     store_queue_occupancy_sum_ += store_occupancy;
     // Capacity is a DUT configuration property. Read the versioned observation
@@ -604,7 +611,7 @@ void PerfMonitor::write_json(const char *path) {
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
 
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v7\",\n");
+    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v8\",\n");
     std::fprintf(file, "  \"observation_abi\": {\"magic\": \"MIKU\", \"version\": 1, \"word_count\": 8},\n");
     std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"nested_counter_read_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
                  roi_marker_seen_ ? "outermost-counter-read-pair" : "full-run",
@@ -716,7 +723,8 @@ void PerfMonitor::write_json(const char *path) {
                  static_cast<unsigned long long>(branch_head_completion_opportunity_),
                  static_cast<unsigned long long>(branch_head_mispredict_opportunity_));
 
-    std::fprintf(file, "  \"lsq\": {\"load_occupancy_sum\": %llu, \"store_occupancy_sum\": %llu, \"load_full_cycles\": %llu, \"store_full_cycles\": %llu, \"events\": [",
+    std::fprintf(file, "  \"lsq\": {\"load_capacity\": %u, \"load_occupancy_sum\": %llu, \"store_occupancy_sum\": %llu, \"load_full_cycles\": %llu, \"store_full_cycles\": %llu, \"events\": [",
+                 load_queue_capacity_,
                  static_cast<unsigned long long>(load_queue_occupancy_sum_),
                  static_cast<unsigned long long>(store_queue_occupancy_sum_),
                  static_cast<unsigned long long>(load_queue_full_cycles_),
