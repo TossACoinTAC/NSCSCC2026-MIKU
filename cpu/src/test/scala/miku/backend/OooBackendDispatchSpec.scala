@@ -250,6 +250,125 @@ class OooBackendDispatchSpec extends AnyFunSuite {
       }
   }
 
+  test("ORN and ANDN preserve both register dependencies through rename") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
+      .compile(new OooBackendDispatchProbe(config))
+      .doSim("ooo-backend-orn-andn-register-dependencies", 0x4c74) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearControl(dut)
+        dut.io.issueReady #= 0xf
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        def addi(rd: Int, rj: Int, immediate: Int): BigInt =
+          BigInt("02800000", 16) | ((immediate & 0xfff) << 10) | (rj << 5) | rd
+        def registerAlu(op19To15: Int, rd: Int, rj: Int, rk: Int): BigInt =
+          (BigInt(1) << 20) | (BigInt(op19To15) << 15) |
+            (BigInt(rk) << 10) | (BigInt(rj) << 5) | rd
+
+        val basePc = BigInt("1c000000", 16)
+        val producerPcs = Vector(basePc, basePc + 4)
+        val consumerPcs = Vector(basePc + 8, basePc + 12)
+        dut.io.inputValid #= 3
+        dut.io.pc(0) #= producerPcs(0)
+        dut.io.instruction(0) #= addi(13, 0, 1)
+        dut.io.pc(1) #= producerPcs(1)
+        dut.io.instruction(1) #= addi(14, 0, 2)
+        dut.clockDomain.waitSampling()
+        dut.io.inputValid #= 0
+
+        val producers = scala.collection.mutable.Map.empty[BigInt, (BigInt, BigInt, Int)]
+        for (_ <- 0 until 16 if producers.size < 2) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          val mask = dut.io.issueValid.toBigInt
+          for (port <- 0 until config.executionWidth) {
+            val pc = dut.io.issuePc(port).toBigInt
+            if (
+              (mask & (BigInt(1) << port)) != 0 &&
+              producerPcs.contains(pc)
+            ) {
+              producers(pc) = (
+                dut.io.issuePdst(port).toBigInt,
+                dut.io.issueRobPointer(port).toBigInt,
+                port
+              )
+            }
+          }
+        }
+        assert(producers.size == 2)
+        assert(producers.values.forall(_._1 != 0))
+
+        dut.io.inputValid #= 3
+        dut.io.pc(0) #= consumerPcs(0)
+        dut.io.instruction(0) #= registerAlu(0x0c, 15, 13, 14) // orn r15,r13,r14
+        dut.io.pc(1) #= consumerPcs(1)
+        dut.io.instruction(1) #= registerAlu(0x0d, 16, 13, 14) // andn r16,r13,r14
+        dut.clockDomain.waitSampling()
+        dut.io.inputValid #= 0
+
+        def assertConsumersBlocked(): Unit = {
+          sleep(1)
+          val mask = dut.io.issueValid.toBigInt
+          assert(
+            !(0 until config.executionWidth).exists { port =>
+              (mask & (BigInt(1) << port)) != 0 &&
+              consumerPcs.contains(dut.io.issuePc(port).toBigInt)
+            }
+          )
+        }
+        for (_ <- 0 until 3) {
+          assertConsumersBlocked()
+          dut.clockDomain.waitSampling()
+        }
+
+        def completeProducer(pc: BigInt, data: BigInt): Unit = {
+          val (pdst, robPointer, port) = producers(pc)
+          dut.io.completionValid #= BigInt(1) << port
+          dut.io.completionLane #= port
+          dut.io.completionRobPointer #= robPointer
+          dut.io.completionPdst #= pdst
+          dut.io.completionWritesPdst #= true
+          dut.io.completionData #= data
+          dut.clockDomain.waitSampling()
+          dut.io.completionValid #= 0
+        }
+
+        val source1 = BigInt("13579bdf", 16)
+        val source2 = BigInt("2468ace0", 16)
+        completeProducer(producerPcs(0), source1)
+        for (_ <- 0 until 2) {
+          assertConsumersBlocked()
+          dut.clockDomain.waitSampling()
+        }
+        completeProducer(producerPcs(1), source2)
+
+        val observed = scala.collection.mutable.Map.empty[BigInt, (BigInt, BigInt)]
+        for (_ <- 0 until 16 if observed.size < 2) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          val mask = dut.io.issueValid.toBigInt
+          for (port <- 0 until config.executionWidth) {
+            val pc = dut.io.issuePc(port).toBigInt
+            if (
+              (mask & (BigInt(1) << port)) != 0 &&
+              consumerPcs.contains(pc)
+            ) {
+              observed(pc) = (
+                dut.io.issueSource1(port).toBigInt,
+                dut.io.issueSource2(port).toBigInt
+              )
+            }
+          }
+        }
+        assert(observed.keySet == consumerPcs.toSet)
+        assert(observed.values.forall(_ == (source1, source2)))
+      }
+  }
+
   test("memory epoch follows rename lane order, rollback, and eight-bit wrap") {
     val compiled = SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
