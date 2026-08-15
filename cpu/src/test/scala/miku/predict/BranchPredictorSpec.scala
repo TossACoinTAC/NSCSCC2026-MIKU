@@ -323,21 +323,8 @@ class BranchPredictorSpec extends AnyFunSuite {
         dut.clockDomain.waitSampling()
         dut.io.lookupValid #= false
         sleep(1)
-        val pcIndex = ((returnPc >> 4) & 0x7f).toInt
-        val returnPhtIndex = (5 << 7) | pcIndex
-        assert(dut.io.prediction(0).phtIndex.toInt == returnPhtIndex)
-
-        // The legacy 1024-entry geometry discarded these PC bits, so same-history branches
-        // separated by 0x200 selected the same counter. Expanded depth must distinguish them.
-        val formerlyAliasedPc = returnPc + 0x200
-        dut.io.lookupPc #= formerlyAliasedPc
-        dut.io.lookupValid #= true
-        dut.clockDomain.waitSampling()
-        dut.io.lookupValid #= false
-        sleep(1)
-        val formerlyAliasedPcIndex = ((formerlyAliasedPc >> 4) & 0x7f).toInt
-        assert(dut.io.prediction(0).phtIndex.toInt == ((5 << 7) | formerlyAliasedPcIndex))
-        assert(dut.io.prediction(0).phtIndex.toInt != returnPhtIndex)
+        val pcIndex = ((returnPc >> 4) & 0x1f).toInt
+        assert(dut.io.prediction(0).phtIndex.toInt == ((5 << 5) | pcIndex))
       }
   }
 }
