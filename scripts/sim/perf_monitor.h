@@ -81,6 +81,9 @@ private:
         std::uint64_t branch_resolve_to_recovery_hist[8] = {};
         std::uint64_t branch_head_completion_opportunity = 0;
         std::uint64_t branch_head_mispredict_opportunity = 0;
+        std::uint64_t predictor_history_groups = 0;
+        std::uint64_t predictor_history_conditional_steps = 0;
+        std::uint64_t predictor_history_multi_groups = 0;
         std::uint64_t load_queue_occupancy_sum = 0;
         std::uint64_t store_queue_occupancy_sum = 0;
         std::uint64_t load_queue_full_cycles = 0;
@@ -89,6 +92,7 @@ private:
         std::uint64_t store_data_out_of_age_order_cycles = 0;
         std::uint64_t lsq_events[kLsqEventCount] = {};
         std::uint64_t cache_events[20] = {};
+        std::uint64_t l1d_response_arbitration[5] = {};
         std::uint64_t cache_occupancy_sum[3] = {};
         std::uint64_t axi_valid[5] = {};
         std::uint64_t axi_fire[5] = {};
@@ -171,6 +175,9 @@ private:
     std::uint64_t branch_resolve_to_recovery_hist_[8] = {};
     std::uint64_t branch_head_completion_opportunity_ = 0;
     std::uint64_t branch_head_mispredict_opportunity_ = 0;
+    std::uint64_t predictor_history_groups_ = 0;
+    std::uint64_t predictor_history_conditional_steps_ = 0;
+    std::uint64_t predictor_history_multi_groups_ = 0;
     std::uint64_t branch_resolve_cycle_[64] = {};
     bool branch_mispredict_pending_[64] = {};
 
@@ -183,6 +190,7 @@ private:
     unsigned load_queue_capacity_ = 0;
     std::uint64_t lsq_events_[kLsqEventCount] = {};
     std::uint64_t cache_events_[20] = {};
+    std::uint64_t l1d_response_arbitration_[5] = {};
     std::uint64_t cache_occupancy_sum_[3] = {};
     std::uint64_t axi_valid_[5] = {};
     std::uint64_t axi_fire_[5] = {};

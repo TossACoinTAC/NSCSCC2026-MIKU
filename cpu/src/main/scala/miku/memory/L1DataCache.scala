@@ -46,6 +46,11 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   private def refillBeatIndex(address: UInt): UInt =
     address(offsetWidth - 1 downto 3)
 
+  private def isOlder(older: UInt, younger: UInt): Bool = {
+    val distance = (younger - older).resize(config.robPointerWidth)
+    (distance =/= U(0, config.robPointerWidth bits)) && !distance.msb
+  }
+
   private def selectBeatWord(beat: Bits, address: UInt): Bits =
     Mux(address(2), beat(63 downto 32), beat(31 downto 0))
 
@@ -128,6 +133,11 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     val maintenanceDone = out Bool ()
     val invalidateBusy = out Bool ()
     val idle = out Bool ()
+    val observationLookupHitLoad = out Bool ()
+    val observationMissWaiterReady = out Bool ()
+    val observationHitWaiterCollision = out Bool ()
+    val observationOlderWaiterCollision = out Bool ()
+    val observationMultipleReadyWaiters = out Bool ()
   }
 
   val cacheArray = new CacheArray(
@@ -605,6 +615,16 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val responseBeatIndex = refillBeatIndex(waiters(responseWaiterId).physicalAddress)
   val responseBeat = responseRefillBeats(responseBeatIndex)
   val waiterResponseFire = waiterReadyMask.orR && !lookupHitLoad
+  val hitWaiterCollision = lookupHitLoad && waiterReadyMask.orR
+  val collisionWaiterOlder = hitWaiterCollision &&
+    waiters(responseWaiterId).recoveryEpoch === lookupRequest.recoveryEpoch &&
+    isOlder(waiters(responseWaiterId).robPointer, lookupRequest.robPointer)
+
+  io.observationLookupHitLoad := lookupHitLoad
+  io.observationMissWaiterReady := waiterReadyMask.orR
+  io.observationHitWaiterCollision := hitWaiterCollision
+  io.observationOlderWaiterCollision := collisionWaiterOlder
+  io.observationMultipleReadyWaiters := CountOne(waiterReadyMask) > 1
 
   when(lookupHitLoad) {
     responseValid := True

@@ -29,6 +29,7 @@ if schema in {
     "miku-perf-observation-v7",
     "miku-perf-observation-v8",
     "miku-perf-observation-v9",
+    "miku-perf-observation-v10",
 }:
     abi = counters.get("observation_abi")
     if abi != {"magic": "MIKU", "version": 1, "word_count": 8}:
@@ -45,6 +46,7 @@ if schema in {
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
+        "miku-perf-observation-v10",
     }:
         roi = counters.get("roi")
         if not isinstance(roi, dict):
@@ -135,6 +137,7 @@ if schema in {
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
+        "miku-perf-observation-v10",
     }:
         head_reason_names = {
             "invalid",
@@ -182,6 +185,7 @@ if schema in {
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
+        "miku-perf-observation-v10",
     }:
         request_sequences = frontend.get("request_interval_sequences")
         if (
@@ -254,12 +258,17 @@ if schema in {
         "miku-perf-observation-v7": 53,
         "miku-perf-observation-v8": 53,
         "miku-perf-observation-v9": 53,
+        "miku-perf-observation-v10": 53,
     }.get(schema, 28)
     if not isinstance(lsq_events, list) or len(lsq_events) != expected_lsq_events or not all(
         isinstance(value, int) and 0 <= value <= cycles for value in lsq_events
     ):
         fail(f"LSQ events must contain {expected_lsq_events} per-cycle counters")
-    if schema in {"miku-perf-observation-v8", "miku-perf-observation-v9"}:
+    if schema in {
+        "miku-perf-observation-v8",
+        "miku-perf-observation-v9",
+        "miku-perf-observation-v10",
+    }:
         load_capacity = lsq.get("load_capacity")
         if load_capacity not in {8, 16, 32, 64}:
             fail("load queue capacity must be a supported power of two")
@@ -274,13 +283,14 @@ if schema in {
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
+        "miku-perf-observation-v10",
     }:
         if lsq.get("load_full_cycles") != lsq_events[46]:
             fail("load queue full count does not match DUT observation")
         if lsq.get("store_full_cycles") != lsq_events[47]:
             fail("store queue full count does not match DUT observation")
 
-    if schema == "miku-perf-observation-v9":
+    if schema in {"miku-perf-observation-v9", "miku-perf-observation-v10"}:
         store_data = counters.get("store_data", {})
         multiple_ready = store_data.get("multiple_ready_cycles")
         out_of_age = store_data.get("out_of_age_order_cycles")
@@ -291,6 +301,46 @@ if schema in {
             fail("store-data observation counters must be per-cycle nonnegative integers")
         if out_of_age > multiple_ready:
             fail("store-data out-of-age count exceeds multiple-ready opportunities")
+
+    if schema == "miku-perf-observation-v10":
+        predictor_history = counters.get("predictor_history", {})
+        history_groups = predictor_history.get("groups")
+        history_steps = predictor_history.get("conditional_steps")
+        history_multi = predictor_history.get("multi_conditional_groups")
+        if not all(
+            isinstance(value, int) and value >= 0
+            for value in (history_groups, history_steps, history_multi)
+        ):
+            fail("predictor-history counters must be nonnegative integers")
+        if not (
+            history_multi <= history_groups
+            and history_groups + history_multi <= history_steps <= 4 * history_groups
+        ):
+            fail("predictor-history group and step counts violate containment")
+        if history_groups > frontend.get("turnover_token_cycles", -1):
+            fail("predictor-history groups exceed frontend turnover tokens")
+
+        l1d_arbitration = counters.get("l1d_response_arbitration", {})
+        arbitration_names = {
+            "lookup_hit_load_cycles",
+            "miss_waiter_ready_cycles",
+            "hit_waiter_collision_cycles",
+            "older_waiter_collision_cycles",
+            "multiple_ready_waiter_cycles",
+        }
+        if set(l1d_arbitration) != arbitration_names or not all(
+            isinstance(value, int) and 0 <= value <= cycles
+            for value in l1d_arbitration.values()
+        ):
+            fail("L1D response-arbitration counters have an invalid schema")
+        collision = l1d_arbitration["hit_waiter_collision_cycles"]
+        if collision > min(
+            l1d_arbitration["lookup_hit_load_cycles"],
+            l1d_arbitration["miss_waiter_ready_cycles"],
+        ):
+            fail("L1D hit/waiter collision exceeds its opportunities")
+        if l1d_arbitration["older_waiter_collision_cycles"] > collision:
+            fail("L1D older-waiter count exceeds collisions")
 
     cache = counters.get("cache", {})
     if not isinstance(cache.get("events"), list) or len(cache["events"]) != 20:
@@ -326,6 +376,7 @@ if schema in {
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
+        "miku-perf-observation-v10",
     } and invariants.get("roi_complete") is not True:
         fail("invariant roi_complete is not true")
     for name in (

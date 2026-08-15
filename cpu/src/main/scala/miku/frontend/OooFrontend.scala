@@ -1057,6 +1057,14 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   perfObservationV1Word2(19) := io.predictorUpdateValid
   perfObservationV1Word2(20) := io.predictorUpdateReady
   perfObservationV1Word2(21) := io.predictorUpdateValid && io.predictorUpdateReady
+  val observationSpeculativeConditionalCount = CountOne(translatedConditionalSeen.asBits)
+  perfObservationV1Word2(24 downto 22) := Mux(
+    translationTurnoverTokenValid,
+    observationSpeculativeConditionalCount.resized,
+    U(0, 3 bits)
+  ).asBits
+  perfObservationV1Word2(25) := translationTurnoverTokenValid &&
+    observationSpeculativeConditionalCount > 1
   perfObservationV1Word2(26) := translationTurnoverTokenValid
   perfObservationV1Word2(27) := predictionPendingValid
   perfObservationV1Word2(28) := cacheDropPending

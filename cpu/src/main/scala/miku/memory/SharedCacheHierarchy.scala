@@ -445,5 +445,10 @@ final class SharedCacheHierarchy(
   perfObservationV1Word6(17) := io.memoryWriteValid
   perfObservationV1Word6(18) := io.memoryWriteValid && io.memoryWriteReady
   perfObservationV1Word6(19) := io.memoryWriteResponseValid
+  perfObservationV1Word6(32) := l1d.io.observationLookupHitLoad
+  perfObservationV1Word6(33) := l1d.io.observationMissWaiterReady
+  perfObservationV1Word6(34) := l1d.io.observationHitWaiterCollision
+  perfObservationV1Word6(35) := l1d.io.observationOlderWaiterCollision
+  perfObservationV1Word6(36) := l1d.io.observationMultipleReadyWaiters
   PerfObservationV1.expose(perfObservationV1Word6, 6)
 }

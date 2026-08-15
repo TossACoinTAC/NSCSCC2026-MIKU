@@ -18,13 +18,14 @@ OBSERVATION_SOURCES = (
     ROOT / "cpu/src/main/scala/miku/backend/OooBackend.scala",
     ROOT / "cpu/src/main/scala/miku/backend/ReorderBuffer.scala",
     ROOT / "cpu/src/main/scala/miku/backend/LoadStoreQueue.scala",
+    ROOT / "cpu/src/main/scala/miku/memory/L1DataCache.scala",
     ROOT / "cpu/src/main/scala/miku/memory/SharedCacheHierarchy.scala",
 )
 
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v9",
+        "schema_version": "miku-perf-observation-v10",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
         "roi": {
             "mode": "outermost-counter-read-pair",
@@ -77,6 +78,7 @@ def valid_document() -> dict:
             "request_interval_histogram": [0] * 8,
             "request_interval_sequences": 0,
             "cache_request_fire": 0,
+            "turnover_token_cycles": 0,
         },
         "issue": {
             "ready_cycles": [0] * 4,
@@ -111,7 +113,19 @@ def valid_document() -> dict:
             "multiple_ready_cycles": 0,
             "out_of_age_order_cycles": 0,
         },
+        "predictor_history": {
+            "groups": 0,
+            "conditional_steps": 0,
+            "multi_conditional_groups": 0,
+        },
         "cache": {"events": [0] * 20, "occupancy_sum": [0] * 3},
+        "l1d_response_arbitration": {
+            "lookup_hit_load_cycles": 0,
+            "miss_waiter_ready_cycles": 0,
+            "hit_waiter_collision_cycles": 0,
+            "older_waiter_collision_cycles": 0,
+            "multiple_ready_waiter_cycles": 0,
+        },
         "axi": {
             "valid": [0] * 5,
             "fire": [0] * 5,
@@ -216,6 +230,16 @@ class PerfObservationContractTest(unittest.TestCase):
         document = copy.deepcopy(valid_document())
         document["schema_version"] = "miku-perf-observation-v8"
         document.pop("store_data")
+        document.pop("predictor_history")
+        document.pop("l1d_response_arbitration")
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_accepts_existing_v9_evidence_without_v10_fields(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v9"
+        document.pop("predictor_history")
+        document.pop("l1d_response_arbitration")
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 
@@ -256,6 +280,20 @@ class PerfObservationContractTest(unittest.TestCase):
         result = self.run_checker(document)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("out-of-age count exceeds", result.stdout)
+
+    def test_rejects_predictor_history_steps_without_groups(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["predictor_history"]["conditional_steps"] = 1
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("history group and step", result.stdout)
+
+    def test_rejects_older_l1d_waiter_without_collision(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["l1d_response_arbitration"]["older_waiter_collision_cycles"] = 1
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("older-waiter count exceeds", result.stdout)
 
     def test_rejects_harness_queue_full_mismatch(self) -> None:
         document = copy.deepcopy(valid_document())
