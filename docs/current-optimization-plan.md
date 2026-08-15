@@ -179,9 +179,13 @@ predictor 容量实验中，`B02-B @ 2b428d6` 扩大 PHT 后总周期反而增�
 R6 observer 同时暴露出一项 harness 归因错误：当前硬件 `loadQueueEntries=8`，旧 monitor
 却用 `load_occupancy >= 16` 推导 LDQ full，导致该字段恒为零；其他
 `oldest blocked + alternate address ready` 计数也只是宽松上界，不能证明年轻 Load 已满足
-alias、MAT、LL/SUC 和顺序条件。下一步先以 `M02` 从 DUT 的版本化 observation word 输出
-真实容量 full 和分层旁路资格，再决定 `L02` younger-ready Load bypass 或 `L03` LDQ 扩容，
-避免基于错误计数修改正式 RTL。
+alias、MAT、LL/SUC 和顺序条件。`M02 @ 6cce873` 将容量 full 和逐级资格直接放入版本化
+observation word，monitor 不再猜测微架构容量。matching instrumented perf20 保持
+`4,423,675` cycles、ROI IPC `0.815623`，确认 observer 修改周期透明；LDQ/SQ 满周期分别为
+`805,264`（`18.2036%`）和 `141,232`（`3.1927%`），最老 Load 仅受本地 alias 条件阻塞且
+存在地址已就绪替代项为 `120,185` cycles（ROI 的 `2.7178%`）。因此下一批同时进入
+`L02` 受限 younger-ready Load bypass 和 `L03` LDQ-only 8-to-16 独立 A/B；L03 首次不扩大
+STQ/SDQ，避免在低得多的 Store full 暴露量下无依据地放大 forwarding/order cone。
 
 ## R1：时序候选与周期验证
 
