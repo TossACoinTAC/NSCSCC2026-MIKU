@@ -51,8 +51,8 @@ final case class LoadQueueEntry(config: OooCoreConfig) extends Bundle {
   val isLl = Bool()
 }
 
-// Payload consumed after load selection.  Volatile queue state such as
-// requestSent/translationDone stays in the indexed entry, while the wide
+// Payload consumed after load selection.  Volatile queue state such as request
+// ownership/translationDone stays in the indexed entry, while the wide
 // immutable fields cross the selection boundary once and remain registered.
 final case class ScheduledLoad(config: OooCoreConfig) extends Bundle {
   val robPointer = UInt(config.robPointerWidth bits)
@@ -860,6 +860,15 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       requestBuffer := requestCandidate
       requestBufferLoadIndex := loadHead
       requestBufferStoreIndex := storeHead
+      // The registered buffer now owns this Load even if the cache is
+      // backpressured.  Retiring it from the scheduler here avoids selecting
+      // the same Load again while preserving one stable external request.
+      when(!storeRequest) {
+        val entry = loads(loadHead)
+        when(entry.valid && entry.robPointer === scheduledLoad.robPointer) {
+          entry.requestSent := True
+        }
+      }
     }
     when(earlyCachedStoreRelease) {
       headStore.valid := False
@@ -1153,12 +1162,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       }
     }
 
-    when(loadRequestFire) {
-      val entry = loads(requestBufferLoadIndex)
-      when(entry.valid && entry.robPointer === requestBuffer.robPointer) {
-        entry.requestSent := True
-      }
-    }
     when(responseLoadAccepted) {
       loads(responseLoadIndex).completed := True
     }

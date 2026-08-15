@@ -1158,6 +1158,71 @@ class LoadStoreQueueSpec extends AnyFunSuite {
       }
   }
 
+  test("a buffered Load releases the scheduler before cache acceptance") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-lsq-load-buffer-ownership"
+      )
+      .compile(new LoadStoreQueueProbe(config))
+      .doSim("ooo-lsq-load-buffer-ownership", 0x4c81) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.io.translationBypassEligible #= true
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        dut.io.allocateValid #= 3
+        for (lane <- 0 until 2) {
+          dut.io.allocate(lane).robPointer #= lane
+          dut.io.allocate(lane).isLoad #= true
+          dut.io.allocate(lane).loadQueueIndex #= lane
+        }
+        sample(dut)
+        dut.io.allocateValid #= 0
+
+        dut.io.translationBypassPhysicalAddress #= 0x80000100L
+        setLoadAgu(dut, pointer = 0, address = 0x100, loadIndex = 0, pdst = 8)
+        sample(dut)
+        dut.io.aguValid #= false
+        dut.io.translationBypassPhysicalAddress #= 0x80000200L
+        setLoadAgu(dut, pointer = 1, address = 0x200, loadIndex = 1, pdst = 9)
+        sample(dut)
+        dut.io.aguValid #= false
+
+        var firstRequestWait = 0
+        while (!dut.io.dataRequestValid.toBoolean && firstRequestWait < 8) {
+          sample(dut)
+          firstRequestWait += 1
+        }
+        assert(dut.io.dataRequestValid.toBoolean)
+        assert(dut.io.dataRequest.robPointer.toBigInt == 0)
+        assert(dut.io.dataRequest.physicalAddress.toBigInt == 0x80000100L)
+
+        // Backpressure must retain one copy of the first request while the
+        // scheduler advances to the second resident Load.
+        for (_ <- 0 until 3) {
+          sample(dut)
+          assert(dut.io.dataRequestValid.toBoolean)
+          assert(dut.io.dataRequest.robPointer.toBigInt == 0)
+        }
+
+        dut.io.dataRequestReady #= true
+        sample(dut)
+        dut.io.dataRequestReady #= false
+        assert(!dut.io.dataRequestValid.toBoolean)
+
+        // One empty registered-buffer cycle is sufficient.  The old fire-time
+        // ownership update needed another cycle to reselect the first Load.
+        sample(dut)
+        assert(dut.io.dataRequestValid.toBoolean)
+        assert(dut.io.dataRequest.robPointer.toBigInt == 1)
+        assert(dut.io.dataRequest.physicalAddress.toBigInt == 0x80000200L)
+      }
+  }
+
   test("a buffered committed store blocks younger loads until cache acceptance") {
     SimConfig.withVerilator
       .workspacePath(
