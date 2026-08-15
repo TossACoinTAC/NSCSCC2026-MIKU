@@ -470,20 +470,15 @@ final class IssueQueue(
     io.occupancy := count
   }
 
-  // Keep the backpressure boundary registered.  The exact-credit path predicts
-  // next occupancy from accepted local events, so a dequeue reopens its slot
-  // without exposing the current select path directly to dispatch.
+  // Register the backpressure boundary. Reserve one slot because the ready
+  // value describes the previous cycle's count; one enqueue per cycle per IQ
+  // cannot overrun the remaining slot.
   val enqueueReadyReg = Reg(Bool()) init (True)
+  enqueueReadyReg := count < U(config.issueQueueEntriesPerPort - 1, count.getWidth bits)
   // Ready/valid are candidate handshakes during recovery.  The sequential
   // flush branches below have priority over every enqueue/dequeue update.
   io.enqueueReady := enqueueReadyReg
   val enqueueFire = io.enqueueValid && io.enqueueReady
-  val nextCount = count + enqueueFire.asUInt - queueDequeue.asUInt
-  if (config.enableExactIssueQueueEnqueueCredit) {
-    enqueueReadyReg := nextCount < U(config.issueQueueEntriesPerPort, count.getWidth bits)
-  } else {
-    enqueueReadyReg := count < U(config.issueQueueEntriesPerPort - 1, count.getWidth bits)
-  }
   val freeSlots = ~slotOccupied
   val enqueueSlot = selectLowest(freeSlots)
   val enqueueAgeIndex = UInt(entryIndexWidth bits)
@@ -510,7 +505,7 @@ final class IssueQueue(
     count := 0
     slotOccupied := 0
   }.otherwise {
-    count := nextCount
+    count := count + enqueueFire.asUInt - queueDequeue.asUInt
     if (!tokenizedIssueOutput) {
       when(queueDequeue) { slotOccupied(issueSlot) := False }
     } else {
