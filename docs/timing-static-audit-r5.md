@@ -17,8 +17,8 @@ matching direct implementation 才能改变默认组合。
   `Post_Impl_Bundles/cpu_bb4fe5d9b4c3_chiplab_c398d274812f_perf_100mhz_20260815-081448/`。
 - R5 direct full 的正式结果是 setup WNS `-0.187 ns`、hold WNS `+0.050 ns`；该次
   route 已完成、DRC 为 0、bitstream 成功，但不是时序闭合里程碑。
-- 当前工作树另有未提交的 RT02、PT02 源码实验；本审计将它们标记为工作中，不把
-  尚未重新生成的 RTL 或实现结果归给这些修改。
+- 当前开发分支包含 RT02、MT08 和暂停中的 PT02 源码实验；本审计将它们与 R5
+  matching implementation 分开记录，不把尚未重新实现的 RTL 或实现结果归给这些候选。
 
 ## 方法
 
@@ -118,8 +118,10 @@ AXI bridge 的宽数据寄存器和 ready/valid mux 可能造成平台路径压�
 1. 先对当前工作区 RT02 完成 ReorderBuffer 定向和完整软件门禁，确认它没有改变
    serial/ERTN/commit 语义。
 2. 为 PT02 增加逐周期 RAS trace 合同；在该合同通过前不把 PT02 与其他候选组合。
-3. 在独立工作树中实现 MT08 的 data probe preload，先跑 HierarchicalTlb/ATU、LSQ
-   translation、C07 相关回归，再跑完整 `cpu-check` 和 perf20。
+3. MT08 的 data probe preload 已在当前工作树实现；HierarchicalTlb/ATU、LSQ 和
+   OooCore 定向回归通过，完整 `cpu-check` 为 39 suites/230 tests。MT08 on/off 的
+   perf20 均为 20/20、总周期 `5,014,776` 且逐项精确相等，已确认周期透明；仍待
+   matching direct implementation 判断物理时序收益。
 4. 独立实现 CT03，并增加 L1D/L2 的 read/write mutual-exclusion assertion；若软件
    周期透明，再与 MT08/RT02 做一次组合 RTL 生成和 matching full implementation。
 5. RT03 只复制 PC 状态，暂不删除 payload PC；通过 RTL/资源/时序 A/B 后，再决定是否
