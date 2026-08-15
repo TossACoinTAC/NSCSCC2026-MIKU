@@ -216,9 +216,25 @@ Store 证据时扩大 STQ/SDQ；后续 IPC 归因转向剩余的 Load latency、
 
 R7 func58 random-AXI seeds `240/255/141` 均为 58/58；Linux random-AXI seed
 `5570815` 的固定 50 ms 窗口 exit code 为 0，运行 `24,999,995` cycles、退休
-`20,447,238` 条指令。下一步冻结证据并执行一次 100 MHz direct full implementation；
-在 matching 物理证据闭合前，R7 只作为软件性能候选，不覆盖 R5 稳定里程碑，也不继承
-R6 的物理实现结论。
+`20,447,238` 条指令。matching 100 MHz direct full 的 setup/hold 为
+`-1.112/+0.009 ns`，setup TNS `-105.363 ns`，fully routed、DRC 0 error/critical warning
+且 bitstream 成功；top-50 全部属于 LSQ 的 younger-retry 选择锥，因此 R7 仍是软件性能
+候选，不覆盖 R5 稳定里程碑。candidate 归档为
+`Post_Impl_Bundles/cpu_54dc2e378983_chiplab_c398d274812f_perf_100mhz_20260815-224609/`。
+
+`MT09 @ cef1047` 把 younger retry 的 16-entry 选择先编码为窄的注册 index，再在下一拍沿
+原有完整顺序条件重新资格化，从 LSQ 热路径移除物理槽选择链。LSQ 36/36、完整门禁
+39 suites/235 tests 和 RTL/Yosys/合同通过；perf20 为 `4,262,719`，仅 bitcount 增加
+9 cycles，总周期回退 `0.000211%`，其余 19 项精确相等。该受控代价进入下一次 matching
+implementation 交叉验证，不能仅凭静态 RTL 宣称时序已修复。
+
+随后用 observer v9/v10 对下一批 IPC 方向做联合归因。M03 测得 SDQ 同拍多个 ready 的
+周期为 `14,347`（ROI `0.3366%`），物理槽选择违反 ROB 年龄的周期仅 `1,720`
+（ROI `0.0404%`），因此不实现 SDQ age-priority。M04 的 clean/instrumented 总周期均为
+`4,262,719`，ROI `4,262,699`、IPC `0.846420`；条件历史 group 中有 `107,496`
+个包含两个及以上条件分支，占 `11.6163%`，当前少折叠约 `108k` 个 GHR bit，B02-D
+据此晋级。L1D 新 hit 压过更老 miss waiter 仅 81 cycles（ROI `0.0019%`），H08 关闭；
+同拍多个 ready waiter 为 `83,442` cycles（ROI `1.9575%`），H09 进入可回退 A/B。
 
 ## R1：时序候选与周期验证
 
