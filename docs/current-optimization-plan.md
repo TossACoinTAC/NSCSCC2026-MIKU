@@ -196,8 +196,7 @@ func58 三 seed、Linux 固定窗口和 direct full 时序，通过后再决定�
 `L15` 作为同一分支上的第二个独立候选已实现：L1D 在 victim writeback/writebackWait
 期间不再全局拒绝其他 set 的新 lookup，只保留 `setConflictMask` 的同 set 串行保护。
 本地短路径 A/B 相对 L03 为 `4,320,785 -> 4,316,663`（`-0.095%`），主要改善
-`inner_product/loop_induction/fireye_D1`，无明显回退；完整 Scala 39 suites/233 tests
-通过。该候选理想仿真收益小，目标是板级写响应延迟下的行为，必须与 L03 一起做
+`inner_product/loop_induction/fireye_D1`，无明显回退；完整 Scala 39 suites/233 tests 通过；本地 func58 random-AXI seeds `240/255/141` 均达到 `3A00003A`。该候选理想仿真收益小，目标是板级写响应延迟下的行为，必须与 L03 一起做
 matching direct full，若时序或资源恶化则优先保留 L03 单项。
 
 ## R1：时序候选与周期验证
