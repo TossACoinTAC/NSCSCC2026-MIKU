@@ -113,20 +113,22 @@ AXI bridge 的宽数据寄存器和 ready/valid mux 可能造成平台路径压�
 没有平台类别路径，且平台接口属于稳定边界。当前不建议为 AXI 端口增加 speculative
 寄存或重排；只在后续实现报告出现平台路径时再单独审计。
 
-## 下一步门禁顺序
+## Matching 实现复核
 
-1. RT02、MT08 已完成源码、定向回归、完整 `cpu-check` 和 perf20 周期透明验证；MT08
-   on/off 与当前组合均为 `5,014,776`，但仍待 matching direct implementation 判断物理收益。
-2. CT03、RT03 已在 `c47f7fb` 完成；L1D 12/12、L2 8/8、ROB 17/17、commit adapter
-   1/1，完整门禁 39 suites/230 tests 通过。组合 perf20 20/20 且相对 `5,014,776`
-   基线逐项精确相等；证据为 `build/reports/comparisons/CT03-RT03-perf20.json`。
-3. CT03 的正确性前提由 L1D/L2 controller 的 `!lookupResponse` 安装互斥和现有
-   store-hit/refill/maintenance 定向 suite 覆盖；若后续引入并行 install 或 hit-under-miss，
-   必须重新建立显式冲突合同，不能沿用本次结论。
-4. PT02 仍保持默认关闭；逐周期 RAS trace 合同未通过前不得加入组合。
-5. 下一步只对 CT03/RT03 与已通过的 RT02/MT08 组合执行一次 direct full implementation；
-   记录真实资源、top-50、setup/hold/TNS 和 bitstream 结果，再决定是否进入下一轮 IPC 候选。
+RT02、MT08、CT03、RT03 的组合 direct full 已完成：setup/hold WNS 为
+`+0.028/+0.047 ns`、setup TNS 为 0，fully routed、DRC 0 error/critical warning、
+bitstream 成功。相对本审计参照的 R5 full route，setup WNS 改善 `0.215 ns`，代价为
+3,011 LUT 和 1,318 FF，BRAM/DSP 不变。该变化只能作为四项组合结果。
 
-本审计没有发现可以在不验证周期语义的情况下直接提交的“纯布线技巧”。MT08、CT03、
-RT02/RT03 当前均已完成源码和软件门禁，后续优先级由 matching direct full 的真实 RTL
-cone、WNS/TNS 和资源变化更新，而不是由旧 top-50 的排名或静态 fanout 数字单独决定。
+新的 top-50 为 predictor 3、IQ 12、ROB/CSR 14、cache/L2 17、frontend 4，LSQ/platform
+为 0。旧 payload-bank 地址回路、RAS 写使能墙和数据侧 TLB/LSQ 负路径均未再出现；新的
+最差路径是 BTB prediction 到 instruction TLB request，slack `+0.028 ns`。这说明静态审计
+找到了有用方向，也说明当前正裕量很小，下一轮 IPC 修改仍需把时序影响纳入设计本身。
+
+CT03 的正确性前提仍由 L1D/L2 controller 的 `!lookupResponse` 安装互斥和现有
+store-hit/refill/maintenance 定向 suite 保护；后续若引入并行 install 或 hit-under-miss，
+必须重新建立显式冲突合同。PT02 继续默认关闭，逐周期 RAS trace 合同通过前不得进入组合。
+
+本审计没有把表面布尔改写或综合器提示当成成功证据。下一轮先读取版本化
+`PerfObservationV1` 的当前周期权重，再选择 IPC 候选；新的 route 只作为候选实现时的
+时序边界，不单独驱动一轮无性能目标的微调。

@@ -7,7 +7,8 @@
 
 ## 当前基线与目标
 
-- CPU 开发分支：`dev/ECHO`，当前源码提交 `c47f7fb`（CT03 + RT03）。
+- CPU 开发分支：`dev/ECHO`；当前里程碑证据提交 `fbc9634`，最近 RTL 变更提交
+  `c47f7fb`（CT03 + RT03）。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - perf20：当前 R5 RTL 为 `5,014,776` cycles，20/20 pass；R4 前三项保持
   `5,014,520`，FT08 增加 26 cycles（`+0.000518%`），归一化几何平均性能回退
@@ -19,6 +20,16 @@
   baseline `5,543,953` 累计 `-9.549269%`。
 - func58：当前 `c47f7fb` RTL 的 random-AXI seeds `240/255/141` 均为 58/58；证据为
   `build/sim/runs/cpu_4e6d37b21365_chiplab_c398d274812f/clean-func58_model_2d816b9020b0_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
+- R5 `RT02+MT08+CT03+RT03` matching 100 MHz direct full 已闭合：setup WNS
+  `+0.028 ns`、hold WNS `+0.047 ns`、setup TNS `0`，fully routed、DRC 0
+  error/critical warning、bitstream 成功。placed utilization 为 91,059 LUT、55,813 FF、
+  66.5 BRAM、8 DSP；相对上一份 R5 full route，setup 改善 `0.215 ns`，LUT/FF 分别增加
+  3,011/1,318，BRAM/DSP 不变。top-50 为 predictor 3、IQ 12、ROB/CSR 14、cache/L2 17，
+  frontend 4，LSQ/platform 为 0；所有路径均为正 slack。稳定本地归档位于
+  `Stable_Backup/cpu_fbc96342366c_chiplab_c398d274812f_perf_100mhz_20260815-112750/`。
+- Linux clean random-AXI seed `5570815` 的固定 50 ms 窗口通过，执行 25,000,000 cycles、
+  18,569,989 instructions，IPC `0.7428`，UART 推进到内存、时钟源和 `devtmpfs` 初始化，
+  无 DiffTest/trace 错误。该证据只表示固定窗口回归通过，不表示已进入用户态。
 - 历史 R3 matching 100 MHz direct full implementation：setup `-0.440 ns`、hold `+0.009 ns`、
   setup TNS `-13.390 ns`、128 个失败 endpoint；DRC 0 error/critical warning、fully routed、
   bitstream 成功，但仍不是里程碑。placed utilization 为 88,048 LUT、54,595 FF、
@@ -42,8 +53,8 @@
   面积、拥塞和跨 IQ 控制锥，不能作为时序修复保留。
 - post-route `-0.055 ns` 只用于识别路径族，不是正式产物。
 
-本阶段固定 100 MHz，不做升频探索。先让 direct full implementation 闭合，再把正 WNS
-作为 IPC 候选的时序预算；核心性能指标是固定 100 MHz 下的 perf20 周期。
+本阶段固定 100 MHz，不做升频探索。R5 direct full 已闭合，当前 `+0.028 ns` setup WNS
+作为下一轮 IPC 候选的初始时序预算；核心性能指标仍是固定 100 MHz 下的 perf20 周期。
 
 ## R0：实验合同
 
@@ -322,8 +333,7 @@ R4 不再把 RTL 文本变短或显式条件消失当作时序成功，而是按
   该微小而可归因的周期代价由 matching route 是否真正移除 frontend correction 路径来裁决。
 
 R4 最终组合 func58 三 seed 均已通过；matching direct full 已完成但 setup 仍差 `0.106 ns`。
-R5 已积累四个相互独立、直接对应候选路径锥的候选，只在组合软件证据完整后启动一次
-direct implementation：
+R5 已完成四个相互独立候选的组合 direct implementation：
 
 - `WT05 @ 0e47e4b`：ordinary IQ 只用 direct/fast wake 做同拍 select bypass，ROB/LSQ 的 registered wake
   仍更新 resident `sourceReady`，但不再进入 age-order/select 的同拍宽路径。R4 最差路径正是
@@ -343,14 +353,18 @@ direct implementation：
   RT03 为 ROB 提交/恢复保存独立的注册 PC 状态。L1D 12/12、L2 8/8、ROB 17/17、
   commit adapter 1/1，完整 `cpu-check` 为 39 suites/230 tests；func58 三 seed 通过。
   CT03/RT03 组合 perf20 为 `5,014,776`，与 RT02+MT08 的匹配基线逐项精确相等，证据为
-  `build/reports/comparisons/CT03-RT03-perf20.json`。这批尚未有 matching direct implementation，
-  因而不能继承旧 WNS、TNS 或资源结果。
+  `build/reports/comparisons/CT03-RT03-perf20.json`。四项组合 direct full 为 setup/hold
+  `+0.028/+0.047 ns`，相对上一份 R5 full route 改善 `0.215 ns`；旧 ROB payload-address
+  回路和 LSQ 负路径已退出 top-50。该物理结果只归属于组合，不能拆成 CT03 或 RT03
+  的独立 WNS/资源收益。
 - `MT07`：在 MT06 的 forwarding owner 边界前把 one-hot owner 编码为 3-bit registered index，
   completion 侧只做已注册 index 的局部 data select。只有新的 LSQ 路径重新进入 top-50 时才实施，
   避免为已变成正 slack 的路径增加寄存器。
 
-若下一轮仍未闭合，必须用新的 top-50 判断哪类路径被真正移除、转移或复制；不根据单次 WNS
-数字回退已通过软件门禁的候选，也不把综合器可重新推导的表面布尔改写重复列为新方向。
+下一步先运行当前 RTL 的版本化 `PerfObservationV1`，按真实周期权重选择首轮 IPC 候选。
+新 top-50 的最差路径是 BTB prediction 到 instruction TLB request 的 `+0.028 ns`；ROB/CSR
+最差为 `+0.051 ns`，IQ 最差 `+0.099 ns`，cache/L2 最差 `+0.097 ns`。下一轮实现候选时
+必须同时控制这些路径锥，不能把当前很小的正裕量视为可随意消耗的空间。
 
 ## 系统、归档与发布
 
