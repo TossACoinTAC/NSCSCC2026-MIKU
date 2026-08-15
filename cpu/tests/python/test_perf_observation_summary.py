@@ -125,7 +125,9 @@ class PerfObservationSummaryTest(unittest.TestCase):
             self.assertEqual(raw["score_cycles"], 20000)
             self.assertEqual(raw["roi_cycles"], 19980)
             self.assertEqual(raw["retired_instructions"], 10000)
-            self.assertEqual(result["source_schema"], "miku-perf-observation-v5")
+            self.assertEqual(result["source_schema"], "miku-perf-observation-v6")
+            self.assertIn("cached_store_request_fire", raw["lsq_events"])
+            self.assertNotIn("accepted_store_valid", raw["lsq_events"])
             self.assertEqual(
                 raw["rob_zero_retire_head_reason"]["incomplete"], 0
             )

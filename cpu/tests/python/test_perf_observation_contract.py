@@ -24,7 +24,7 @@ OBSERVATION_SOURCES = (
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v5",
+        "schema_version": "miku-perf-observation-v6",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
         "roi": {
             "mode": "outermost-counter-read-pair",
@@ -181,6 +181,12 @@ class PerfObservationContractTest(unittest.TestCase):
         document = copy.deepcopy(valid_document())
         document["schema_version"] = "miku-perf-observation-v4"
         document["lsq"]["events"] = document["lsq"]["events"][:28]
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_accepts_existing_v5_evidence(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v5"
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 
