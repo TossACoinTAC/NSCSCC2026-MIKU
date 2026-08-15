@@ -199,6 +199,124 @@ class L1DataCacheSpec extends AnyFunSuite {
     response.get
   }
 
+  private def firstMergedWaiterResponse(ageOrdered: Boolean): BigInt = {
+    val arbitrationConfig = config.copy(enableAgeOrderedL1DWaiterResponse = ageOrdered)
+    var firstResponsePdst = BigInt(-1)
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          s"/sim-workspace-ooo-l1d-waiter-age-$ageOrdered"
+      )
+      .compile(new L1DataCacheProbe(arbitrationConfig))
+      .doSim(s"ooo-l1d-waiter-age-$ageOrdered", if (ageOrdered) 0x4c62 else 0x4c63) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling(arbitrationConfig.dataCache.sets + 8)
+        sleep(1)
+
+        def issue(address: BigInt, robPointer: Int, pdst: Int): Unit = {
+          setRequest(
+            dut,
+            address,
+            isWrite = false,
+            data = 0,
+            mask = 0xf,
+            robPointer = robPointer,
+            pdst = pdst
+          )
+          var waitCycles = 0
+          while (!dut.io.requestReady.toBoolean && waitCycles < 12) {
+            sample(dut)
+            waitCycles += 1
+          }
+          assert(dut.io.requestReady.toBoolean)
+          sample(dut)
+          dut.io.requestValid #= false
+        }
+
+        def acceptRead(expectedAddress: BigInt): Int = {
+          var waitCycles = 0
+          while (!dut.io.lineReadValid.toBoolean && waitCycles < 12) {
+            sample(dut)
+            waitCycles += 1
+          }
+          assert(dut.io.lineReadValid.toBoolean)
+          assert(dut.io.lineRead.lineAddress.toBigInt == expectedAddress)
+          val mshrId = dut.io.lineRead.mshrId.toInt
+          dut.io.lineReadReady #= true
+          sample(dut)
+          dut.io.lineReadReady #= false
+          mshrId
+        }
+
+        var dummySeen = false
+        def captureDummyResponse(): Unit = {
+          if (dut.io.responseValid.toBoolean && dut.io.response.pdst.toInt == 5) dummySeen = true
+        }
+
+        def sendBeat(mshrId: Int, beat: Int, data: BigInt, last: Boolean): Unit = {
+          dut.io.lineReadBeatValid #= true
+          dut.io.lineReadBeat.mshrId #= mshrId
+          dut.io.lineReadBeat.beat #= beat
+          dut.io.lineReadBeat.data #= data
+          dut.io.lineReadBeat.last #= last
+          dut.io.lineReadBeat.error #= false
+          sleep(1)
+          assert(dut.io.lineReadBeatReady.toBoolean)
+          sample(dut)
+          captureDummyResponse()
+          dut.io.lineReadBeatValid #= false
+        }
+
+        // The dummy miss owns waiter slot 0 while the older measured load is allocated in slot 1.
+        issue(address = 0x100, robPointer = 5, pdst = 5)
+        val dummyMshrId = acceptRead(expectedAddress = 0x100)
+        issue(address = 0x200, robPointer = 10, pdst = 10)
+        val measuredMshrId = acceptRead(expectedAddress = 0x200)
+
+        // Complete the dummy line, freeing slot 0 without completing the measured line.
+        for (beat <- 0 until CacheContract.BeatsPerLine) {
+          sendBeat(
+            dummyMshrId,
+            beat,
+            BigInt(0x1000 + beat),
+            last = beat == CacheContract.BeatsPerLine - 1
+          )
+        }
+        var settleCycles = 0
+        while ((!dummySeen || !dut.io.requestReady.toBoolean) && settleCycles < 12) {
+          captureDummyResponse()
+          sample(dut)
+          settleCycles += 1
+        }
+        assert(dummySeen)
+
+        // A younger load now reuses slot 0 and merges into the older slot-1 miss.  Their common
+        // critical beat makes both waiters ready on the same edge.
+        issue(address = 0x200, robPointer = 12, pdst = 12)
+        sendBeat(measuredMshrId, beat = 0, data = BigInt("1122334455667788", 16), last = false)
+        var responseWait = 0
+        while (!dut.io.responseValid.toBoolean && responseWait < 4) {
+          sample(dut)
+          responseWait += 1
+        }
+        assert(dut.io.responseValid.toBoolean)
+        firstResponsePdst = dut.io.response.pdst.toBigInt
+      }
+    firstResponsePdst
+  }
+
+  test("L1D returns the oldest same-epoch ready refill waiter") {
+    assert(firstMergedWaiterResponse(ageOrdered = true) == 10)
+  }
+
+  test("L1D legacy refill arbitration exposes physical-slot priority") {
+    assert(firstMergedWaiterResponse(ageOrdered = false) == 12)
+  }
+
   test("L1D preserves a four-bit load queue identity through a miss") {
     val expandedConfig = config.copy(loadQueueEntries = 16)
     SimConfig.withVerilator

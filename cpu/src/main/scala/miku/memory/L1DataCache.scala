@@ -51,6 +51,11 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     (distance =/= U(0, config.robPointerWidth bits)) && !distance.msb
   }
 
+  private def isNewerEpoch(newer: UInt, older: UInt): Bool = {
+    val distance = (newer - older).resize(config.recoveryEpochWidth)
+    (distance =/= U(0, config.recoveryEpochWidth bits)) && !distance.msb
+  }
+
   private def selectBeatWord(beat: Bits, address: UInt): Bits =
     Mux(address(2), beat(63 downto 32), beat(31 downto 0))
 
@@ -606,7 +611,41 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   for (entry <- 0 until config.loadQueueEntries) {
     waiterReadyMask(entry) := waiters(entry).valid && waiterBeatReady(entry)
   }
-  val responseWaiterId = selectLowest(waiterReadyMask, config.loadQueueEntries)
+  val responseWaiterId = if (config.enableAgeOrderedL1DWaiterResponse) {
+    final case class ReadyWaiterCandidate() extends Bundle {
+      val valid = Bool()
+      val id = UInt(waiterIndexWidth bits)
+      val robPointer = UInt(config.robPointerWidth bits)
+      val recoveryEpoch = UInt(config.recoveryEpochWidth bits)
+    }
+
+    var level = (0 until config.loadQueueEntries).map { entry =>
+      val candidate = ReadyWaiterCandidate()
+      candidate.valid := waiterReadyMask(entry)
+      candidate.id := U(entry, waiterIndexWidth bits)
+      candidate.robPointer := waiters(entry).robPointer
+      candidate.recoveryEpoch := waiters(entry).recoveryEpoch
+      candidate
+    }
+    while (level.size > 1) {
+      level = level.grouped(2).map { pair =>
+        val left = pair.head
+        val right = pair(1)
+        val winner = ReadyWaiterCandidate()
+        val sameEpoch = right.recoveryEpoch === left.recoveryEpoch
+        val chooseRight = right.valid &&
+          (!left.valid ||
+            (!sameEpoch && isNewerEpoch(right.recoveryEpoch, left.recoveryEpoch)) ||
+            (sameEpoch && isOlder(right.robPointer, left.robPointer)))
+        winner := left
+        when(chooseRight) { winner := right }
+        winner
+      }.toIndexedSeq
+    }
+    level.head.id
+  } else {
+    selectLowest(waiterReadyMask, config.loadQueueEntries)
+  }
   val responseMshrId = waiters(responseWaiterId).mshrId
   val responseRefillBeats = Vec(Bits(CacheContract.BeatBits bits), CacheContract.BeatsPerLine)
   for (beat <- 0 until CacheContract.BeatsPerLine) {

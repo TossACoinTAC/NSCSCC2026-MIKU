@@ -132,6 +132,9 @@ final case class OooCoreConfig(
     // L1D/L2 arbitration keeps lookup response and line installation mutually exclusive.  Keep
     // data-array reads qualified by lookup/maintenance acceptance independently of write enable.
     enableDataArrayDataReadDecoupling: Boolean = true,
+    // When several refill waiters become ready together, prefer the newest recovery epoch and
+    // then the oldest ROB entry.  Disabling this flag preserves physical-slot priority for A/B.
+    enableAgeOrderedL1DWaiterResponse: Boolean = true,
     enableDeferredFrontendCorrectionCleanup: Boolean = true,
     enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,
