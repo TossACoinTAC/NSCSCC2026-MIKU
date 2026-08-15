@@ -76,7 +76,7 @@ final class BankedFetchPredictor(
     val phtUpdateOldValid = in Bool ()
     val phtUpdateTaken = in Bool ()
 
-    val speculativeHistoryValid = in Bool ()
+    val speculativeHistoryCount = in UInt (log2Up(config.fetchWidth + 1) bits)
     val speculativeHistoryTaken = in Bool ()
     val speculativeRasPush = in Bool ()
     val speculativeRasPop = in Bool ()
@@ -114,6 +114,18 @@ final class BankedFetchPredictor(
   val speculativeGhr = Reg(Bits(historyWidth bits)) init (0)
   val architecturalGhr = Reg(Bits(historyWidth bits)) init (0)
 
+  private def foldSpeculativeHistory(history: Bits, count: UInt, taken: Bool): Bits = {
+    val folded = Bits(historyWidth bits)
+    folded := history
+    switch(count) {
+      is(1) { folded := history(historyWidth - 2 downto 0) ## taken.asBits }
+      is(2) { folded := history(historyWidth - 3 downto 0) ## B(0, 1 bits) ## taken.asBits }
+      is(3) { folded := history(historyWidth - 4 downto 0) ## B(0, 2 bits) ## taken.asBits }
+      is(4) { folded := history(historyWidth - 5 downto 0) ## B(0, 3 bits) ## taken.asBits }
+    }
+    folded
+  }
+
   val speculativeRas = Vec.fill(rasDepth)(Reg(UInt(config.xlen bits)) init (0))
   val architecturalRas = Vec.fill(rasDepth)(Reg(UInt(config.xlen bits)) init (0))
   val speculativeRasCount = Reg(UInt(rasCountWidth bits)) init (0)
@@ -132,9 +144,13 @@ final class BankedFetchPredictor(
   when(io.architecturalHistoryValid.orR) {
     architecturalGhr := architecturalGhrStage(config.commitWidth)
   }
-  when(io.speculativeHistoryValid) {
-    speculativeGhr := speculativeGhr(historyWidth - 2 downto 0) ##
-      io.speculativeHistoryTaken.asBits
+  val nextSpeculativeGhr = foldSpeculativeHistory(
+    speculativeGhr,
+    io.speculativeHistoryCount,
+    io.speculativeHistoryTaken
+  )
+  when(io.speculativeHistoryCount =/= 0) {
+    speculativeGhr := nextSpeculativeGhr
   }
 
   val architecturalRasCountStage = Vec(UInt(rasCountWidth bits), config.commitWidth + 1)
@@ -222,11 +238,7 @@ final class BankedFetchPredictor(
     )
     .asBits
   val lookupGhr = Bits(historyWidth bits)
-  lookupGhr := speculativeGhr
-  when(io.speculativeHistoryValid) {
-    lookupGhr := speculativeGhr(historyWidth - 2 downto 0) ##
-      io.speculativeHistoryTaken.asBits
-  }
+  lookupGhr := nextSpeculativeGhr
   val lookupPhtIndex = lookupGhr(4 downto 0) ##
     io.lookupPc(fetchGroupOffsetWidth + 4 downto fetchGroupOffsetWidth)
   val capturedTag = Reg(Bits(btbTagWidth bits)) init (0)

@@ -122,6 +122,9 @@ final case class OooCoreConfig(
     enableFrontendTranslationResponseBypass: Boolean = true,
     enableFrontendTranslationTurnover: Boolean = true,
     enableFrontendHistoryTurnover: Boolean = true,
+    // Fold every conditional branch before the first predicted-taken lane into speculative GHR.
+    // Disabling this flag preserves the historical one-step-per-fetch-group behavior for A/B.
+    enableMultiConditionalSpeculativeHistory: Boolean = true,
     enableBalancedFrontendPredictionSelect: Boolean = true,
     enableFrontendCacheHitTurnover: Boolean = true,
     enableSpeculativeInstructionArrayRead: Boolean = true,

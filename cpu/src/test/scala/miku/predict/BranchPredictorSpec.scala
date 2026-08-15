@@ -256,7 +256,7 @@ class BranchPredictorSpec extends AnyFunSuite {
         dut.io.phtUpdateOldState #= 0
         dut.io.phtUpdateOldValid #= false
         dut.io.phtUpdateTaken #= false
-        dut.io.speculativeHistoryValid #= false
+        dut.io.speculativeHistoryCount #= 0
         dut.io.speculativeHistoryTaken #= false
         dut.io.speculativeRasPush #= false
         dut.io.speculativeRasPop #= false
@@ -325,6 +325,23 @@ class BranchPredictorSpec extends AnyFunSuite {
         sleep(1)
         val pcIndex = ((returnPc >> 4) & 0x1f).toInt
         assert(dut.io.prediction(0).phtIndex.toInt == ((5 << 5) | pcIndex))
+
+        // Three conditional branches in one fetch group are predicted N,N,T. The same-cycle
+        // next lookup must see all three outcomes, not a single group-level history step.
+        dut.io.speculativeHistoryCount #= 3
+        dut.io.speculativeHistoryTaken #= true
+        dut.io.lookupPc #= returnPc
+        dut.io.lookupValid #= true
+        dut.clockDomain.waitSampling()
+        dut.io.speculativeHistoryCount #= 0
+        dut.io.speculativeHistoryTaken #= false
+        dut.io.lookupValid #= false
+        sleep(1)
+        val foldedHistory = ((5 << 3) | 1) & 0xff
+        assert(
+          dut.io.prediction(0).phtIndex.toInt ==
+            (((foldedHistory & 0x1f) << 5) | pcIndex)
+        )
       }
   }
 }

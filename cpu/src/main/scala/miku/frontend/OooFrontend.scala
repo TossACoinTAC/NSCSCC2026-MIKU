@@ -349,7 +349,19 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       }
     }
   }
-  val requestHistoryValid = translatedConditionalSeen.asBits.orR
+  val requestHistoryCountRaw = CountOne(translatedConditionalSeen.asBits)
+  val requestHistoryCount = UInt(log2Up(config.fetchWidth + 1) bits)
+  if (config.enableMultiConditionalSpeculativeHistory) {
+    requestHistoryCount := requestHistoryCountRaw.resized
+  } else {
+    requestHistoryCount := Mux(
+      translatedConditionalSeen.asBits.orR,
+      U(1, requestHistoryCount.getWidth bits),
+      U(0, requestHistoryCount.getWidth bits)
+    )
+  }
+  val requestHistoryTaken = requestPredictedTaken &&
+    requestPredictedType === PredictedBranchType.conditional
   // A call link is one of four fixed offsets inside an aligned 16-byte fetch
   // group.  Build it from the group base and lane so the selected branch PC
   // does not feed a full-width +4 carry chain on the speculative RAS path.
@@ -378,7 +390,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     if (config.enableFrontendHistoryTurnover) {
       translationResponseBypassValid
     } else {
-      translationResponseBypassValid && !requestHistoryValid &&
+      translationResponseBypassValid && requestHistoryCount === 0 &&
         requestPredictedType =/= PredictedBranchType.call &&
         requestPredictedType =/= PredictedBranchType.ret
     }
@@ -509,7 +521,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   // state transiently: the registered restore wins before the corrected lookup, and response
   // predecode no longer feeds the predictor RAM address and RAS write-enable cones.
   val predictorSpeculativeUpdateValid = Bool()
-  val predictorSpeculativeHistoryValid = Bool()
+  val predictorSpeculativeHistoryCount = UInt(log2Up(config.fetchWidth + 1) bits)
   val predictorSpeculativeHistoryTaken = Bool()
   val predictorSpeculativeRasPush = Bool()
   val predictorSpeculativeRasPop = Bool()
@@ -518,9 +530,8 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     // The token is formed at translation acceptance.  This removes L1I tag-hit/request-ready
     // feedback from the speculative predictor update while retaining the same-cycle lookup fold.
     predictorSpeculativeUpdateValid := translationTurnoverTokenValid
-    predictorSpeculativeHistoryValid := requestHistoryValid
-    predictorSpeculativeHistoryTaken := requestPredictedTaken &&
-      requestPredictedType === PredictedBranchType.conditional
+    predictorSpeculativeHistoryCount := requestHistoryCount
+    predictorSpeculativeHistoryTaken := requestHistoryTaken
     predictorSpeculativeRasPush := requestPredictedTaken &&
       requestPredictedType === PredictedBranchType.call
     predictorSpeculativeRasPop := requestPredictedTaken &&
@@ -528,16 +539,15 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     predictorSpeculativeReturnAddress := requestPredictedReturnAddress
   } else {
     val delayedUpdateValid = RegNext(requestFire) init (False)
-    val delayedHistoryValid = Reg(Bool()) init (False)
+    val delayedHistoryCount = Reg(UInt(log2Up(config.fetchWidth + 1) bits)) init (0)
     val delayedHistoryTaken = Reg(Bool()) init (False)
     val delayedRasPush = Reg(Bool()) init (False)
     val delayedRasPop = Reg(Bool()) init (False)
     val delayedReturnAddress =
       Reg(UInt(config.xlen bits)) init (U(config.resetVector, config.xlen bits))
     when(requestFire) {
-      delayedHistoryValid := requestHistoryValid
-      delayedHistoryTaken := requestPredictedTaken &&
-        requestPredictedType === PredictedBranchType.conditional
+      delayedHistoryCount := requestHistoryCount
+      delayedHistoryTaken := requestHistoryTaken
       delayedRasPush := requestPredictedTaken &&
         requestPredictedType === PredictedBranchType.call
       delayedRasPop := requestPredictedTaken &&
@@ -545,14 +555,17 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       delayedReturnAddress := requestPredictedReturnAddress
     }
     predictorSpeculativeUpdateValid := delayedUpdateValid
-    predictorSpeculativeHistoryValid := delayedHistoryValid
+    predictorSpeculativeHistoryCount := delayedHistoryCount
     predictorSpeculativeHistoryTaken := delayedHistoryTaken
     predictorSpeculativeRasPush := delayedRasPush
     predictorSpeculativeRasPop := delayedRasPop
     predictorSpeculativeReturnAddress := delayedReturnAddress
   }
-  targetPredictor.io.speculativeHistoryValid := predictorSpeculativeUpdateValid &&
-    predictorSpeculativeHistoryValid
+  targetPredictor.io.speculativeHistoryCount := Mux(
+    predictorSpeculativeUpdateValid,
+    predictorSpeculativeHistoryCount,
+    U(0, predictorSpeculativeHistoryCount.getWidth bits)
+  )
   targetPredictor.io.speculativeHistoryTaken := predictorSpeculativeHistoryTaken
   targetPredictor.io.speculativeRasPush := predictorSpeculativeUpdateValid &&
     predictorSpeculativeRasPush
