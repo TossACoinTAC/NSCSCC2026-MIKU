@@ -187,6 +187,12 @@ observation word，monitor 不再猜测微架构容量。matching instrumented p
 `L02` 受限 younger-ready Load bypass 和 `L03` LDQ-only 8-to-16 独立 A/B；L03 首次不扩大
 STQ/SDQ，避免在低得多的 Store full 暴露量下无依据地放大 forwarding/order cone。
 
+`L03` 的 LDQ-only 8-to-16 已在 `dev/L03-ldq16` 完成首轮实现与本地 A/B：R6
+baseline `4,423,675 -> 4,320,785`（总周期 `-2.326%`，几何平均 `0.986232`），
+完整 Scala 39 suites/233 tests 通过。`fireye_A0 -17.30%` 是最主要收益项；
+`fireye_B2 +0.35%` 是最大回退。该结果只是短路径 perf20，下一步必须补 matching
+func58 三 seed、Linux 固定窗口和 direct full 时序，通过后再决定是否进入组合板测。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
