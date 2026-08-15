@@ -265,7 +265,6 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     misses(lineMatchId).state =/= L1DataMshrState.respond &&
     pendingStoreReady
   val newLookupReady = !lineMatch && !setConflictMask.orR && freeMissMask.orR &&
-    !(activeWritebackMask | activeWritebackWaitMask).orR &&
     (io.request.isWrite || freeWaiterMask.orR) &&
     (!io.request.isWrite || pendingStoreReady) && cacheArray.io.lookupReady
   io.requestReady := commonRequestReady &&
