@@ -21,11 +21,6 @@ final case class BankedFetchPrediction(config: OooCoreConfig) extends Bundle {
   val target = UInt(config.xlen bits)
 }
 
-object BankedFetchPredictor {
-  val BtbEntriesPerBank = 256
-  val InitializationWaitCycles = BtbEntriesPerBank + 4
-}
-
 /** Four-bank synchronous BTB/PHT with speculative and architectural history state.
   *
   * A 16-byte group reads all lane banks in parallel. BTB and PHT arrays are cleared through their
@@ -34,7 +29,7 @@ object BankedFetchPredictor {
   */
 final class BankedFetchPredictor(
     config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit,
-    btbEntriesPerBank: Int = BankedFetchPredictor.BtbEntriesPerBank,
+    btbEntriesPerBank: Int = 128,
     phtEntriesPerBank: Int = 1024,
     historyWidth: Int = 8,
     rasDepth: Int = 8
@@ -56,7 +51,7 @@ final class BankedFetchPredictor(
   private val btbEntryWidth = btbStaticTakenBit + 1
 
   require(config.fetchWidth == 4)
-  require(btbEntriesPerBank == BankedFetchPredictor.BtbEntriesPerBank)
+  require(btbEntriesPerBank == 128)
   require(phtEntriesPerBank == 1024)
   require(historyWidth == 8)
   require(rasDepth == 8)
