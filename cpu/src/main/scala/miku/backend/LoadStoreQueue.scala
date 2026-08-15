@@ -393,12 +393,34 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
   val forwardingCount = CountOne(forwardingStore)
   val forwardingId = OHToUInt(OHMasking.first(forwardingStore))
-  val loadOrderClear = !bufferedCommittedStore && !unknownOlderStore.orR &&
+  val loadOrderClearBase = !unknownOlderStore.orR &&
     !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
     !partialOverlapStore.orR && !pendingDataStore.orR
-  val forwardCandidate = loadHeadReady && scheduledLoad.translationDone &&
+  val bufferedStoreSameWord = requestBuffer.physicalAddress(config.xlen - 1 downto 2) ===
+    scheduledLoad.physicalAddress(config.xlen - 1 downto 2)
+  val bufferedStoreOverlap = (requestBuffer.byteMask & scheduledLoad.byteMask).orR
+  val bufferedStoreNoOverlap = !bufferedStoreSameWord || !bufferedStoreOverlap
+  // A committed Store is already architectural and its request-buffer payload is complete. It
+  // can forward only after every other older-store/order predicate has been resolved.
+  val bufferedStoreForwardEligible = if (config.enableBufferedStoreForwarding) {
+    bufferedCommittedStore && loadHeadReady && scheduledLoad.translationDone &&
+      !scheduledLoad.uncached && !scheduledLoad.isLl && loadOrderClearBase &&
+      forwardingCount === 0 && bufferedStoreSameWord && bufferedStoreOverlap &&
+      (requestBuffer.byteMask & scheduledLoad.byteMask) === scheduledLoad.byteMask &&
+      isOlder(requestBuffer.robPointer, scheduledLoad.robPointer)
+  } else {
+    False
+  }
+  // A non-overlapping buffered Store may coexist with an ordinary older-store forwarding path;
+  // it still cannot issue a second cache request because the single request buffer is occupied.
+  val bufferedStoreOrderAllowsLoad = !bufferedCommittedStore || bufferedStoreNoOverlap ||
+    bufferedStoreForwardEligible
+  val loadOrderClear = loadOrderClearBase && bufferedStoreOrderAllowsLoad
+  val storeForwardCandidate = loadHeadReady && scheduledLoad.translationDone &&
     !scheduledLoad.uncached && !scheduledLoad.isLl && loadOrderClear &&
     forwardingCount === 1
+  val bufferedForwardCandidate = bufferedStoreForwardEligible
+  val forwardCandidate = storeForwardCandidate || bufferedForwardCandidate
   val cacheLoadBase = loadHeadReady && loadOrderClear && forwardingCount === 0
   val loadAtRequiredOrderPoint = !scheduledLoad.uncached ||
     scheduledLoad.robPointer === io.robHeadPointer
@@ -584,8 +606,11 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // Store before a younger forwarded Load. Besides preserving age priority,
   // this keeps the deep forwarding/alias predicate out of the direct Store-to-ROB path.
   val storeCompletionFire = storeCompletionCandidate && !io.dataResponseValid
-  val forwardFire = forwardCandidate && !io.dataResponseValid &&
+  val storeForwardFire = storeForwardCandidate && !io.dataResponseValid &&
     !storeCompletionCandidate
+  val bufferedForwardFire = bufferedForwardCandidate && !io.dataResponseValid &&
+    !storeCompletionCandidate && !storeForwardFire
+  val forwardFire = storeForwardFire || bufferedForwardFire
   val baseCompletionBusy = io.dataResponseValid || forwardCandidate ||
     storeCompletionCandidate
   io.translationResponse.ready := translationCancelPending ||
@@ -629,7 +654,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val aguExceptionCapture = aguFire && aguMisaligned
 
   val generatedCompletionValid = responseAccepted ||
-    (if (config.enableBankedLoadForwardCompletion) False else forwardFire) ||
+    (if (config.enableBankedLoadForwardCompletion) False else storeForwardFire) ||
+    bufferedForwardFire ||
     storeCompletionFire || translationCompletionFire || aguExceptionCompletionReady
   val generatedCompletion = Completion(config)
   val generatedCompletionIsLoad = Bool()
@@ -667,7 +693,19 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       generatedCompletion.exception.badVAddrValid := True
       generatedCompletion.exception.badVAddr := responseLoadVirtualAddress
     }
-  }.elsewhen(forwardFire) {
+  }.elsewhen(bufferedForwardFire) {
+    generatedCompletionIsLoad := True
+    generatedCompletion.robPointer := scheduledLoad.robPointer
+    generatedCompletion.recoveryEpoch := scheduledLoad.recoveryEpoch
+    generatedCompletion.pdst := scheduledLoad.pdst
+    generatedCompletion.writesPdst := scheduledLoad.writesPdst
+    generatedCompletion.data := formatLoad(
+      requestBuffer.writeData,
+      scheduledLoad.virtualAddress,
+      scheduledLoad.size,
+      scheduledLoad.signExtend
+    )
+  }.elsewhen(storeForwardFire) {
     if (!config.enableBankedLoadForwardCompletion) {
       generatedCompletionIsLoad := True
       generatedCompletion.robPointer := scheduledLoad.robPointer
@@ -776,7 +814,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     when(io.flush) {
       valid := False
     }.otherwise {
-      valid := forwardFire
+      valid := storeForwardFire
     }
 
     bankedForwardCompletionValid := valid
