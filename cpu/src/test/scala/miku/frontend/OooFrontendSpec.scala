@@ -318,12 +318,13 @@ class OooFrontendSpec extends AnyFunSuite {
 
         val branchPc = config.resetVector + 0x200
         val branchTarget = branchPc + 0x40
-        val phtIndex = ((branchPc >> 4) & 0x1f).toInt
+        val phtIndex = ((branchPc >> 4) & 0x7f).toInt
         dut.io.predictorUpdatePc #= branchPc
         dut.io.predictorUpdateTaken #= true
         dut.io.predictorUpdateTarget #= branchTarget
         dut.io.predictorUpdateType #= 0
-        dut.io.predictorUpdateMetadata #= (phtIndex | (2 << 10))
+        dut.io.predictorUpdateMetadata #=
+          (phtIndex | (2 << PredictorMetadataLayout.PhtStateLsb))
         dut.io.predictorUpdateValid #= true
         sample(dut)
         dut.io.predictorUpdateValid #= false
@@ -383,9 +384,12 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.io.cacheRequestReady #= false
 
         returnGroup(dut, branchTarget, firstRd = 9)
-        val targetPhtIndex = (1 << 5) | ((branchTarget >> 4) & 0x1f).toInt
+        val targetPhtIndex = (1 << 7) | ((branchTarget >> 4) & 0x7f).toInt
         assert(dut.io.decoded(1).pc.toBigInt == branchTarget)
-        assert((dut.io.decoded(1).predictorMetadata.toBigInt & 0x3ff) == targetPhtIndex)
+        assert(
+          (dut.io.decoded(1).predictorMetadata.toBigInt &
+            ((1 << PredictorMetadataLayout.PhtIndexWidth) - 1)) == targetPhtIndex
+        )
       }
   }
 
@@ -1859,8 +1863,9 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.io.predictorUpdateValid #= true
         var learnedHistory = 0
         for (_ <- 0 until 6) {
-          val phtIndex = ((learnedHistory & 0x1f) << 5) | ((learnedPc >> 4) & 0x1f)
-          dut.io.predictorUpdateMetadata #= (phtIndex | (2 << 10))
+          val phtIndex = ((learnedHistory & 0x1f) << 7) | ((learnedPc >> 4) & 0x7f)
+          dut.io.predictorUpdateMetadata #=
+            (phtIndex | (2 << PredictorMetadataLayout.PhtStateLsb))
           dut.io.predictorRetireValid #= 1
           dut.io.predictorRetireTaken #= 1
           dut.io.predictorRetireType(0) #= 0

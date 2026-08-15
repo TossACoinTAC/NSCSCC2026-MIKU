@@ -12,12 +12,18 @@ object PredictedBranchType {
   def call: UInt = U(4, Width bits)
 }
 
+object PredictorMetadataLayout {
+  val PhtIndexWidth = 12
+  val PhtStateLsb = PhtIndexWidth
+  val PhtValidBit = PhtStateLsb + 2
+}
+
 final case class BankedFetchPrediction(config: OooCoreConfig) extends Bundle {
   val hit = Bool()
   val phtValid = Bool()
   val branchType = UInt(PredictedBranchType.Width bits)
   val phtState = UInt(2 bits)
-  val phtIndex = UInt(10 bits)
+  val phtIndex = UInt(PredictorMetadataLayout.PhtIndexWidth bits)
   val target = UInt(config.xlen bits)
 }
 
@@ -30,7 +36,7 @@ final case class BankedFetchPrediction(config: OooCoreConfig) extends Bundle {
 final class BankedFetchPredictor(
     config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit,
     btbEntriesPerBank: Int = 128,
-    phtEntriesPerBank: Int = 1024,
+    phtEntriesPerBank: Int = 4096,
     historyWidth: Int = 8,
     rasDepth: Int = 8
 ) extends Component {
@@ -52,7 +58,7 @@ final class BankedFetchPredictor(
 
   require(config.fetchWidth == 4)
   require(btbEntriesPerBank == 128)
-  require(phtEntriesPerBank == 1024)
+  require(phtEntriesPerBank == (1 << PredictorMetadataLayout.PhtIndexWidth))
   require(historyWidth == 8)
   require(rasDepth == 8)
 
@@ -227,8 +233,10 @@ final class BankedFetchPredictor(
     lookupGhr := speculativeGhr(historyWidth - 2 downto 0) ##
       io.speculativeHistoryTaken.asBits
   }
+  // Preserve the proven five-bit history partition and spend the extra BRAM depth on two more
+  // static-PC bits. Unlike the rejected XOR-fold experiment, this adds no lookup logic level.
   val lookupPhtIndex = lookupGhr(4 downto 0) ##
-    io.lookupPc(fetchGroupOffsetWidth + 4 downto fetchGroupOffsetWidth)
+    io.lookupPc(fetchGroupOffsetWidth + 6 downto fetchGroupOffsetWidth)
   val capturedTag = Reg(Bits(btbTagWidth bits)) init (0)
   val capturedPhtIndex = Reg(UInt(phtRowWidth bits)) init (0)
   // The synchronous table ports read continuously after initialization.  lookupFire qualifies
@@ -263,7 +271,7 @@ final class BankedFetchPredictor(
   val phtUpdateBank = io.phtUpdatePc(fetchGroupOffsetWidth - 1 downto 2)
   val phtNextState = UInt(2 bits)
   // An untrained BTB entry uses BTFNT, so stale power-up PHT data is never observed. Its first
-  // precise update installs a weak state directly and removes the 1024-cycle PHT reset sweep.
+  // precise update installs a weak state directly and removes a full PHT reset sweep.
   phtNextState := Mux(io.phtUpdateTaken, U(2, 2 bits), U(1, 2 bits))
   when(io.phtUpdateOldValid && io.phtUpdateTaken && io.phtUpdateOldState =/= 3) {
     phtNextState := io.phtUpdateOldState + 1
@@ -312,7 +320,7 @@ final class BankedFetchPredictor(
       phtRead(bank),
       Mux(btbRead(bank)(btbStaticTakenBit), B"10", B"01")
     ).asUInt
-    io.prediction(bank).phtIndex := capturedPhtIndex
+    io.prediction(bank).phtIndex := capturedPhtIndex.resized
     io.prediction(bank).target :=
       btbRead(bank)(btbTargetLsb + config.xlen - 1 downto btbTargetLsb).asUInt
     when(
