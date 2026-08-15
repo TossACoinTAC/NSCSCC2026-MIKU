@@ -586,37 +586,17 @@ final class DispatchRouter(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   portUsed(0) := 0
   val laneOpen = Vec(Bool(), config.dispatchWidth + 1)
   laneOpen(0) := True
-  val readyCapabilities = Vec(Bits(config.executionWidth bits), config.dispatchWidth)
-  for (lane <- 0 until config.dispatchWidth; port <- 0 until config.executionWidth) {
-    readyCapabilities(lane)(port) := io.inputValid(lane) && io.portReady(port) &&
-      accepts(config.executionPorts(port), io.input(lane))
-  }
   val choices = Vec(Bits(config.executionWidth bits), config.dispatchWidth)
   for (lane <- 0 until config.dispatchWidth) {
-    val available = readyCapabilities(lane) & ~portUsed(lane)
-    val selectionPool = if (config.enableCapabilityAwareDispatchReservation) {
-      val reservedForYounger = Bits(config.executionWidth bits)
-      for (port <- 0 until config.executionWidth) {
-        val reservations = (lane + 1 until config.dispatchWidth).map { younger =>
-          val precedingReachable = (lane + 1 until younger).map { preceding =>
-            !io.inputValid(preceding) || readyCapabilities(preceding).orR
-          }
-          val reachesYounger = if (precedingReachable.isEmpty) True
-          else precedingReachable.reduce(_ && _)
-          reachesYounger &&
-            readyCapabilities(younger) === B(1 << port, config.executionWidth bits)
-        }
-        reservedForYounger(port) :=
-          (if (reservations.isEmpty) False else reservations.reduce(_ || _))
-      }
-      val unreserved = available & ~reservedForYounger
-      Mux(unreserved.orR, unreserved, available)
-    } else {
-      available
+    val capable = Bits(config.executionWidth bits)
+    for (port <- 0 until config.executionWidth) {
+      capable(port) := io.inputValid(lane) && io.portReady(port) &&
+        accepts(config.executionPorts(port), io.input(lane))
     }
+    val available = capable & ~portUsed(lane)
     choices(lane) := B(0, config.executionWidth bits)
     when(laneOpen(lane) && available.orR) {
-      choices(lane) := UIntToOh(selectLowest(selectionPool), config.executionWidth)
+      choices(lane) := UIntToOh(selectLowest(available), config.executionWidth)
     }
     portUsed(lane + 1) := portUsed(lane) | choices(lane)
     io.inputReady(lane) := laneOpen(lane) && available.orR
