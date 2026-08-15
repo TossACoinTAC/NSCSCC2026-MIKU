@@ -86,6 +86,7 @@ final case class OooCoreConfig(
     mshrEntries: Int = 4,
     enableDivideFastPath: Boolean = false,
     enableFastStoreCompletion: Boolean = true,
+    enableDecoupledStoreCompletion: Boolean = true,
     enableStoreTranslationLookahead: Boolean = true,
     // When a translated cached Load waits only for overlapping Store data, scan younger
     // Load entries one at a time instead of expanding Store disambiguation across the LDQ.

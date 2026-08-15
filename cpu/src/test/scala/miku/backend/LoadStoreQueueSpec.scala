@@ -1145,6 +1145,98 @@ class LoadStoreQueueSpec extends AnyFunSuite {
       }
   }
 
+  test("cached Store completion can advance independently of the ordered drain") {
+    for ((enabled, name, seed) <- Seq(
+        (false, "coupled", 0x4c7d),
+        (true, "decoupled", 0x4c7e)
+      )) {
+      val testConfig = config.copy(
+        enableFastStoreCompletion = false,
+        enableDecoupledStoreCompletion = enabled
+      )
+      SimConfig.withVerilator
+        .workspacePath(s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-lsq-store-drain-$name")
+        .compile(new LoadStoreQueueProbe(testConfig))
+        .doSim(s"ooo-lsq-store-drain-$name", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearInputs(dut)
+          dut.io.translationBypassEligible #= true
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          sample(dut)
+
+          dut.io.allocateValid #= 3
+          for ((lane, pointer, index) <- Seq((0, 4, 0), (1, 5, 1))) {
+            dut.io.allocate(lane).robPointer #= pointer
+            dut.io.allocate(lane).isStore #= true
+            dut.io.allocate(lane).storeQueueIndex #= index
+          }
+          sample(dut)
+          dut.io.allocateValid #= 0
+
+          dut.io.translationBypassPhysicalAddress #= 0x100
+          setStoreAgu(dut, 4, 0x100, BigInt("11111111", 16), storeIndex = 0)
+          sample(dut)
+          dut.io.aguValid #= false
+          var olderCompletionWait = 0
+          while (!dut.io.completionValid.toBoolean && olderCompletionWait < 8) {
+            sample(dut)
+            olderCompletionWait += 1
+          }
+          assert(dut.io.completionValid.toBoolean)
+          assert(dut.io.completion.robPointer.toBigInt == 4)
+          sample(dut)
+          assert(!dut.io.completionValid.toBoolean)
+
+          dut.io.commitValid #= 1
+          dut.io.commit(0).robPointer #= 4
+          dut.io.commit(0).isStore #= true
+          dut.io.commit(0).storeQueueIndex #= 0
+          sample(dut)
+          dut.io.commitValid #= 0
+          var requestWait = 0
+          while (!dut.io.dataRequestValid.toBoolean && requestWait < 8) {
+            sample(dut)
+            requestWait += 1
+          }
+          assert(dut.io.dataRequestValid.toBoolean)
+          assert(dut.io.dataRequest.robPointer.toBigInt == 4)
+
+          dut.io.translationBypassPhysicalAddress #= 0x104
+          setStoreAgu(dut, 5, 0x104, BigInt("22222222", 16), storeIndex = 1)
+          sample(dut)
+          dut.io.aguValid #= false
+          var youngerCompletedWhileBlocked = false
+          for (_ <- 0 until 6) {
+            sample(dut)
+            youngerCompletedWhileBlocked = youngerCompletedWhileBlocked ||
+              (dut.io.completionValid.toBoolean &&
+                dut.io.completion.robPointer.toBigInt == 5)
+            assert(dut.io.dataRequestValid.toBoolean)
+            assert(dut.io.dataRequest.robPointer.toBigInt == 4)
+          }
+          assert(youngerCompletedWhileBlocked == enabled)
+
+          dut.io.dataRequestReady #= true
+          sample(dut)
+          dut.io.dataRequestReady #= false
+          if (!enabled) {
+            var youngerCompletionWait = 0
+            while (
+              (!dut.io.completionValid.toBoolean ||
+                dut.io.completion.robPointer.toBigInt != 5) && youngerCompletionWait < 8
+            ) {
+              sample(dut)
+              youngerCompletionWait += 1
+            }
+            assert(dut.io.completionValid.toBoolean)
+            assert(dut.io.completion.robPointer.toBigInt == 5)
+          }
+        }
+    }
+  }
+
   test("ordinary cached Store completion bypass is independently configurable") {
     for ((enabled, name, seed) <- Seq(
         (false, "registered", 0x4c78),

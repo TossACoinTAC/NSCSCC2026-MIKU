@@ -219,6 +219,14 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     entry.translationDone.init(False)
   }
   val storeHead = Reg(UInt(config.storeQueueIndexWidth bits)) init (0)
+  // Completion may run ahead of the ordered side-effect drain. This mirrors
+  // the StoreQueue/StoreBuffer split in ysyx while keeping one narrow indexed
+  // Store path instead of adding an all-entry completion CAM.
+  val storeCompletionHead = if (config.enableDecoupledStoreCompletion) {
+    Reg(UInt(config.storeQueueIndexWidth bits)) init (0)
+  } else {
+    storeHead
+  }
   // The allocator releases load slots in retirement order.  Keeping the
   // oldest live slot explicitly lets the scheduler rotate a small pending
   // bitmap instead of comparing every load ROB pointer against every other
@@ -347,6 +355,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   }
 
   val headStore = stores(storeHead)
+  val completionStore = stores(storeCompletionHead)
   val headLoadState = loads(loadHead)
   val loadHeadReady = scheduledLoadValid && headLoadState.valid &&
     headLoadState.robPointer === scheduledLoad.robPointer && headLoadState.addressReady &&
@@ -590,10 +599,10 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     (io.translationResponse.exception.valid ||
       (translationOwnerStore && translationStoreCanComplete &&
         (!io.translationResponse.uncached || translationStore.isSc)))
-  val storeCompletionCandidate = headStore.valid && headStore.addressReady &&
-    headStore.translationDone && !headStore.completed &&
-    (headStore.dataReady || (headStore.isSc && !headStore.scSuccess)) &&
-    (!headStore.uncached || headStore.isSc)
+  val storeCompletionCandidate = completionStore.valid && completionStore.addressReady &&
+    completionStore.translationDone && !completionStore.completed &&
+    (completionStore.dataReady || (completionStore.isSc && !completionStore.scSuccess)) &&
+    (!completionStore.uncached || completionStore.isSc)
   // Cache responses cannot be backpressured. After those, complete the older
   // Store before a younger forwarded Load. Besides preserving age priority,
   // this keeps the deep forwarding/alias predicate out of the direct Store-to-ROB path.
@@ -718,13 +727,13 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       )
     }
   }.elsewhen(storeCompletionFire) {
-    generatedCompletion.robPointer := headStore.robPointer
-    generatedCompletion.recoveryEpoch := headStore.recoveryEpoch
-    generatedCompletion.pdst := headStore.pdst
-    generatedCompletion.writesPdst := headStore.writesPdst
+    generatedCompletion.robPointer := completionStore.robPointer
+    generatedCompletion.recoveryEpoch := completionStore.recoveryEpoch
+    generatedCompletion.pdst := completionStore.pdst
+    generatedCompletion.writesPdst := completionStore.writesPdst
     generatedCompletion.data := Mux(
-      headStore.isSc,
-      headStore.scSuccess.asBits.resize(config.xlen),
+      completionStore.isSc,
+      completionStore.scSuccess.asBits.resize(config.xlen),
       B(0, config.xlen bits)
     )
   }.elsewhen(translationCompletionFire) {
@@ -842,7 +851,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val translatedFastStore = translationCompletionFire && translationOwnerStore &&
     !translationStore.isSc && !io.translationResponse.cancelled &&
     !io.translationResponse.exception.valid && !io.translationResponse.uncached
-  val alreadyTranslatedFastStore = storeCompletionFire && !headStore.isSc
+  val alreadyTranslatedFastStore = storeCompletionFire && !completionStore.isSc
   val fastStoreCompletionCandidate = if (config.enableFastStoreCompletion) {
     !io.flush && (translatedFastStore || alreadyTranslatedFastStore)
   } else {
@@ -856,12 +865,12 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val fastStoreCompletionRobPointer = Mux(
     translatedFastStore,
     translationOwnerRobPointer,
-    headStore.robPointer
+    completionStore.robPointer
   )
   val fastStoreCompletionRecoveryEpoch = Mux(
     translatedFastStore,
     translationOwnerRecoveryEpoch,
-    headStore.recoveryEpoch
+    completionStore.recoveryEpoch
   )
   when(io.flush) {
     aguExceptionCompletionValid := False
@@ -1021,6 +1030,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     // Retired stores are architectural state.  Preserve the committed prefix
     // across recovery and drain it before admitting the new speculative epoch.
     drainAfterFlush := committedStorePresent
+    if (config.enableDecoupledStoreCompletion) {
+      storeCompletionHead := 0
+    }
     when(!committedStorePresent) {
       storeHead := 0
     }
@@ -1060,6 +1072,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     when(drainAfterFlush && !committedStorePresent) {
       drainAfterFlush := False
       storeHead := 0
+      if (config.enableDecoupledStoreCompletion) {
+        storeCompletionHead := 0
+      }
     }
     for (lane <- 0 until config.renameWidth) {
       when(io.allocateValid(lane) && io.allocate(lane).isStore) {
@@ -1166,7 +1181,20 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       }
     }
     when(storeCompletionFire) {
-      stores(storeHead).completed := True
+      stores(storeCompletionHead).completed := True
+    }
+    if (config.enableDecoupledStoreCompletion) {
+      val translationCompletesCursorStore = translationCompletionFire &&
+        translationOwnerStore && translationOwnerStoreIndex === storeCompletionHead &&
+        translationStore.valid && translationStore.robPointer === translationOwnerRobPointer &&
+        translationStore.recoveryEpoch === translationOwnerRecoveryEpoch
+      when(
+        !drainAfterFlush &&
+          (storeCompletionFire || translationCompletesCursorStore ||
+            (completionStore.valid && completionStore.completed))
+      ) {
+        storeCompletionHead := storeCompletionHead + 1
+      }
     }
 
     for (lane <- 0 until config.commitWidth) {
