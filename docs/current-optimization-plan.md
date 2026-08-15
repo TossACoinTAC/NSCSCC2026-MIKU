@@ -93,7 +93,7 @@
   因而不能直接视为 L02 的安全可回收周期。branch recovery 只占 `0.97%`，本轮不优先
   扩大分支恢复机制。汇总证据为 `build/reports/observations/R6-baseline.json`。
 
-## R6：Load head completion 提前退休
+## R6：Load head completion 提前退休实验
 
 首项 `L10` 使用 LSQ 原始 ordinary cached Load completion 产生窄身份 token；ROB 只在
 当前 epoch、准确命中下一拍 head 时保存 token。Load 数据仍由现有 LSQ completion 寄存器
@@ -101,11 +101,24 @@
 避免把 cache response/forwarding 的组合数据路径直接拉入 ROB 提交控制。异常、LL、SUC、
 translation completion、flush、旧 epoch 和非 head completion 全部保留原路径。
 
-`L10` 的动态上界为 `382,202/5,014,756 = 7.6215%`，不是预期收益；实际保留门槛仍为
-完整 perf20 归一化几何平均至少改善 `0.5%`。实现必须覆盖 cache response、Store forwarding、
-同拍 completion 冲突、pointer/epoch 复用和 flush，并在 clean perf20 后重采 matching
-instrumented 计数器。该候选会跨 LSQ/ROB，但控制只走窄 token；数据使用已经存在的 LSQ
-寄存边界，以保护当前 `+0.028 ns` 的有限时序预算。
+`L10 @ 518714a` 的动态上界为 `382,202/5,014,756 = 7.6215%`，但完整实验说明该上界
+大部分不能转化为总周期收益。原始实现首先暴露出一项真实恢复边界：Load 已提前退休，随后
+年轻分支 recovery 与延迟一拍的 PRF 写回重合时，普通 flush 抑制会丢失已成为架构状态的
+写回；`43d8f41` 将恢复例外严格限定为同一拍实际退休的准确 Load 身份。修复后
+ReorderBuffer 18/18、完整 `cpu-check` 39 suites/231 tests、RTL/Yosys/合同门禁和 perf20
+20/20 均通过。
+
+相对 R5，perf20 总周期为 `5,014,776 -> 5,015,136`（`+0.007179%`），归一化几何平均
+加速仅 `1.000411877x`，远低于 `0.5%` 保留门槛；单项在 `coremark -1.27359%` 至
+`fireye_I2 +1.16388%` 间重排，说明早退主要改变调度相位，未稳定回收整体瓶颈。
+`4cdfd21`、`baca0c6` 已依次撤回修复与实现，当前默认 RTL 回到 R5。比较证据为
+`build/reports/comparisons/R6-L10.json`。
+
+R6 下一项优先处理 SQ full：matching observer 中 Store Queue 满占 ROI `9.1629%`。
+候选应在 committed cached Store 已完整捕获到现有 request buffer 时释放原 SQ 槽，并让
+buffer 自身继续承担恢复、顺序和 drain 所有权；这比直接把 STQ 从 8 扩到 16 更少增加
+关联地址比较和 forwarding 时序压力。正式实现前须证明 buffered Store 会继续阻塞所有
+可能越过它的年轻访存，并在 flush、cache backpressure、CACOP/barrier 下保持架构可见。
 
 ## R1：时序候选与周期验证
 
