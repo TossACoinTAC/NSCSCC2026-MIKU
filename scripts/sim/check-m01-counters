@@ -30,6 +30,7 @@ if schema in {
     "miku-perf-observation-v8",
     "miku-perf-observation-v9",
     "miku-perf-observation-v10",
+    "miku-perf-observation-v11",
 }:
     abi = counters.get("observation_abi")
     if abi != {"magic": "MIKU", "version": 1, "word_count": 8}:
@@ -47,6 +48,7 @@ if schema in {
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
         "miku-perf-observation-v10",
+        "miku-perf-observation-v11",
     }:
         roi = counters.get("roi")
         if not isinstance(roi, dict):
@@ -138,6 +140,7 @@ if schema in {
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
         "miku-perf-observation-v10",
+        "miku-perf-observation-v11",
     }:
         head_reason_names = {
             "invalid",
@@ -186,6 +189,7 @@ if schema in {
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
         "miku-perf-observation-v10",
+        "miku-perf-observation-v11",
     }:
         request_sequences = frontend.get("request_interval_sequences")
         if (
@@ -259,6 +263,7 @@ if schema in {
         "miku-perf-observation-v8": 53,
         "miku-perf-observation-v9": 53,
         "miku-perf-observation-v10": 53,
+        "miku-perf-observation-v11": 53,
     }.get(schema, 28)
     if not isinstance(lsq_events, list) or len(lsq_events) != expected_lsq_events or not all(
         isinstance(value, int) and 0 <= value <= cycles for value in lsq_events
@@ -268,6 +273,7 @@ if schema in {
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
         "miku-perf-observation-v10",
+        "miku-perf-observation-v11",
     }:
         load_capacity = lsq.get("load_capacity")
         if load_capacity not in {8, 16, 32, 64}:
@@ -284,13 +290,18 @@ if schema in {
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
         "miku-perf-observation-v10",
+        "miku-perf-observation-v11",
     }:
         if lsq.get("load_full_cycles") != lsq_events[46]:
             fail("load queue full count does not match DUT observation")
         if lsq.get("store_full_cycles") != lsq_events[47]:
             fail("store queue full count does not match DUT observation")
 
-    if schema in {"miku-perf-observation-v9", "miku-perf-observation-v10"}:
+    if schema in {
+        "miku-perf-observation-v9",
+        "miku-perf-observation-v10",
+        "miku-perf-observation-v11",
+    }:
         store_data = counters.get("store_data", {})
         multiple_ready = store_data.get("multiple_ready_cycles")
         out_of_age = store_data.get("out_of_age_order_cycles")
@@ -302,7 +313,7 @@ if schema in {
         if out_of_age > multiple_ready:
             fail("store-data out-of-age count exceeds multiple-ready opportunities")
 
-    if schema == "miku-perf-observation-v10":
+    if schema in {"miku-perf-observation-v10", "miku-perf-observation-v11"}:
         predictor_history = counters.get("predictor_history", {})
         history_groups = predictor_history.get("groups")
         history_steps = predictor_history.get("conditional_steps")
@@ -342,6 +353,43 @@ if schema in {
         if l1d_arbitration["older_waiter_collision_cycles"] > collision:
             fail("L1D older-waiter count exceeds collisions")
 
+    if schema == "miku-perf-observation-v11":
+        rename_admission = counters.get("rename_admission", {})
+        rename_names = {
+            "present_cycles",
+            "blocked_cycles",
+            "dispatch_queue_blocked_cycles",
+            "rob_blocked_cycles",
+            "freelist_conservative_blocked_cycles",
+            "freelist_exact_fit_cycles",
+            "freelist_only_rescue_cycles",
+            "lsq_blocked_cycles",
+        }
+        if set(rename_admission) != rename_names or not all(
+            isinstance(value, int) and 0 <= value <= cycles
+            for value in rename_admission.values()
+        ):
+            fail("rename-admission counters have an invalid schema")
+        present = rename_admission["present_cycles"]
+        blocked = rename_admission["blocked_cycles"]
+        conservative = rename_admission["freelist_conservative_blocked_cycles"]
+        exact_fit = rename_admission["freelist_exact_fit_cycles"]
+        only_rescue = rename_admission["freelist_only_rescue_cycles"]
+        if blocked > present:
+            fail("rename blocked cycles exceed present groups")
+        if any(
+            rename_admission[name] > blocked
+            for name in (
+                "dispatch_queue_blocked_cycles",
+                "rob_blocked_cycles",
+                "freelist_conservative_blocked_cycles",
+                "lsq_blocked_cycles",
+            )
+        ):
+            fail("rename resource-block count exceeds blocked groups")
+        if not only_rescue <= exact_fit <= conservative:
+            fail("rename FreeList rescue counts violate containment")
+
     cache = counters.get("cache", {})
     if not isinstance(cache.get("events"), list) or len(cache["events"]) != 20:
         fail("cache events must contain 20 counters")
@@ -377,6 +425,7 @@ if schema in {
         "miku-perf-observation-v8",
         "miku-perf-observation-v9",
         "miku-perf-observation-v10",
+        "miku-perf-observation-v11",
     } and invariants.get("roi_complete") is not True:
         fail("invariant roi_complete is not true")
     for name in (

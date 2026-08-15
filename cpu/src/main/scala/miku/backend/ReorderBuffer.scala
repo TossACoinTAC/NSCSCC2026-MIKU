@@ -83,6 +83,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val completionWakeupData = out Vec (Bits(config.xlen bits), config.writebackWidth)
     val currentEpoch = in UInt (config.recoveryEpochWidth bits)
     val predictorUpdateCapacity = in UInt (log2Up(config.commitWidth + 1) bits)
+    val observationRenameAdmission = in Bits (8 bits)
 
     val commitValid = out Bits (config.commitWidth bits)
     val commit = out Vec (CommitRecord(config), config.commitWidth)
@@ -732,5 +733,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   }
   perfObservationV1Word4(52) := observationIncomingHeadBranchCompletion.orR
   perfObservationV1Word4(53) := observationIncomingHeadMispredictCompletion.orR
+  perfObservationV1Word4(61 downto 54) := io.observationRenameAdmission
   PerfObservationV1.expose(perfObservationV1Word4, 4)
 }

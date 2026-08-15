@@ -242,6 +242,23 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val resourcesReady = dispatchQueue.io.enqueueReady &&
     rob.io.allocateCapacityReady && freeList.io.allocateCapacityReady &&
     lsqAllocator.io.allocateCapacityReady && !io.flush
+  val observationRenamePresent = io.renameValid.orR && !io.flush
+  rob.io.observationRenameAdmission(0) := observationRenamePresent
+  rob.io.observationRenameAdmission(1) := observationRenamePresent && !resourcesReady
+  rob.io.observationRenameAdmission(2) :=
+    observationRenamePresent && !dispatchQueue.io.enqueueReady
+  rob.io.observationRenameAdmission(3) :=
+    observationRenamePresent && !rob.io.allocateCapacityReady
+  rob.io.observationRenameAdmission(4) :=
+    observationRenamePresent && !freeList.io.allocateCapacityReady
+  rob.io.observationRenameAdmission(5) :=
+    observationRenamePresent && !freeList.io.allocateCapacityReady && freeList.io.allocateReady
+  rob.io.observationRenameAdmission(6) := observationRenamePresent &&
+    !freeList.io.allocateCapacityReady && freeList.io.allocateReady &&
+    dispatchQueue.io.enqueueReady && rob.io.allocateCapacityReady &&
+    lsqAllocator.io.allocateCapacityReady
+  rob.io.observationRenameAdmission(7) :=
+    observationRenamePresent && !lsqAllocator.io.allocateCapacityReady
   val acceptAll = resourcesReady && io.renameValid.orR
   val accepted = Bits(config.renameWidth bits)
   val allLanes = B((BigInt(1) << config.renameWidth) - 1, config.renameWidth bits)

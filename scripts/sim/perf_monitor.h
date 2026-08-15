@@ -23,6 +23,7 @@ private:
     static constexpr unsigned kWordCount = 8;
     static constexpr unsigned kFrontendOccupancyBins = 17;
     static constexpr unsigned kLsqEventCount = 53;
+    static constexpr unsigned kRenameAdmissionEventCount = 8;
 
     struct CycleSnapshot {
         std::uint64_t words[kWordCount] = {};
@@ -81,6 +82,7 @@ private:
         std::uint64_t branch_resolve_to_recovery_hist[8] = {};
         std::uint64_t branch_head_completion_opportunity = 0;
         std::uint64_t branch_head_mispredict_opportunity = 0;
+        std::uint64_t rename_admission[kRenameAdmissionEventCount] = {};
         std::uint64_t predictor_history_groups = 0;
         std::uint64_t predictor_history_conditional_steps = 0;
         std::uint64_t predictor_history_multi_groups = 0;
@@ -175,6 +177,7 @@ private:
     std::uint64_t branch_resolve_to_recovery_hist_[8] = {};
     std::uint64_t branch_head_completion_opportunity_ = 0;
     std::uint64_t branch_head_mispredict_opportunity_ = 0;
+    std::uint64_t rename_admission_[kRenameAdmissionEventCount] = {};
     std::uint64_t predictor_history_groups_ = 0;
     std::uint64_t predictor_history_conditional_steps_ = 0;
     std::uint64_t predictor_history_multi_groups_ = 0;

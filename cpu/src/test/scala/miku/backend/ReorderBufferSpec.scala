@@ -80,6 +80,7 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
   }
   rob.io.currentEpoch := io.currentEpoch
   rob.io.predictorUpdateCapacity := io.predictorUpdateCapacity
+  rob.io.observationRenameAdmission := 0
   rob.io.completionValid := io.completionValid
   rob.io.storeCompletionBypassValid := io.storeCompletionBypassValid
   rob.io.storeCompletionBypass.robPointer := io.storeCompletionBypassRobPointer

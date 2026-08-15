@@ -101,6 +101,16 @@ def write_observation_matrix(root: Path) -> Path:
                 "older_waiter_collision_cycles": 4,
                 "multiple_ready_waiter_cycles": 3,
             }
+            counters["rename_admission"] = {
+                "present_cycles": 500,
+                "blocked_cycles": 100,
+                "dispatch_queue_blocked_cycles": 40,
+                "rob_blocked_cycles": 30,
+                "freelist_conservative_blocked_cycles": 20,
+                "freelist_exact_fit_cycles": 15,
+                "freelist_only_rescue_cycles": 10,
+                "lsq_blocked_cycles": 25,
+            }
             path = lane / "m01-counters.json"
             path.write_text(json.dumps(counters), encoding="utf-8")
             counter_hash = hashlib.sha256(path.read_bytes()).hexdigest()
@@ -142,7 +152,7 @@ class PerfObservationSummaryTest(unittest.TestCase):
             self.assertEqual(raw["score_cycles"], 20000)
             self.assertEqual(raw["roi_cycles"], 19980)
             self.assertEqual(raw["retired_instructions"], 10000)
-            self.assertEqual(result["source_schema"], "miku-perf-observation-v10")
+            self.assertEqual(result["source_schema"], "miku-perf-observation-v11")
             self.assertEqual(raw["load_queue_capacity"], 8)
             self.assertEqual(raw["store_data_multiple_ready_cycles"], 400)
             self.assertEqual(raw["store_data_out_of_age_order_cycles"], 100)
@@ -159,6 +169,13 @@ class PerfObservationSummaryTest(unittest.TestCase):
             self.assertEqual(
                 raw["l1d_response_arbitration"]["older_waiter_collision_cycles"],
                 80,
+            )
+            self.assertEqual(
+                raw["rename_admission"]["freelist_only_rescue_cycles"], 200
+            )
+            self.assertAlmostEqual(
+                result["summary"]["derived"]["rename_freelist_only_rescue_ratio"],
+                200 / 19980,
             )
             self.assertIn("cached_store_request_fire", raw["lsq_events"])
             self.assertIn("load_queue_full", raw["lsq_events"])
@@ -277,6 +294,33 @@ class PerfObservationSummaryTest(unittest.TestCase):
             result = summarize_matrix(matrix)
             self.assertEqual(result["source_schema"], "miku-perf-observation-v9")
             self.assertEqual(result["summary"]["raw"]["predictor_history_groups"], 0)
+
+    def test_summarizes_existing_v10_matrix_without_v11_fields(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            matrix = write_observation_matrix(Path(directory))
+            for path in Path(directory).glob("perf20__*/seed_0/limit_1ns/m01-counters.json"):
+                counters = json.loads(path.read_text(encoding="utf-8"))
+                counters["schema_version"] = "miku-perf-observation-v10"
+                counters.pop("rename_admission")
+                path.write_text(json.dumps(counters), encoding="utf-8")
+                manifest = path.with_name("run-manifest.txt")
+                lines = manifest.read_text(encoding="utf-8").splitlines()
+                counter_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+                manifest.write_text(
+                    "\n".join(
+                        f"m01_counters_sha256={counter_hash}"
+                        if line.startswith("m01_counters_sha256=")
+                        else line
+                        for line in lines
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            result = summarize_matrix(matrix)
+            self.assertEqual(result["source_schema"], "miku-perf-observation-v10")
+            self.assertEqual(
+                result["summary"]["raw"]["rename_admission"]["present_cycles"], 0
+            )
 
     def test_rejects_tampered_counter_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -25,7 +25,7 @@ OBSERVATION_SOURCES = (
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v10",
+        "schema_version": "miku-perf-observation-v11",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
         "roi": {
             "mode": "outermost-counter-read-pair",
@@ -125,6 +125,16 @@ def valid_document() -> dict:
             "hit_waiter_collision_cycles": 0,
             "older_waiter_collision_cycles": 0,
             "multiple_ready_waiter_cycles": 0,
+        },
+        "rename_admission": {
+            "present_cycles": 0,
+            "blocked_cycles": 0,
+            "dispatch_queue_blocked_cycles": 0,
+            "rob_blocked_cycles": 0,
+            "freelist_conservative_blocked_cycles": 0,
+            "freelist_exact_fit_cycles": 0,
+            "freelist_only_rescue_cycles": 0,
+            "lsq_blocked_cycles": 0,
         },
         "axi": {
             "valid": [0] * 5,
@@ -243,6 +253,13 @@ class PerfObservationContractTest(unittest.TestCase):
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_accepts_existing_v10_evidence_without_v11_fields(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v10"
+        document.pop("rename_admission")
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_accepts_self_described_sixteen_entry_load_queue(self) -> None:
         document = copy.deepcopy(valid_document())
         document["lsq"]["load_capacity"] = 16
@@ -294,6 +311,16 @@ class PerfObservationContractTest(unittest.TestCase):
         result = self.run_checker(document)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("older-waiter count exceeds", result.stdout)
+
+    def test_rejects_freelist_rescue_without_exact_fit(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["rename_admission"]["present_cycles"] = 1
+        document["rename_admission"]["blocked_cycles"] = 1
+        document["rename_admission"]["freelist_conservative_blocked_cycles"] = 1
+        document["rename_admission"]["freelist_only_rescue_cycles"] = 1
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("FreeList rescue counts violate", result.stdout)
 
     def test_rejects_harness_queue_full_mismatch(self) -> None:
         document = copy.deepcopy(valid_document())

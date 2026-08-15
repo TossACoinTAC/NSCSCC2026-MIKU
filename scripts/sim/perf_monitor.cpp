@@ -183,6 +183,8 @@ void PerfMonitor::reset_accumulators() {
     branch_resolve_to_recovery_max_ = 0;
     branch_head_completion_opportunity_ = 0;
     branch_head_mispredict_opportunity_ = 0;
+    std::fill(std::begin(rename_admission_),
+              std::end(rename_admission_), 0);
     predictor_history_groups_ = 0;
     predictor_history_conditional_steps_ = 0;
     predictor_history_multi_groups_ = 0;
@@ -258,6 +260,7 @@ void PerfMonitor::save_accumulator_checkpoint() {
     SAVE_ARRAY(branch_resolve_to_recovery_hist);
     SAVE_SCALAR(branch_head_completion_opportunity);
     SAVE_SCALAR(branch_head_mispredict_opportunity);
+    SAVE_ARRAY(rename_admission);
     SAVE_SCALAR(predictor_history_groups);
     SAVE_SCALAR(predictor_history_conditional_steps);
     SAVE_SCALAR(predictor_history_multi_groups);
@@ -330,6 +333,7 @@ void PerfMonitor::restore_accumulator_checkpoint() {
     RESTORE_ARRAY(branch_resolve_to_recovery_hist);
     RESTORE_SCALAR(branch_head_completion_opportunity);
     RESTORE_SCALAR(branch_head_mispredict_opportunity);
+    RESTORE_ARRAY(rename_admission);
     RESTORE_SCALAR(predictor_history_groups);
     RESTORE_SCALAR(predictor_history_conditional_steps);
     RESTORE_SCALAR(predictor_history_multi_groups);
@@ -485,6 +489,9 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     branch_mispredicted_ += popcount(mispredict_mask);
     branch_head_completion_opportunity_ += field(branch, 52, 1);
     branch_head_mispredict_opportunity_ += field(branch, 53, 1);
+    for (unsigned index = 0; index < kRenameAdmissionEventCount; index++) {
+        rename_admission_[index] += field(branch, 54 + index, 1);
+    }
     for (unsigned lane = 0; lane < 5; lane++) {
         if (field(mispredict_mask, lane, 1) == 0) continue;
         const unsigned pointer = static_cast<unsigned>(field(branch, 10 + lane * 6, 6));
@@ -640,7 +647,7 @@ void PerfMonitor::write_json(const char *path) {
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
 
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v10\",\n");
+    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v11\",\n");
     std::fprintf(file, "  \"observation_abi\": {\"magic\": \"MIKU\", \"version\": 1, \"word_count\": 8},\n");
     std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"nested_counter_read_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
                  roi_marker_seen_ ? "outermost-counter-read-pair" : "full-run",
@@ -755,6 +762,15 @@ void PerfMonitor::write_json(const char *path) {
                  static_cast<unsigned long long>(predictor_history_groups_),
                  static_cast<unsigned long long>(predictor_history_conditional_steps_),
                  static_cast<unsigned long long>(predictor_history_multi_groups_));
+    std::fprintf(file, "  \"rename_admission\": {\"present_cycles\": %llu, \"blocked_cycles\": %llu, \"dispatch_queue_blocked_cycles\": %llu, \"rob_blocked_cycles\": %llu, \"freelist_conservative_blocked_cycles\": %llu, \"freelist_exact_fit_cycles\": %llu, \"freelist_only_rescue_cycles\": %llu, \"lsq_blocked_cycles\": %llu},\n",
+                 static_cast<unsigned long long>(rename_admission_[0]),
+                 static_cast<unsigned long long>(rename_admission_[1]),
+                 static_cast<unsigned long long>(rename_admission_[2]),
+                 static_cast<unsigned long long>(rename_admission_[3]),
+                 static_cast<unsigned long long>(rename_admission_[4]),
+                 static_cast<unsigned long long>(rename_admission_[5]),
+                 static_cast<unsigned long long>(rename_admission_[6]),
+                 static_cast<unsigned long long>(rename_admission_[7]));
 
     std::fprintf(file, "  \"lsq\": {\"load_capacity\": %u, \"load_occupancy_sum\": %llu, \"store_occupancy_sum\": %llu, \"load_full_cycles\": %llu, \"store_full_cycles\": %llu, \"events\": [",
                  load_queue_capacity_,
