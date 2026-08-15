@@ -552,6 +552,67 @@ class IssueQueueSpec extends AnyFunSuite {
       }
   }
 
+  test("exact IQ credit reopens a full queue immediately after dequeue") {
+    for (exactCredit <- Seq(false, true)) {
+      val config = OooCoreConfig.FourIssueThreeCommit.copy(
+        enableExactIssueQueueEnqueueCredit = exactCredit
+      )
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-iq-exact-credit-$exactCredit"
+        )
+        .compile(new IssueQueueProbe(config))
+        .doSim(s"ooo-iq-exact-credit-$exactCredit", if (exactCredit) 0x4973 else 0x4972) {
+          dut =>
+            dut.clockDomain.forkStimulus(period = 10)
+            clearInputs(dut, config)
+            dut.clockDomain.assertReset()
+            dut.clockDomain.waitSampling(2)
+            dut.clockDomain.deassertReset()
+            sample(dut)
+
+            dut.io.enqueueValid #= true
+            dut.io.enqueue.psrc1 #= 5
+            dut.io.enqueue.psrc2 #= 6
+            dut.io.enqueue.source1Ready #= false
+            dut.io.enqueue.source2Ready #= false
+            for (entry <- 0 until config.issueQueueEntriesPerPort - 1) {
+              dut.io.enqueue.robPointer #= entry
+              sample(dut)
+            }
+
+            // The last entry is ready, so a full queue can dequeue exactly one
+            // uop while all seven older entries remain blocked.
+            dut.io.enqueue.robPointer #= config.issueQueueEntriesPerPort - 1
+            dut.io.enqueue.source1Ready #= true
+            dut.io.enqueue.source2Ready #= true
+            sample(dut)
+            assert(dut.io.occupancy.toInt == config.issueQueueEntriesPerPort)
+            assert(!dut.io.enqueueReady.toBoolean)
+            assert(dut.io.issueValid.toBoolean)
+
+            dut.io.enqueueValid #= false
+            dut.io.issueReady #= true
+            sample(dut)
+            dut.io.issueReady #= false
+            assert(dut.io.occupancy.toInt == config.issueQueueEntriesPerPort - 1)
+            assert(dut.io.enqueueReady.toBoolean == exactCredit)
+
+            dut.io.enqueueValid #= true
+            dut.io.enqueue.robPointer #= config.issueQueueEntriesPerPort
+            dut.io.enqueue.source1Ready #= false
+            dut.io.enqueue.source2Ready #= false
+            sample(dut)
+            assert(
+              dut.io.occupancy.toInt ==
+                (if (exactCredit) config.issueQueueEntriesPerPort
+                 else config.issueQueueEntriesPerPort - 1)
+            )
+        }
+    }
+  }
+
   test("LSU IQ registered output holds backpressure and sustains one issue per cycle") {
     val config = OooCoreConfig.FourIssueThreeCommit
     val loadStorePort =

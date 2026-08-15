@@ -98,6 +98,9 @@ final case class OooCoreConfig(
     enableOrdinaryRegisteredWakeSelectDecoupling: Boolean = true,
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableBalancedIssueSelection: Boolean = true,
+    // Derive the next registered enqueue credit from the accepted enqueue/dequeue pair.
+    // Disabling this flag preserves the historical one-slot conservative boundary for A/B.
+    enableExactIssueQueueEnqueueCredit: Boolean = true,
     enableBankedLoadForwardCompletion: Boolean = true,
     // Retry one younger, already translated cached Load when the oldest pending Load is blocked
     // only by a local Store alias.  The alternate still traverses the ordinary LSQ order checks.
