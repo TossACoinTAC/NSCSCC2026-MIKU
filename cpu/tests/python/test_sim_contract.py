@@ -57,6 +57,17 @@ class SimulationContractTest(unittest.TestCase):
         self.assertIn("verdict=linux-time-window-complete", matrix)
         self.assertIn("verdict=linux-window-did-not-reach-time-limit", matrix)
 
+    def test_instrumented_monitor_lock_matches_sources(self) -> None:
+        result = subprocess.run(
+            ["sha256sum", "-c", "scripts/sim/manifest.sha256"],
+            cwd=ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_commit_endpoint_observer_accepts_every_lane_and_rejects_false_hits(self) -> None:
         source = r'''
 #include <cassert>
