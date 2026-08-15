@@ -214,9 +214,11 @@ LDQ full 从扩容前的 `18.2036%` 降至 `3.7878%`，平均占用为 `6.16/16`
 Store 证据时扩大 STQ/SDQ；后续 IPC 归因转向剩余的 Load latency、Store head stall 和
 前端/分支机会。v8 汇总见 `build/reports/observations/R7-L02-L03-v8.json`。
 
-下一步完成 func58 三 seed、Linux 固定窗口和一次 100 MHz direct full implementation；
-在这些证据完成前，R7 只作为软件性能候选，不覆盖 R5 稳定里程碑，也不继承 R6 的物理
-实现结论。
+R7 func58 random-AXI seeds `240/255/141` 均为 58/58；Linux random-AXI seed
+`5570815` 的固定 50 ms 窗口 exit code 为 0，运行 `24,999,995` cycles、退休
+`20,447,238` 条指令。下一步冻结证据并执行一次 100 MHz direct full implementation；
+在 matching 物理证据闭合前，R7 只作为软件性能候选，不覆盖 R5 稳定里程碑，也不继承
+R6 的物理实现结论。
 
 ## R1：时序候选与周期验证
 
