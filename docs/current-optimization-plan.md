@@ -187,6 +187,13 @@ observation word，monitor 不再猜测微架构容量。matching instrumented p
 `L02` 受限 younger-ready Load bypass 和 `L03` LDQ-only 8-to-16 独立 A/B；L03 首次不扩大
 STQ/SDQ，避免在低得多的 Store full 暴露量下无依据地放大 forwarding/order cone。
 
+`L02 @ 2c586e5` 采用单次寄存 retry token：只有最老 Load 仅受已知本地 Store alias 条件
+阻塞时，才在下一拍选择一个更年轻、已翻译、cacheable、非 LL 的 Load，并让它重新通过
+原有的完整顺序和 forwarding 资格锥。LSQ 36/36、完整 `cpu-check` 和 perf20 20/20 通过；
+相对 L13 baseline 为 `4,423,675 -> 4,373,845`（`-1.126439%`），几何平均加速
+`1.007186175x`。最大单项收益是 `inner_product -6.379%`，没有超过 `0.03%` 的显著退化，
+因此保留进入 R7 组合。比较证据为 `build/reports/comparisons/R7-L02.json`。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
