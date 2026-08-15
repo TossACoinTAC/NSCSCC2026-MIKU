@@ -194,6 +194,30 @@ STQ/SDQ，避免在低得多的 Store full 暴露量下无依据地放大 forwar
 `1.007186175x`。最大单项收益是 `inner_product -6.379%`，没有超过 `0.03%` 的显著退化，
 因此保留进入 R7 组合。比较证据为 `build/reports/comparisons/R7-L02.json`。
 
+## R7：受证据驱动的 Load 并行度
+
+`L03 @ 2ab264f` 只把 LDQ 从 8 扩为 16，STQ/SDQ 继续保持 8；L1D waiter 的 index
+合同也用 index 15 的 miss/refill 定向测试覆盖。完整 `cpu-check`、发布 RTL、Yosys 和合同
+门禁通过。为了避免把组合收益错误拆分，开发分支保留了 `fab80ad` 的 L03-only 实验节点和
+随后恢复 L02 的显式 revert。L03 独立 perf20 为 `4,423,675 -> 4,320,785`
+（`-2.325894%`），几何平均加速 `1.013960668x`；20/20 通过，最大收益
+`fireye_A0 -17.29978%`，最大退化 `fireye_B2 +0.34980%`。
+
+L02+L03 当前组合 perf20 为 `4,262,710`，相对 R6 baseline 减少 `160,965`
+cycles（`-3.638717%`），几何平均加速 `1.022228468x`；L02 在 LDQ16 上仍提供约
+`-1.344%` 的增量，因此两项均独立越过保留门槛。组合门禁的发布 RTL SHA-256 为
+`d4abf008a36335fb5ea8d1995c2e2f143ff5de59754687a32a5cc8fe62f67fdd`。Observer ABI v8
+的 matching instrumented perf20 已完成：20 项与 clean 的 verdict/cycles
+逐项相等，总计均为 `4,262,710`；ROI IPC 为 `0.846422`，DUT 导出的 LDQ 容量为 16。
+LDQ full 从扩容前的 `18.2036%` 降至 `3.7878%`，平均占用为 `6.16/16`；SQ full 为
+`3.7618%`，ROB full 为 `6.3083%`。这不支持继续把 LDQ 扩到 32，也不支持在缺少独立
+Store 证据时扩大 STQ/SDQ；后续 IPC 归因转向剩余的 Load latency、Store head stall 和
+前端/分支机会。v8 汇总见 `build/reports/observations/R7-L02-L03-v8.json`。
+
+下一步完成 func58 三 seed、Linux 固定窗口和一次 100 MHz direct full implementation；
+在这些证据完成前，R7 只作为软件性能候选，不覆盖 R5 稳定里程碑，也不继承 R6 的物理
+实现结论。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload

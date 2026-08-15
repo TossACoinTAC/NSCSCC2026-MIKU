@@ -69,7 +69,7 @@ T = cycle_count / f_cpu
 | 物理寄存器 / ROB | 64 / 32 |
 | Instruction buffer / dispatch queue | 16 / 8 |
 | 每端口 IQ | 8，共 4 个独立队列 |
-| LDQ / STQ / store-data queue | 8 / 8 / 8 |
+| LDQ / STQ / store-data queue | 16 / 8 / 8 |
 | L1I / L1D | 各 16 KiB，2-way，128 sets，64 B line |
 | 共享 L2 | 64 KiB，2-way，512 sets，64 B line |
 | MSHR | 4 |
@@ -1934,7 +1934,7 @@ RAT snapshot 与 LSQ committed-store 保留，共同构成了精确状态边界�
 
 #### 一条 Load/Store 同时存在于哪些结构
 
-当前 LDQ、STQ、SDQ 均为 8 entries，P3 是唯一 LSU/AGU 端口。
+当前 LDQ 为 16 entries，STQ、SDQ 各为 8 entries，P3 是唯一 LSU/AGU 端口。
 
 | 动态阶段 | Load | Store |
 | --- | --- | --- |
@@ -1991,7 +1991,7 @@ STQ 的年龄/地址比较不再直接读取一个大范围动态 mux；AGU 与 
 
 “最老 pending”与“最老未完成”有重要区别。Load A 的 cache request 一旦被接受，
 `requestSent=1`，scheduler 就可以选择 Load B，而无需等 A 的 miss response。L1D 有 4 个
-MSHR 与 8 个 load waiter，response 根据完整 ROB pointer 和 recovery epoch 回到对应 LDQ
+MSHR 与 16 个 load waiter，response 根据完整 ROB pointer 和 recovery epoch 回到对应 LDQ
 entry。因此不同 cache miss 可以并发并且乱序返回。
 
 如果 A 还没有发出，只是被某个 Store 顺序条件挡住，它仍然是最老 pending，B 也不能被
@@ -2003,9 +2003,10 @@ L1: Load A，被 S0 阻塞
 L2: Load B，实际访问完全独立的地址
 ```
 
-当前先等 S0 地址明确，再处理 A，然后才轮到 B。更激进的 ready-load scheduler 可以检查
-B 对所有 older Store 的安全性并先发 B，但会从“1 个 Load x 8 STQ 比较”扩大为“多个
-LDQ candidate x 8 STQ 比较 + 年龄选择”，很容易重新成为 FPGA 关键路径。
+早期实现先等 S0 地址明确，再处理 A，然后才轮到 B。当前 `L02` 用一个寄存 retry token
+选择单个年轻候选，并让它重新经过既有的 1 Load x 8 STQ 资格锥；它没有构造完整的
+16 LDQ candidate x 8 STQ CAM。完整 ready-load scheduler 仍会显著扩大比较与年龄选择网络，
+很容易重新成为 FPGA 关键路径。
 
 #### 当前 Store/Load 顺序判定的四种情况
 
