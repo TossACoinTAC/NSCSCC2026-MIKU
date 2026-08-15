@@ -3,6 +3,7 @@ package miku.backend
 import miku.core._
 import miku.execute.AddressGenerationRequest
 import miku.memory._
+import miku.observe.PerfObservationV1
 import miku.privileged._
 import spinal.core._
 import spinal.lib._
@@ -164,6 +165,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     val dataResponse = in(CacheResponse(config))
     val completionValid = out Bool ()
     val completion = out(Completion(config))
+    val storeCompletionBypassValid = out Bool ()
+    val storeCompletionBypass = out(StoreCompletionIdentity(config))
     val loadWakeupValid = out Bool ()
     val loadWakeupPdst = out UInt (config.physicalRegIndexWidth bits)
     val loadWakeupRecoveryEpoch = out UInt (config.recoveryEpochWidth bits)
@@ -590,6 +593,23 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val translationCompletionFire = translationResponseFire && !io.flush &&
     translationActive && translationProducesCompletion
   val translationCompletionCandidate = translationResponseCandidate && translationProducesCompletion
+  // Capture the resident payload through the registered owner tuple.  A
+  // completion-producing response may be held while another completion wins;
+  // Stream keeps its payload stable, so the address fields can be captured
+  // idempotently without putting completion arbitration in every wide LQ CE.
+  val residentLoadTranslation = io.translationResponse.valid && translationActive &&
+    !io.translationResponse.cancelled && !translationOwnerStore
+  val residentLoadTranslationOwner = Bits(config.loadQueueEntries bits)
+  for (entry <- 0 until config.loadQueueEntries) {
+    residentLoadTranslationOwner(entry) := residentLoadTranslation &&
+      translationOwnerLoadIndex === U(entry, config.loadQueueIndexWidth bits) &&
+      loads(entry).valid && loads(entry).robPointer === translationOwnerRobPointer &&
+      loads(entry).recoveryEpoch === translationOwnerRecoveryEpoch
+  }
+  val scheduledLoadTranslationOwner = residentLoadTranslation && scheduledLoadValid &&
+    loadHead === translationOwnerLoadIndex &&
+    scheduledLoad.robPointer === translationOwnerRobPointer &&
+    scheduledLoad.recoveryEpoch === translationOwnerRecoveryEpoch
   // Misaligned accesses are rare and already terminal exceptions. Buffer that
   // completion instead of feeding the current load/translation arbitration
   // back into aguReady. This keeps an older load's forwarding cone out of the
@@ -607,7 +627,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   aguFire := io.aguValid && io.aguReady
   val aguExceptionCapture = aguFire && aguMisaligned
 
-  val generatedCompletionValid = responseAccepted || forwardFire ||
+  val generatedCompletionValid = responseAccepted ||
+    (if (config.enableBankedLoadForwardCompletion) False else forwardFire) ||
     storeCompletionFire || translationCompletionFire || aguExceptionCompletionReady
   val generatedCompletion = Completion(config)
   val generatedCompletionIsLoad = Bool()
@@ -646,21 +667,23 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       generatedCompletion.exception.badVAddr := responseLoadVirtualAddress
     }
   }.elsewhen(forwardFire) {
-    generatedCompletionIsLoad := True
-    generatedCompletion.robPointer := scheduledLoad.robPointer
-    generatedCompletion.recoveryEpoch := scheduledLoad.recoveryEpoch
-    generatedCompletion.pdst := scheduledLoad.pdst
-    generatedCompletion.writesPdst := scheduledLoad.writesPdst
-    generatedCompletion.data := formatLoad(
-      formatStore(
-        stores(forwardingId).writeData,
-        stores(forwardingId).virtualAddress,
-        stores(forwardingId).size
-      ),
-      scheduledLoad.virtualAddress,
-      scheduledLoad.size,
-      scheduledLoad.signExtend
-    )
+    if (!config.enableBankedLoadForwardCompletion) {
+      generatedCompletionIsLoad := True
+      generatedCompletion.robPointer := scheduledLoad.robPointer
+      generatedCompletion.recoveryEpoch := scheduledLoad.recoveryEpoch
+      generatedCompletion.pdst := scheduledLoad.pdst
+      generatedCompletion.writesPdst := scheduledLoad.writesPdst
+      generatedCompletion.data := formatLoad(
+        formatStore(
+          stores(forwardingId).writeData,
+          stores(forwardingId).virtualAddress,
+          stores(forwardingId).size
+        ),
+        scheduledLoad.virtualAddress,
+        scheduledLoad.size,
+        scheduledLoad.signExtend
+      )
+    }
   }.elsewhen(storeCompletionFire) {
     generatedCompletion.robPointer := headStore.robPointer
     generatedCompletion.recoveryEpoch := headStore.recoveryEpoch
@@ -718,6 +741,67 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       responseLoadPhysicalAddress(31 downto 1).asBits ## responseLoadUncached.asBits
   }
 
+  val bankedForwardCompletionValid = Bool()
+  val bankedForwardCompletion = Completion(config)
+  val bankedForwardWakeupEpochCurrent = Bool()
+  if (config.enableBankedLoadForwardCompletion) {
+    val valid = RegInit(False)
+    val selectedStore = Reg(Bits(config.storeQueueEntries bits)) init (0)
+    val robPointer = Reg(UInt(config.robPointerWidth bits)) init (0)
+    val recoveryEpoch = Reg(UInt(config.recoveryEpochWidth bits)) init (0)
+    val pdst = Reg(UInt(config.physicalRegIndexWidth bits)) init (0)
+    val writesPdst = RegInit(False)
+    val epochCurrent = RegInit(False)
+    val dataBanks = Vec.fill(config.storeQueueEntries)(Reg(Bits(config.xlen bits)))
+
+    selectedStore := forwardingStore
+    robPointer := scheduledLoad.robPointer
+    recoveryEpoch := scheduledLoad.recoveryEpoch
+    pdst := scheduledLoad.pdst
+    writesPdst := scheduledLoad.writesPdst
+    epochCurrent := scheduledLoad.recoveryEpoch === io.currentRecoveryEpoch
+    for (entry <- 0 until config.storeQueueEntries) {
+      dataBanks(entry) := formatLoad(
+        formatStore(
+          stores(entry).writeData,
+          stores(entry).virtualAddress,
+          stores(entry).size
+        ),
+        scheduledLoad.virtualAddress,
+        scheduledLoad.size,
+        scheduledLoad.signExtend
+      )
+    }
+    when(io.flush) {
+      valid := False
+    }.otherwise {
+      valid := forwardFire
+    }
+
+    bankedForwardCompletionValid := valid
+    bankedForwardCompletion.robPointer := robPointer
+    bankedForwardCompletion.recoveryEpoch := recoveryEpoch
+    bankedForwardCompletion.pdst := pdst
+    bankedForwardCompletion.writesPdst := writesPdst
+    bankedForwardCompletion.data := dataBanks(OHToUInt(selectedStore))
+    bankedForwardCompletion.sideEffectData := 0
+    bankedForwardCompletion.exception.valid := False
+    bankedForwardCompletion.exception.ecode := 0
+    bankedForwardCompletion.exception.esubcode := 0
+    bankedForwardCompletion.exception.badVAddrValid := False
+    bankedForwardCompletion.exception.badVAddr := 0
+    bankedForwardCompletion.exception.tlbRefill := False
+    bankedForwardCompletion.branchResolved := False
+    bankedForwardCompletion.branchTaken := False
+    bankedForwardCompletion.branchTarget := 0
+    bankedForwardCompletion.branchMispredict := False
+    bankedForwardWakeupEpochCurrent := epochCurrent
+  } else {
+    bankedForwardCompletionValid := False
+    bankedForwardWakeupEpochCurrent := False
+    clearCompletion(bankedForwardCompletion)
+  }
+
   val completionValid = RegInit(False)
   val completion = Reg(Completion(config))
   val completionLoadWakeup = RegInit(False)
@@ -734,32 +818,18 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // Keep the direct path compact: ordinary Stores have no destination data or
   // exception payload. Any exceptional, SC, uncached, or collision case keeps
   // using the fully registered completion path below.
-  val fastStoreCompletionValid = fastStoreCompletionCandidate && !completionValid
-  val fastStoreCompletion = Completion(config)
-  fastStoreCompletion.robPointer := Mux(
+  val fastStoreCompletionValid = fastStoreCompletionCandidate && !completionValid &&
+    !bankedForwardCompletionValid
+  val fastStoreCompletionRobPointer = Mux(
     translatedFastStore,
     translationOwnerRobPointer,
     headStore.robPointer
   )
-  fastStoreCompletion.recoveryEpoch := Mux(
+  val fastStoreCompletionRecoveryEpoch = Mux(
     translatedFastStore,
     translationOwnerRecoveryEpoch,
     headStore.recoveryEpoch
   )
-  fastStoreCompletion.pdst := 0
-  fastStoreCompletion.writesPdst := False
-  fastStoreCompletion.data := 0
-  fastStoreCompletion.sideEffectData := 0
-  fastStoreCompletion.exception.valid := False
-  fastStoreCompletion.exception.ecode := 0
-  fastStoreCompletion.exception.esubcode := 0
-  fastStoreCompletion.exception.badVAddrValid := False
-  fastStoreCompletion.exception.badVAddr := 0
-  fastStoreCompletion.exception.tlbRefill := False
-  fastStoreCompletion.branchResolved := False
-  fastStoreCompletion.branchTaken := False
-  fastStoreCompletion.branchTarget := 0
-  fastStoreCompletion.branchMispredict := False
   when(io.flush) {
     aguExceptionCompletionValid := False
     // Cached writes only enter this buffer after retirement and must survive a
@@ -817,15 +887,25 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     // from being replicated onto every completion payload register.
     completion := generatedCompletion
   }
-  io.completionValid := completionValid || fastStoreCompletionValid
+  io.completionValid := completionValid || bankedForwardCompletionValid
   io.completion := completion
-  when(fastStoreCompletionValid) {
-    io.completion := fastStoreCompletion
+  when(bankedForwardCompletionValid) {
+    io.completion := bankedForwardCompletion
   }
-  io.loadWakeupValid := completionValid && completionLoadWakeup
+  io.storeCompletionBypassValid := fastStoreCompletionValid
+  io.storeCompletionBypass.robPointer := fastStoreCompletionRobPointer
+  io.storeCompletionBypass.recoveryEpoch := fastStoreCompletionRecoveryEpoch
+  io.loadWakeupValid := (completionValid && completionLoadWakeup) ||
+    (bankedForwardCompletionValid && bankedForwardCompletion.writesPdst &&
+      bankedForwardCompletion.pdst =/= 0)
   io.loadWakeupPdst := completion.pdst
   io.loadWakeupRecoveryEpoch := completion.recoveryEpoch
   io.loadWakeupEpochCurrent := completionLoadWakeupEpochCurrent
+  when(bankedForwardCompletionValid) {
+    io.loadWakeupPdst := bankedForwardCompletion.pdst
+    io.loadWakeupRecoveryEpoch := bankedForwardCompletion.recoveryEpoch
+    io.loadWakeupEpochCurrent := bankedForwardWakeupEpochCurrent
+  }
 
   loadReleaseValid := B(0, config.commitWidth bits)
   storeReleaseValid := B(0, config.commitWidth bits)
@@ -1020,36 +1100,35 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       loads(index).uncached := aguTranslationBypass && io.translationBypass.uncached
     }
 
+    for (index <- 0 until config.loadQueueEntries) {
+      when(residentLoadTranslationOwner(index)) {
+        loads(index).physicalAddress := io.translationResponse.physicalAddress
+        loads(index).uncached := io.translationResponse.uncached
+        when(translationResponseFire) {
+          loads(index).translationDone := True
+          when(io.translationResponse.exception.valid) { loads(index).completed := True }
+        }
+      }
+    }
+    when(scheduledLoadTranslationOwner) {
+      scheduledLoad.physicalAddress := io.translationResponse.physicalAddress
+      scheduledLoad.uncached := io.translationResponse.uncached
+      when(translationResponseFire) { scheduledLoad.translationDone := True }
+    }
+
     when(translationResponseFire && translationActive) {
       translationActive := False
       when(!io.translationResponse.cancelled && translationOwnerStore) {
         val entry = stores(translationOwnerStoreIndex)
-        when(entry.valid && entry.robPointer === translationOwnerRobPointer) {
+        when(
+          entry.valid && entry.robPointer === translationOwnerRobPointer &&
+            entry.recoveryEpoch === translationOwnerRecoveryEpoch
+        ) {
           entry.physicalAddress := io.translationResponse.physicalAddress
           entry.uncached := io.translationResponse.uncached
           entry.translationDone := True
           when(entry.isSc) { entry.scSuccess := translatedScSuccess }
           when(translationCompletionFire) { entry.completed := True }
-        }
-      }.elsewhen(!io.translationResponse.cancelled) {
-        val entry = loads(translationOwnerLoadIndex)
-        when(entry.valid && entry.robPointer === translationOwnerRobPointer) {
-          entry.physicalAddress := io.translationResponse.physicalAddress
-          entry.uncached := io.translationResponse.uncached
-          entry.translationDone := True
-          // The selected-load payload is already the timing boundary for
-          // ordering and cache issue. Capture translation on the same edge as
-          // the LQ entry so the next request cycle does not re-read the wide
-          // physical address through the dynamic loadHead mux.
-          when(
-            scheduledLoadValid && loadHead === translationOwnerLoadIndex &&
-              scheduledLoad.robPointer === translationOwnerRobPointer
-          ) {
-            scheduledLoad.physicalAddress := io.translationResponse.physicalAddress
-            scheduledLoad.uncached := io.translationResponse.uncached
-            scheduledLoad.translationDone := True
-          }
-          when(io.translationResponse.exception.valid) { entry.completed := True }
         }
       }
     }
@@ -1122,4 +1201,85 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       storeHead := storeHead + 1
     }
   }
+
+  val perfObservationV1Word5 = Bits(PerfObservationV1.WordWidth bits)
+  perfObservationV1Word5 := 0
+  val observationLoadsValid = Bits(config.loadQueueEntries bits)
+  val observationStoresValid = Bits(config.storeQueueEntries bits)
+  for (entry <- 0 until config.loadQueueEntries) {
+    observationLoadsValid(entry) := loads(entry).valid
+  }
+  for (entry <- 0 until config.storeQueueEntries) {
+    observationStoresValid(entry) := stores(entry).valid
+  }
+  perfObservationV1Word5(4 downto 0) := CountOne(observationLoadsValid).resize(5).asBits
+  perfObservationV1Word5(8 downto 5) := CountOne(observationStoresValid).resize(4).asBits
+  perfObservationV1Word5(9) := scheduledLoadValid
+  perfObservationV1Word5(10) := translationActive
+  perfObservationV1Word5(11) := translationCancelPending
+  perfObservationV1Word5(12) := io.translationRequest.valid
+  perfObservationV1Word5(13) := io.translationRequest.ready
+  perfObservationV1Word5(14) := translationRequestFire
+  perfObservationV1Word5(15) := io.translationResponse.valid
+  perfObservationV1Word5(16) := io.translationResponse.ready
+  perfObservationV1Word5(17) := translationResponseFire
+  perfObservationV1Word5(18) := io.dataRequestValid
+  perfObservationV1Word5(19) := io.dataRequestReady
+  perfObservationV1Word5(20) := dataRequestFire
+  perfObservationV1Word5(21) := io.dataRequest.isWrite
+  perfObservationV1Word5(22) := io.dataRequest.uncached
+  perfObservationV1Word5(23) := io.dataResponseValid
+  perfObservationV1Word5(24) := loadRequestFire
+  perfObservationV1Word5(25) := storeRequestFire
+  perfObservationV1Word5(26) := forwardFire
+  perfObservationV1Word5(27) := storeCompletionFire
+  perfObservationV1Word5(28) := translationCompletionFire
+  perfObservationV1Word5(29) := io.completionValid
+  perfObservationV1Word5(30) := io.loadWakeupValid
+  perfObservationV1Word5(31) := storeDataFire
+  perfObservationV1Word5(32) := aguFire
+  perfObservationV1Word5(33) := io.olderStorePending
+  perfObservationV1Word5(34) := io.storeDrainBusy
+  perfObservationV1Word5(35) := requestBufferValid
+  perfObservationV1Word5(36) := acceptedStoreValid
+  perfObservationV1Word5(37) := loadHeadReady
+  perfObservationV1Word5(38) := loadNeedsTranslation
+  perfObservationV1Word5(39) := loadHeadReady && unknownOlderStore.orR
+  perfObservationV1Word5(40) := loadHeadReady && olderUncachedStore.orR
+  perfObservationV1Word5(41) := loadHeadReady && olderLoadOrderBlock.orR
+  perfObservationV1Word5(42) := loadHeadReady && partialOverlapStore.orR
+  perfObservationV1Word5(43) := loadHeadReady && pendingDataStore.orR
+  perfObservationV1Word5(44) := forwardCandidate
+  perfObservationV1Word5(45) := cacheLoadCandidate
+  perfObservationV1Word5(46) := requestCapture && !storeRequest
+  perfObservationV1Word5(47) := cacheLoadCandidate && requestBufferValid
+  perfObservationV1Word5(48) := cacheLoadCandidate && storeRequest
+  val rawLoadCompletion = responseLoadAccepted || forwardFire ||
+    (translationCompletionFire && !translationOwnerStore)
+  val rawOrdinaryLoadCompletion =
+    (responseLoadAccepted && !io.dataResponse.error && !responseLoadUncached && !responseLoadIsLl) ||
+      forwardFire
+  val rawOrdinaryLoadCompletionRobPointer = Mux(
+    responseLoadAccepted,
+    responseLoadRobPointer,
+    scheduledLoad.robPointer
+  )
+  val alternatePendingLoadAddressReady = Bits(config.loadQueueEntries bits)
+  for (entry <- 0 until config.loadQueueEntries) {
+    alternatePendingLoadAddressReady(entry) := pendingLoads(entry) &&
+      U(entry, config.loadQueueIndexWidth bits) =/= loadHead && loads(entry).addressReady
+  }
+  val oldestLoadAddressNotReady = scheduledLoadValid && headLoadState.valid &&
+    headLoadState.robPointer === scheduledLoad.robPointer && !headLoadState.addressReady
+  val oldestLoadOrderBlocked = loadHeadReady && !loadOrderClear
+  perfObservationV1Word5(49) := rawLoadCompletion
+  perfObservationV1Word5(50) := rawOrdinaryLoadCompletion
+  perfObservationV1Word5(51) := rawOrdinaryLoadCompletion &&
+    rawOrdinaryLoadCompletionRobPointer === io.robHeadPointer
+  perfObservationV1Word5(52) := oldestLoadAddressNotReady
+  perfObservationV1Word5(53) := alternatePendingLoadAddressReady.orR
+  perfObservationV1Word5(54) :=
+    (oldestLoadAddressNotReady || oldestLoadOrderBlocked) &&
+      alternatePendingLoadAddressReady.orR
+  PerfObservationV1.expose(perfObservationV1Word5, 5)
 }

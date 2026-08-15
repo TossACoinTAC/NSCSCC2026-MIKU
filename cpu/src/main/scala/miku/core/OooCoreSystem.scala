@@ -3,7 +3,12 @@ package miku.core
 import miku.backend._
 import miku.compat.Axi3Compat
 import miku.memory._
-import miku.observe.{ArchState, ChiplabMultiCommitDiffTestAdapter, CommitEvent}
+import miku.observe.{
+  ArchState,
+  ChiplabMultiCommitDiffTestAdapter,
+  CommitEvent,
+  PerfObservationV1
+}
 import miku.privileged._
 import spinal.core._
 import spinal.lib._
@@ -281,6 +286,40 @@ final class OooCoreSystem(
     io.axi.w.payload := axiBridge.io.axi.w.payload
     io.axi.w.valid := axiBridge.io.axi.w.valid
     io.axi.b.ready := axiBridge.io.axi.b.ready
+
+    // Stable simulation observation ABI. Each owning module publishes one
+    // word locally; this system scope owns only the header and AXI activity.
+    val perfObservationV1Word0 = Bits(PerfObservationV1.WordWidth bits)
+    perfObservationV1Word0 := 0
+    perfObservationV1Word0(31 downto 0) := B(PerfObservationV1.Magic, 32 bits)
+    perfObservationV1Word0(39 downto 32) := B(PerfObservationV1.Version, 8 bits)
+    perfObservationV1Word0(47 downto 40) := B(PerfObservationV1.WordCount, 8 bits)
+    perfObservationV1Word0(55 downto 48) := B(config.commitWidth, 8 bits)
+    perfObservationV1Word0(63 downto 56) := B(config.executionWidth, 8 bits)
+    PerfObservationV1.expose(perfObservationV1Word0, 0)
+
+    val perfObservationV1Word7 = Bits(PerfObservationV1.WordWidth bits)
+    perfObservationV1Word7 := 0
+    perfObservationV1Word7(0) := io.axi.ar.valid
+    perfObservationV1Word7(1) := io.axi.ar.ready
+    perfObservationV1Word7(2) := io.axi.ar.valid && io.axi.ar.ready
+    perfObservationV1Word7(3) := io.axi.r.valid
+    perfObservationV1Word7(4) := io.axi.r.ready
+    perfObservationV1Word7(5) := io.axi.r.valid && io.axi.r.ready
+    perfObservationV1Word7(6) :=
+      io.axi.r.valid && io.axi.r.payload.response =/= B(0, 2 bits)
+    perfObservationV1Word7(7) := io.axi.aw.valid
+    perfObservationV1Word7(8) := io.axi.aw.ready
+    perfObservationV1Word7(9) := io.axi.aw.valid && io.axi.aw.ready
+    perfObservationV1Word7(10) := io.axi.w.valid
+    perfObservationV1Word7(11) := io.axi.w.ready
+    perfObservationV1Word7(12) := io.axi.w.valid && io.axi.w.ready
+    perfObservationV1Word7(13) := io.axi.b.valid
+    perfObservationV1Word7(14) := io.axi.b.ready
+    perfObservationV1Word7(15) := io.axi.b.valid && io.axi.b.ready
+    perfObservationV1Word7(16) :=
+      io.axi.b.valid && io.axi.b.payload.response =/= B(0, 2 bits)
+    PerfObservationV1.expose(perfObservationV1Word7, 7)
 
     io.writebackValid := core.io.debugCommitValid
     io.registerReadData := architecturalGpr(io.registerNumber.asUInt)

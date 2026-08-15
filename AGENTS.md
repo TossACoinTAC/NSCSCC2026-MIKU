@@ -37,6 +37,10 @@ setup/hold WNS/TNS；不能把旧 RTL 的时序或性能证据带到新 RTL。�
 正式 bitstream 必须由 matching RTL 从头执行一次完整 implementation，并由该次 run
 自身满足功能、时钟、setup/hold、DRC 和 fully-routed 门禁。
 
+细粒度候选、失败尝试和证据身份保留在对应 `dev/*` 分支；满足阶段性门禁的里程碑
+同步到 `main` 时允许使用 squash，`main` 不承担候选级溯源。squash 前必须在
+开发分支完成 matching RTL、测试和实现证据归档，并在提交说明中引用其 manifest。
+
 SpinalHDL 是 RTL 唯一来源，禁止手改生成的 `build/rtl/mycpu_top.v`。公开
 `core_top`、AXI、debug/commit、reset 和 `TLBNUM=32` 接口保持兼容。Vivado
 或 Chiplab 的 IP 只能作为 CPU 本地、可重建且支持 Verilator 的依赖；不得

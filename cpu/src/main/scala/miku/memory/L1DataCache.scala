@@ -130,7 +130,10 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     val idle = out Bool ()
   }
 
-  val cacheArray = new CacheArray(geometry)
+  val cacheArray = new CacheArray(
+    geometry,
+    decoupleDataReadEnable = config.enableDataArrayDataReadDecoupling
+  )
   val state = RegInit(L1DataCacheState.normal)
   val misses = Vec.fill(config.mshrEntries)(Reg(L1DataMshr(config)))
   val waiters = Vec.fill(config.loadQueueEntries)(Reg(L1DataMshrWaiter(config)))
@@ -147,6 +150,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   for (entry <- misses) {
     entry.valid.init(False)
     entry.state.init(L1DataMshrState.readRequest)
+    entry.readRequestPending.init(False)
   }
   for (waiter <- waiters) { waiter.valid.init(False) }
 
@@ -380,6 +384,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         L1DataMshrState.writeback,
         L1DataMshrState.readRequest
       )
+      entry.readRequestPending := !(cacheArray.io.victimValid && cacheArray.io.victimDirty)
       entry.lineAddress := lineAddress(lookupRequest.physicalAddress)
       entry.criticalBeat := refillBeatIndex(lookupRequest.physicalAddress)
       entry.victimWay := cacheArray.io.victimWay
@@ -430,8 +435,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val writebackMask = activeWritebackMask
   val readRequestMask = Bits(config.mshrEntries bits)
   for (entry <- 0 until config.mshrEntries) {
-    readRequestMask(entry) := misses(entry).valid &&
-      misses(entry).state === L1DataMshrState.readRequest
+    readRequestMask(entry) := misses(entry).valid && misses(entry).readRequestPending
   }
   val writebackId = selectLowest(writebackMask, config.mshrEntries)
   val readRequestId = selectLowest(readRequestMask, config.mshrEntries)
@@ -462,11 +466,9 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       misses(io.lineWriteResponse.mshrId).valid &&
       misses(io.lineWriteResponse.mshrId).state === L1DataMshrState.writebackWait
   ) {
-    misses(io.lineWriteResponse.mshrId).state := Mux(
-      io.lineWriteResponse.error,
-      L1DataMshrState.writeback,
-      L1DataMshrState.readRequest
-    )
+    val entry = misses(io.lineWriteResponse.mshrId)
+    entry.state := Mux(io.lineWriteResponse.error, L1DataMshrState.writeback, L1DataMshrState.readRequest)
+    entry.readRequestPending := !io.lineWriteResponse.error
   }
 
   io.lineReadValid := state === L1DataCacheState.normal && readRequestMask.orR
@@ -476,6 +478,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val lineReadFire = io.lineReadValid && io.lineReadReady
   when(lineReadFire) {
     misses(readRequestId).state := L1DataMshrState.refill
+    misses(readRequestId).readRequestPending := False
     misses(readRequestId).refillMask := B(0, CacheContract.BeatsPerLine bits)
     misses(readRequestId).refillError := False
   }
@@ -556,6 +559,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         ),
         L1DataMshrState.install
       )
+      entry.readRequestPending := nextError && entry.storeByteMask.orR
     }
   }
   for (entry <- 0 until config.loadQueueEntries) {

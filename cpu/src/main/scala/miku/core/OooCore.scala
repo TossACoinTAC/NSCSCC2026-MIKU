@@ -3,6 +3,7 @@ package miku.core
 import miku.backend._
 import miku.frontend._
 import miku.memory._
+import miku.observe.PerfObservationV1
 import miku.predict._
 import miku.privileged._
 import spinal.core._
@@ -389,4 +390,32 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
   io.cacheInvalidateBusy := backend.io.cacheInvalidateBusy
   io.fetchPc := frontend.io.fetchPc
   io.frontendOccupancy := frontend.io.occupancy
+
+  require(config.commitWidth == 3)
+  require(config.robPointerWidth == 6)
+  val perfObservationV1Word1 = Bits(PerfObservationV1.WordWidth bits)
+  perfObservationV1Word1 := 0
+  val observationRetired = Bits(config.commitWidth bits)
+  for (lane <- 0 until config.commitWidth) {
+    observationRetired(lane) := io.commitValid(lane) && io.commit(lane).retired
+  }
+  perfObservationV1Word1(2 downto 0) := io.commitValid
+  perfObservationV1Word1(5 downto 3) := observationRetired
+  perfObservationV1Word1(6) := io.recoveryValid
+  perfObservationV1Word1(9 downto 7) := io.recovery.cause.asBits
+  perfObservationV1Word1(10) := io.exceptionValid
+  perfObservationV1Word1(11) := io.ertnValid
+  perfObservationV1Word1(12) := io.idleValid
+  perfObservationV1Word1(13) := io.refetchValid
+  perfObservationV1Word1(14) := internalRedirectValid
+  perfObservationV1Word1(19 downto 15) := frontend.io.occupancy.asBits.resized
+  perfObservationV1Word1(22 downto 20) := frontend.io.decodeValid
+  perfObservationV1Word1(26 downto 23) :=
+    predictorUpdateQueue.io.occupancy.asBits.resized
+  perfObservationV1Word1(27) := predictorUpdateQueue.io.popValid
+  perfObservationV1Word1(28) :=
+    predictorUpdateQueue.io.popValid && predictorUpdateQueue.io.popReady
+  perfObservationV1Word1(34 downto 29) := io.recovery.robPointer.asBits
+  perfObservationV1Word1(37 downto 35) := committedBranch
+  PerfObservationV1.expose(perfObservationV1Word1, 1)
 }

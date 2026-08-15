@@ -1,5 +1,6 @@
 schema_version: 1
 description: "只通过公开合同和结构化证据验证；测试适配不得删除断言。"
+impact_map: tests/impact-rules.json
 tests:
   - name: generation
     path: tests/python/test_generation_contract.py
@@ -10,6 +11,12 @@ tests:
   - name: simulation
     path: tests/python/test_sim_contract.py
     categories: [artifact, harness, DUT]
+  - name: perf-observation
+    path: tests/python/test_perf_observation_contract.py
+    categories: [artifact, harness]
+  - name: perf-observation-summary
+    path: tests/python/test_perf_observation_summary.py
+    categories: [artifact, harness]
   - name: toolchain
     path: tests/python/test_toolchain_contract.py
     categories: [config, artifact]
@@ -22,3 +29,6 @@ tests:
   - name: candidate
     path: tests/python/test_candidate_manifest.py
     categories: [artifact]
+  - name: experiment
+    path: tests/python/test_experiment_contract.py
+    categories: [artifact, harness]

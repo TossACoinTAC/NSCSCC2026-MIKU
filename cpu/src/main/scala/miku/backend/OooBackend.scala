@@ -1,6 +1,7 @@
 package miku.backend
 
 import miku.core._
+import miku.observe.PerfObservationV1
 import spinal.core._
 import spinal.lib._
 
@@ -9,6 +10,16 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   private val loadStorePort =
     config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
   require(loadStorePort >= 0)
+  // Multiply results use their own writeback lane.  For an execution-port-indexed lane whose
+  // remaining operations are ALU/Branch, every physical-register producer already emits a direct
+  // wake at issue acceptance; its staged ROB wake is therefore only an IQ echo.
+  private val directOnlyCompletionPorts = config.executionPorts.zipWithIndex.collect {
+    case (port, index)
+        if port.capabilities.forall(kind =>
+          kind == ExecutionUnitKind.Alu || kind == ExecutionUnitKind.Branch ||
+            kind == ExecutionUnitKind.Multiply
+        ) => index
+  }.toSet
 
   val io = new Bundle {
     val renameValid = in Bits (config.renameWidth bits)
@@ -23,6 +34,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
 
     val completionValid = in Bits (config.writebackWidth bits)
     val completion = in Vec (Completion(config), config.writebackWidth)
+    val storeCompletionBypassValid = in Bool ()
+    val storeCompletionBypass = in(StoreCompletionIdentity(config))
     val directWakeupValid = in Bits (config.executionWidth bits)
     val directWakeupPdst =
       in Vec (UInt(config.physicalRegIndexWidth bits), config.executionWidth)
@@ -68,12 +81,20 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val dispatchQueue = new DispatchQueue(config)
   val dispatchWindow = new DispatchWindow(config)
   val router = new DispatchRouter(config)
-  val issueQueues = (0 until config.executionWidth).map(index => new IssueQueue(config, index))
+  val issueQueues = (0 until config.executionWidth).map { index =>
+    val ordinaryPort = index != loadStorePort
+    val tokenizedOutput = ordinaryPort && config.enableTokenizedOrdinaryIssueOutput
+    val registeredOutput = config.executionPorts(index).registeredIssueOutput ||
+      (ordinaryPort && !config.enableTokenizedOrdinaryIssueOutput)
+    new IssueQueue(
+      config,
+      index,
+      tokenizedIssueOutput = tokenizedOutput,
+      forceRegisteredIssueOutput = registeredOutput
+    )
+  }
   val storeDataQueue = new StoreDataQueue(config)
 
-  private val ordinaryIssuePorts = (0 until config.executionWidth).filter(_ != loadStorePort)
-  val issueAddressValid = Vec.fill(ordinaryIssuePorts.size)(RegInit(False))
-  val issueAddressUop = Vec.fill(ordinaryIssuePorts.size)(Reg(RenamedMicroOp(config)))
   val issueOperandValid = RegInit(B(0, config.executionWidth bits))
   val issueOperandUop = Vec.fill(config.executionWidth)(Reg(RenamedMicroOp(config)))
   val issueOperandSource1 = Vec.fill(config.executionWidth)(Reg(Bits(config.xlen bits)))
@@ -305,13 +326,24 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   // qualified writeback data; MUL, DIV and LSU keep the registered ROB wakeup.
   val earlyWakeupValid = Bits(config.writebackWidth bits)
   val earlyWakeupPdst = Vec(UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
+  val fastSelectWakeupValid = Bits(config.writebackWidth bits)
+  val fastSelectWakeupPdst = Vec(UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
   for (write <- 0 until config.writebackWidth) {
     if (write < config.executionWidth && write != loadStorePort) {
       // IQ flush has priority over wakeup state updates, so this is a candidate
       // event and deliberately excludes the global flush signal from select.
       val registeredWake = rob.io.completionWakeupCandidateValid(write)
       val directWake = io.directWakeupValid(write) && io.directWakeupPdst(write) =/= 0
-      val selectedRegisteredWake = if (config.enableDirectWakeupEchoSuppression) {
+      fastSelectWakeupValid(write) := directWake
+      fastSelectWakeupPdst(write) := io.directWakeupPdst(write)
+      val suppressDirectOnlyEcho = config.enableDirectOnlyPortEchoSuppression &&
+        directOnlyCompletionPorts.contains(write)
+      val selectedRegisteredWake = if (suppressDirectOnlyEcho) {
+        // Resident and same-edge enqueued consumers observed the direct wake.  A consumer arriving
+        // later is qualified by dispatchSourceReady above, while PRF/RAT still consume the raw ROB
+        // wake below.  Keeping stagedPdst off this IQ lane also lets a younger direct tag use it.
+        False
+      } else if (config.enableDirectWakeupEchoSuppression) {
         // A direct producer already woke every resident/enqueued IQ consumer.
         // Suppress only that producer's next-cycle registered echo, freeing the
         // lane for a new direct tag. A first-time DIV/other registered wake keeps
@@ -343,6 +375,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
       } else {
         False
       }
+      fastSelectWakeupValid(write) := loadWake
+      fastSelectWakeupPdst(write) := io.loadWakeupPdst
       val selectedRegisteredWake = if (
         config.enableDirectWakeupEchoSuppression && config.enableLoadCompletionEarlyWakeup
       ) {
@@ -365,9 +399,19 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
         rob.io.completionWakeupPdst(write),
         io.loadWakeupPdst
       )
+    } else if (
+      write == config.executionWidth && config.enableMultiplyCompletionEchoSuppression
+    ) {
+      // The multiplier already broadcasts its destination when the fixed-latency pipe accepts
+      // the uop. Its dedicated result lane still writes the PRF/RAT and qualifies dispatch, but
+      // repeating the tag through every resident IQ only recreates a completed dependency.
+      earlyWakeupValid(write) := False
+      earlyWakeupPdst(write) := 0
     } else {
       earlyWakeupValid(write) := rob.io.completionWakeupCandidateValid(write)
       earlyWakeupPdst(write) := rob.io.completionWakeupPdst(write)
+      fastSelectWakeupValid(write) := False
+      fastSelectWakeupPdst(write) := 0
     }
   }
 
@@ -435,29 +479,20 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
         }
       }
     } else {
-      val addressPort = ordinaryIssuePorts.indexOf(port)
-      prf.io.readAddress(port * 2) := issueAddressUop(addressPort).psrc1
-      prf.io.readAddress(port * 2 + 1) := issueAddressUop(addressPort).psrc2
+      prf.io.readAddress(port * 2) := issueQueues(port).io.issue.psrc1
+      prf.io.readAddress(port * 2 + 1) := issueQueues(port).io.issue.psrc2
 
       val operandReady = !issueOperandValid(port) || io.issueReady(port)
-      val addressReady = !issueAddressValid(addressPort) || operandReady
-      issueQueues(port).io.issueReady := addressReady
+      issueQueues(port).io.issueReady := operandReady
       when(io.flush) {
-        issueAddressValid(addressPort) := False
         issueOperandValid(port) := False
       }.otherwise {
         when(operandReady) {
-          issueOperandValid(port) := issueAddressValid(addressPort)
-          when(issueAddressValid(addressPort)) {
-            issueOperandUop(port) := issueAddressUop(addressPort)
+          issueOperandValid(port) := issueQueues(port).io.issueValid
+          when(issueQueues(port).io.issueValid) {
+            issueOperandUop(port) := issueQueues(port).io.issue
             issueOperandSource1(port) := operandReadData(port * 2)
             issueOperandSource2(port) := operandReadData(port * 2 + 1)
-          }
-        }
-        when(addressReady) {
-          issueAddressValid(addressPort) := issueQueues(port).io.issueValid
-          when(issueQueues(port).io.issueValid) {
-            issueAddressUop(addressPort) := issueQueues(port).io.issue
           }
         }
       }
@@ -473,6 +508,20 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     for (write <- 0 until config.writebackWidth) {
       issueQueues(port).io.wakeupPdst(write) := earlyWakeupPdst(write)
     }
+    if (
+      (port == loadStorePort && config.enableLsuRegisteredWakeSelectDecoupling) ||
+      (port != loadStorePort && config.enableOrdinaryRegisteredWakeSelectDecoupling)
+    ) {
+      issueQueues(port).io.selectWakeupValid := fastSelectWakeupValid
+      for (write <- 0 until config.writebackWidth) {
+        issueQueues(port).io.selectWakeupPdst(write) := fastSelectWakeupPdst(write)
+      }
+    } else {
+      issueQueues(port).io.selectWakeupValid := earlyWakeupValid
+      for (write <- 0 until config.writebackWidth) {
+        issueQueues(port).io.selectWakeupPdst(write) := earlyWakeupPdst(write)
+      }
+    }
   }
 
   io.storeDataValid := storeDataQueue.io.readValid && !io.flush
@@ -484,6 +533,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
 
   rob.io.completionValid := io.completionValid
   rob.io.completion := io.completion
+  rob.io.storeCompletionBypassValid := io.storeCompletionBypassValid
+  rob.io.storeCompletionBypass := io.storeCompletionBypass
   for (write <- 0 until config.writebackWidth) {
     prf.io.writeValid(write) := rob.io.completionWakeupValid(write)
     prf.io.write(write).pdst := rob.io.completionWakeupPdst(write)
@@ -529,4 +580,25 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   freeList.io.flush := io.flush
   prf.io.flush := io.flush
   rob.io.flush := io.flush
+
+  require(config.executionWidth == 4)
+  val perfObservationV1Word3 = Bits(PerfObservationV1.WordWidth bits)
+  perfObservationV1Word3 := 0
+  perfObservationV1Word3(5 downto 0) := rob.io.occupancy.asBits.resized
+  perfObservationV1Word3(11 downto 6) := rob.io.headPointer.asBits
+  perfObservationV1Word3(14 downto 12) := io.renameValid
+  perfObservationV1Word3(17 downto 15) := io.renameValid & io.renameReady
+  perfObservationV1Word3(20 downto 18) := dispatchWindow.io.outputValid
+  perfObservationV1Word3(24 downto 21) := issueOperandValid
+  perfObservationV1Word3(28 downto 25) := issueOperandValid & io.issueReady
+  perfObservationV1Word3(33 downto 29) := io.completionValid
+  for (queue <- 0 until config.executionWidth) {
+    perfObservationV1Word3(34 + queue * 4 + 3 downto 34 + queue * 4) :=
+      issueQueues(queue).io.occupancy.asBits.resized
+    perfObservationV1Word3(50 + queue) := issueQueues(queue).io.issueValid
+    perfObservationV1Word3(54 + queue) := issueQueues(queue).io.issueReady
+    perfObservationV1Word3(58 + queue) :=
+      router.io.portValid(queue) && router.io.portReady(queue)
+  }
+  PerfObservationV1.expose(perfObservationV1Word3, 3)
 }

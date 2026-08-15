@@ -107,7 +107,7 @@ record_hash() {
 }
 
 root_commit=$(git -C "$workspace" rev-parse HEAD)
-cpu_source_sha=$(python3 "$workspace/scripts/common/content_hash.py" "$cpu_dir")
+cpu_source_sha=$(python3 "$workspace/scripts/common/content_hash.py" --profile cpu-source "$cpu_dir")
 cpu_short=${cpu_source_sha:0:12}
 chiplab_head=$(git -C "$chiplab_dir" rev-parse HEAD)
 if [[ $chiplab_head != "$chiplab_commit" ]]; then

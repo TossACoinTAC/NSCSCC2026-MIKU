@@ -1,6 +1,7 @@
 package miku.memory
 
 import miku.core._
+import miku.observe.PerfObservationV1
 import spinal.core._
 import spinal.lib._
 
@@ -421,4 +422,28 @@ final class SharedCacheHierarchy(
     !io.invalidate && !io.dataInvalidate && !io.dataWritebackInvalidate &&
     !io.level2Invalidate
   io.idle := RegNext(idleNow) init (False)
+
+  val perfObservationV1Word6 = Bits(PerfObservationV1.WordWidth bits)
+  perfObservationV1Word6 := 0
+  perfObservationV1Word6(0) := io.instructionRequestValid
+  perfObservationV1Word6(1) := io.instructionRequestReady
+  perfObservationV1Word6(2) := io.instructionResponseValid
+  perfObservationV1Word6(3) := l1i.io.requestValid && l1i.io.requestReady
+  perfObservationV1Word6(4) := l1i.io.lineReadValid
+  perfObservationV1Word6(5) := l1i.io.lineReadValid && l1i.io.lineReadReady
+  perfObservationV1Word6(6) := l1d.io.requestValid && l1d.io.requestReady
+  perfObservationV1Word6(7) := l1d.io.lineReadValid
+  perfObservationV1Word6(8) := l1d.io.lineReadValid && l1d.io.lineReadReady
+  perfObservationV1Word6(9) := l1d.io.lineWriteValid
+  perfObservationV1Word6(10) := l1d.io.lineWriteValid && l1d.io.lineWriteReady
+  perfObservationV1Word6(11) := l2.io.readValid
+  perfObservationV1Word6(12) := l2.io.readValid && l2.io.readReady
+  perfObservationV1Word6(13) := io.memoryReadValid
+  perfObservationV1Word6(14) := io.memoryReadValid && io.memoryReadReady
+  perfObservationV1Word6(15) := io.memoryReadBeatValid
+  perfObservationV1Word6(16) := io.memoryReadBeatValid && io.memoryReadBeatReady
+  perfObservationV1Word6(17) := io.memoryWriteValid
+  perfObservationV1Word6(18) := io.memoryWriteValid && io.memoryWriteReady
+  perfObservationV1Word6(19) := io.memoryWriteResponseValid
+  PerfObservationV1.expose(perfObservationV1Word6, 6)
 }

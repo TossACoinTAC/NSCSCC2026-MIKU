@@ -86,9 +86,17 @@ final case class IssueEntry(config: OooCoreConfig, portIndex: Int) extends Bundl
 
 final class IssueQueue(
     config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit,
-    portIndex: Int = 0
+    portIndex: Int = 0,
+    tokenizedIssueOutput: Boolean = false,
+    forceRegisteredIssueOutput: Boolean = false
 ) extends Component {
   require(portIndex >= 0 && portIndex < config.executionWidth)
+  private val registeredIssueOutput =
+    forceRegisteredIssueOutput || config.executionPorts(portIndex).registeredIssueOutput
+  require(
+    !tokenizedIssueOutput || !registeredIssueOutput,
+    "an issue port cannot use both tokenized and copied registered outputs"
+  )
 
   private val portCapabilities = config.executionPorts(portIndex).capabilities
   private val portHasAlu = portCapabilities.contains(ExecutionUnitKind.Alu)
@@ -263,12 +271,32 @@ final class IssueQueue(
   }
 
   private def selectLowest(mask: Bits): UInt = {
-    val selected = UInt(log2Up(config.issueQueueEntriesPerPort) bits)
-    selected := 0
-    for (index <- (0 until config.issueQueueEntriesPerPort).reverse) {
-      when(mask(index)) { selected := U(index, selected.getWidth bits) }
+    val indexWidth = log2Up(mask.getWidth)
+    if (config.enableBalancedIssueSelection) {
+      def selectRange(first: Int, length: Int): (Bool, UInt) = {
+        if (length == 1) {
+          (mask(first), U(first, indexWidth bits))
+        } else {
+          val lowerLength = length / 2
+          val upperLength = length - lowerLength
+          val (lowerValid, lowerIndex) = selectRange(first, lowerLength)
+          val (upperValid, upperIndex) = selectRange(first + lowerLength, upperLength)
+          val selectedIndex = UInt(indexWidth bits)
+          selectedIndex := upperIndex
+          when(lowerValid) { selectedIndex := lowerIndex }
+          (lowerValid || upperValid, selectedIndex)
+        }
+      }
+
+      selectRange(0, mask.getWidth)._2
+    } else {
+      val selected = UInt(indexWidth bits)
+      selected := 0
+      for (index <- (0 until mask.getWidth).reverse) {
+        when(mask(index)) { selected := U(index, selected.getWidth bits) }
+      }
+      selected
     }
-    selected
   }
 
   val io = new Bundle {
@@ -278,6 +306,10 @@ final class IssueQueue(
 
     val wakeupValid = in Bits (config.writebackWidth bits)
     val wakeupPdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
+    // Persistent wakeup updates source-ready state. Select wakeup is the
+    // latency bypass allowed to make an entry eligible in the same cycle.
+    val selectWakeupValid = in Bits (config.writebackWidth bits)
+    val selectWakeupPdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
 
     val issueValid = out Bool ()
     val issue = out(RenamedMicroOp(config))
@@ -287,51 +319,108 @@ final class IssueQueue(
     val occupancy = out UInt (log2Up(config.issueQueueEntriesPerPort + 1) bits)
   }
 
-  // Keep resident uops compacted in age order, as the ysyx issue queue does.
-  // Wakeup-to-select therefore crosses one payload lookup instead of an age
-  // lookup followed by a second physical-slot lookup.
-  val queue = Vec.fill(config.issueQueueEntriesPerPort)(Reg(IssueEntry(config, portIndex)))
+  // Payload remains in a fixed physical slot for its whole resident lifetime.
+  // Only the narrow age-order index array compacts after an out-of-order issue;
+  // execution backpressure therefore cannot become the CE of every payload bit.
+  private val entryCount = config.issueQueueEntriesPerPort
+  // A tokenized ordinary output retains the selected slot for the address
+  // stage. The extra physical slot preserves the original eight resident IQ
+  // entries while one older entry is held by execution backpressure.
+  private val physicalSlotCount = entryCount + (if (tokenizedIssueOutput) 1 else 0)
+  private val entryIndexWidth = log2Up(physicalSlotCount)
+  val payloadSlots = Vec.fill(physicalSlotCount)(Reg(IssueEntry(config, portIndex)))
+  val slotOccupied = Reg(Bits(physicalSlotCount bits)) init (0)
+  val ageOrder = Vec.fill(entryCount)(Reg(UInt(entryIndexWidth bits)))
   val count = Reg(UInt(log2Up(config.issueQueueEntriesPerPort + 1) bits)) init (0)
 
-  val wakeupEntry1 = Bits(config.issueQueueEntriesPerPort bits)
-  val wakeupEntry2 = Bits(config.issueQueueEntriesPerPort bits)
-  for (entry <- 0 until config.issueQueueEntriesPerPort) {
-    wakeupEntry1(entry) := False
-    wakeupEntry2(entry) := False
+  val wakeupSlot1 = Bits(physicalSlotCount bits)
+  val wakeupSlot2 = Bits(physicalSlotCount bits)
+  val selectWakeupSlot1 = Bits(physicalSlotCount bits)
+  val selectWakeupSlot2 = Bits(physicalSlotCount bits)
+  val readySlot = Bits(physicalSlotCount bits)
+  for (slot <- 0 until physicalSlotCount) {
+    wakeupSlot1(slot) := False
+    wakeupSlot2(slot) := False
+    selectWakeupSlot1(slot) := False
+    selectWakeupSlot2(slot) := False
     for (write <- 0 until config.writebackWidth) {
-      when(io.wakeupValid(write) && io.wakeupPdst(write) === queue(entry).psrc1) {
-        wakeupEntry1(entry) := True
+      when(io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc1) {
+        wakeupSlot1(slot) := True
       }
-      when(io.wakeupValid(write) && io.wakeupPdst(write) === queue(entry).psrc2) {
-        wakeupEntry2(entry) := True
+      when(io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc2) {
+        wakeupSlot2(slot) := True
+      }
+      when(
+        io.selectWakeupValid(write) &&
+          io.selectWakeupPdst(write) === payloadSlots(slot).psrc1
+      ) {
+        selectWakeupSlot1(slot) := True
+      }
+      when(
+        io.selectWakeupValid(write) &&
+          io.selectWakeupPdst(write) === payloadSlots(slot).psrc2
+      ) {
+        selectWakeupSlot2(slot) := True
       }
     }
-  }
-
-  val readyMap = Bits(config.issueQueueEntriesPerPort bits)
-  for (entry <- 0 until config.issueQueueEntriesPerPort) {
     val storeDataIsDecoupled =
       if (config.executionPorts(portIndex).capabilities.contains(ExecutionUnitKind.LoadStore)) {
-        queue(entry).memory.isStore
+        payloadSlots(slot).memory.isStore
       } else {
         False
       }
-    readyMap(entry) := U(entry, count.getWidth bits) < count &&
-      (queue(entry).source1Ready || wakeupEntry1(entry)) &&
-      (storeDataIsDecoupled || queue(entry).source2Ready || wakeupEntry2(entry)) &&
-      (!(if (portHasSystem) queue(entry).system.serializing else False) ||
-        queue(entry).robPointer === io.robHeadPointer)
+    readySlot(slot) := slotOccupied(slot) &&
+      (payloadSlots(slot).source1Ready || selectWakeupSlot1(slot)) &&
+      (storeDataIsDecoupled || payloadSlots(slot).source2Ready || selectWakeupSlot2(slot)) &&
+      (!(if (portHasSystem) payloadSlots(slot).system.serializing else False) ||
+        payloadSlots(slot).robPointer === io.robHeadPointer)
   }
 
-  val issueIndex = selectLowest(readyMap)
-  val issueIndexWide = UInt(count.getWidth bits)
-  issueIndexWide := issueIndex.resize(count.getWidth)
+  val readyAge = Bits(entryCount bits)
+  for (age <- 0 until entryCount) {
+    readyAge(age) := U(age, count.getWidth bits) < count && readySlot(ageOrder(age))
+  }
+  val issueAgeIndex = selectLowest(readyAge)
+  val issueAgeIndexWide = UInt(count.getWidth bits)
+  issueAgeIndexWide := issueAgeIndex.resize(count.getWidth)
+  val issueSlot = ageOrder(issueAgeIndex)
   val selectedUop = RenamedMicroOp(config)
-  unpackIssueEntry(selectedUop, queue(issueIndex))
+  unpackIssueEntry(selectedUop, payloadSlots(issueSlot))
   val queueDequeue = Bool()
+  val tokenOutputDequeue = Bool()
+  val tokenOutputSlot = UInt(entryIndexWidth bits)
 
-  if (config.executionPorts(portIndex).registeredIssueOutput) {
+  if (tokenizedIssueOutput) {
+    val outputValid = RegInit(False)
+    val outputSlot = Reg(UInt(entryIndexWidth bits)) init (0)
+    val outputEntry = IssueEntry(config, portIndex)
+    outputEntry := payloadSlots(outputSlot)
+    io.issueValid := outputValid
+    unpackIssueEntry(io.issue, outputEntry)
+
+    val outputDequeue = io.issueValid && io.issueReady
+    tokenOutputDequeue := outputDequeue
+    tokenOutputSlot := outputSlot
+    queueDequeue := (!outputValid || outputDequeue) && readyAge.orR
+    when(io.flush) {
+      outputValid := False
+      outputSlot := 0
+    }.otherwise {
+      when(outputDequeue) { outputValid := False }
+      when(queueDequeue) {
+        outputValid := True
+        outputSlot := issueSlot
+      }
+    }
+    io.occupancy := (count + outputValid.asUInt).resized
+  } else {
+    tokenOutputDequeue := False
+    tokenOutputSlot := 0
+  }
+
+  if (!tokenizedIssueOutput && registeredIssueOutput) {
     val outputSlots = Vec.fill(2)(Reg(IssueEntry(config, portIndex)))
+    val nextOutputSlots = Vec.fill(2)(IssueEntry(config, portIndex))
     val outputReadPointer = RegInit(False)
     val outputWritePointer = RegInit(False)
     val outputCount = Reg(UInt(2 bits)) init (0)
@@ -346,7 +435,7 @@ final class IssueQueue(
     io.issue := outputHead
 
     val outputDequeue = io.issueValid && io.issueReady
-    queueDequeue := outputEnqueueReady && readyMap.orR
+    queueDequeue := outputEnqueueReady && readyAge.orR
     val nextOutputCount = UInt(outputCount.getWidth bits)
     nextOutputCount := outputCount + queueDequeue.asUInt - outputDequeue.asUInt
 
@@ -361,19 +450,21 @@ final class IssueQueue(
       when(queueDequeue) { outputWritePointer := !outputWritePointer }
       when(outputDequeue) { outputReadPointer := !outputReadPointer }
     }
-    // outputCount alone defines visibility.  Let an invalid slot absorb the
-    // flush-edge payload write so redirect does not drive every payload CE.
+    for (slot <- 0 until 2) nextOutputSlots(slot) := outputSlots(slot)
     when(queueDequeue) {
       when(outputWritePointer) {
-        outputSlots(1) := queue(issueIndex)
+        nextOutputSlots(1) := payloadSlots(issueSlot)
       }.otherwise {
-        outputSlots(0) := queue(issueIndex)
+        nextOutputSlots(0) := payloadSlots(issueSlot)
       }
     }
+    // Visibility is carried entirely by outputCount.  Updating the local
+    // payload next state every cycle keeps redirect out of the wide register CE.
+    for (slot <- 0 until 2) outputSlots(slot) := nextOutputSlots(slot)
 
     io.occupancy := (count + outputCount).resized
-  } else {
-    io.issueValid := readyMap.orR
+  } else if (!tokenizedIssueOutput) {
+    io.issueValid := readyAge.orR
     io.issue := selectedUop
     queueDequeue := io.issueValid && io.issueReady
     io.occupancy := count
@@ -388,9 +479,11 @@ final class IssueQueue(
   // flush branches below have priority over every enqueue/dequeue update.
   io.enqueueReady := enqueueReadyReg
   val enqueueFire = io.enqueueValid && io.enqueueReady
-  val enqueueIndex = UInt(log2Up(config.issueQueueEntriesPerPort) bits)
-  enqueueIndex := count.resized
-  when(queueDequeue) { enqueueIndex := (count - 1).resized }
+  val freeSlots = ~slotOccupied
+  val enqueueSlot = selectLowest(freeSlots)
+  val enqueueAgeIndex = UInt(entryIndexWidth bits)
+  enqueueAgeIndex := count.resized
+  when(queueDequeue) { enqueueAgeIndex := (count - 1).resized }
 
   val enqueueWakeup1 = io.wakeupValid.asBools
     .zip(io.wakeupPdst)
@@ -410,37 +503,46 @@ final class IssueQueue(
 
   when(io.flush) {
     count := 0
+    slotOccupied := 0
   }.otherwise {
     count := count + enqueueFire.asUInt - queueDequeue.asUInt
-  }
-  // count alone defines resident entries.  Payload mutation on a flush edge
-  // is harmless and keeps the redirect net out of every wide queue CE.
-  for (entry <- 0 until config.issueQueueEntriesPerPort) {
-    val entryEnqueue = enqueueFire &&
-      enqueueIndex === U(entry, log2Up(config.issueQueueEntriesPerPort) bits)
-    if (entry < config.issueQueueEntriesPerPort - 1) {
-      val entryShift = queueDequeue &&
-        U(entry, count.getWidth bits) >= issueIndexWide &&
-        U(entry + 1, count.getWidth bits) < count
-      when(entryEnqueue) {
-        queue(entry) := enqueued
-      }.elsewhen(entryShift) {
-        copyIssueEntry(
-          queue(entry),
-          queue(entry + 1),
-          queue(entry + 1).source1Ready || wakeupEntry1(entry + 1),
-          queue(entry + 1).source2Ready || wakeupEntry2(entry + 1)
-        )
-      }.otherwise {
-        when(wakeupEntry1(entry)) { queue(entry).source1Ready := True }
-        when(wakeupEntry2(entry)) { queue(entry).source2Ready := True }
-      }
+    if (!tokenizedIssueOutput) {
+      when(queueDequeue) { slotOccupied(issueSlot) := False }
     } else {
-      when(entryEnqueue) {
-        queue(entry) := enqueued
-      }.otherwise {
-        when(wakeupEntry1(entry)) { queue(entry).source1Ready := True }
-        when(wakeupEntry2(entry)) { queue(entry).source2Ready := True }
+      // The tokenized output owns its payload slot until execution accepts it.
+      // A simultaneous replacement token keeps its independently selected slot.
+      when(tokenOutputDequeue) { slotOccupied(tokenOutputSlot) := False }
+    }
+    when(enqueueFire) { slotOccupied(enqueueSlot) := True }
+  }
+
+  for (age <- 0 until entryCount) {
+    val nextAgeSlot = UInt(entryIndexWidth bits)
+    nextAgeSlot := ageOrder(age)
+    if (age < entryCount - 1) {
+      when(
+        queueDequeue &&
+          U(age, count.getWidth bits) >= issueAgeIndexWide &&
+          U(age + 1, count.getWidth bits) < count
+      ) {
+        nextAgeSlot := ageOrder(age + 1)
+      }
+    }
+    when(enqueueFire && enqueueAgeIndex === U(age, entryIndexWidth bits)) {
+      nextAgeSlot := enqueueSlot
+    }
+    ageOrder(age) := nextAgeSlot
+  }
+
+  for (slot <- 0 until physicalSlotCount) {
+    when(enqueueFire && enqueueSlot === U(slot, entryIndexWidth bits)) {
+      payloadSlots(slot) := enqueued
+    }.otherwise {
+      when(slotOccupied(slot) && wakeupSlot1(slot)) {
+        payloadSlots(slot).source1Ready := True
+      }
+      when(slotOccupied(slot) && wakeupSlot2(slot)) {
+        payloadSlots(slot).source2Ready := True
       }
     }
   }

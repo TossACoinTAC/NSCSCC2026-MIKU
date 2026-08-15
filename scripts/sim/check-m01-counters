@@ -19,6 +19,272 @@ except (OSError, json.JSONDecodeError) as error:
     fail(str(error))
 
 schema = counters.get("schema_version")
+if schema in {
+    "miku-perf-observation-v1",
+    "miku-perf-observation-v2",
+    "miku-perf-observation-v3",
+    "miku-perf-observation-v4",
+    "miku-perf-observation-v5",
+}:
+    abi = counters.get("observation_abi")
+    if abi != {"magic": "MIKU", "version": 1, "word_count": 8}:
+        fail(f"unexpected observation ABI {abi!r}")
+    if counters.get("commit_observation_lag_cycles") != 4:
+        fail("unexpected DiffTest commit observation lag")
+
+    if schema in {
+        "miku-perf-observation-v2",
+        "miku-perf-observation-v3",
+        "miku-perf-observation-v4",
+        "miku-perf-observation-v5",
+    }:
+        roi = counters.get("roi")
+        if not isinstance(roi, dict):
+            fail("ROI must be a structured object")
+        mode = roi.get("mode")
+        markers = roi.get("counter_read_markers")
+        complete = roi.get("complete")
+        expected_mode = (
+            "counter-read-pairs"
+            if schema == "miku-perf-observation-v2"
+            else "outermost-counter-read-pair"
+        )
+        if mode not in {"full-run", expected_mode}:
+            fail(f"unexpected ROI mode {mode!r}")
+        if not isinstance(markers, int) or markers < 0:
+            fail("ROI counter_read_markers must be a nonnegative integer")
+        if complete is not True:
+            fail("ROI counter-read markers are incomplete")
+        if roi.get("boundary_cycles_included") is not False:
+            fail("ROI boundary cycles must be excluded")
+        if schema == "miku-perf-observation-v2":
+            pairs = roi.get("closed_pairs")
+            if not isinstance(pairs, int) or pairs < 0:
+                fail("ROI closed_pairs must be a nonnegative integer")
+            if mode == "full-run" and (markers != 0 or pairs != 0):
+                fail("full-run ROI cannot contain counter-read markers")
+            if mode == expected_mode and (
+                markers < 2 or markers % 2 != 0 or pairs != markers // 2
+            ):
+                fail("counter-read ROI markers do not form closed pairs")
+        else:
+            nested_pairs = roi.get("nested_counter_read_pairs")
+            if not isinstance(nested_pairs, int) or nested_pairs < 0:
+                fail("ROI nested_counter_read_pairs must be a nonnegative integer")
+            if mode == "full-run" and (markers != 0 or nested_pairs != 0):
+                fail("full-run ROI cannot contain counter-read markers")
+            if mode == expected_mode and (
+                markers < 2
+                or markers % 2 != 0
+                or nested_pairs != markers // 2 - 1
+            ):
+                fail("outermost counter-read ROI markers are inconsistent")
+
+    hist = counters.get("retire_width_histogram")
+    if not isinstance(hist, list) or len(hist) != 4 or not all(
+        isinstance(value, int) and value >= 0 for value in hist
+    ):
+        fail("retire_width_histogram must contain four nonnegative integers")
+    cycles = counters.get("cycles")
+    instructions = counters.get("retired_instructions")
+    observed = counters.get("observed_commit_instructions")
+    if not isinstance(cycles, int) or cycles < 0:
+        fail("cycles must be a nonnegative integer")
+    if sum(hist) != cycles:
+        fail("retire histogram does not conserve cycles")
+    weighted = sum(width * count for width, count in enumerate(hist))
+    if weighted != instructions or observed != instructions:
+        fail("retire histogram and DiffTest commit stream do not conserve instructions")
+    if counters.get("unused_commit_slots") != 3 * cycles - instructions:
+        fail("unused_commit_slots does not conserve commit width")
+
+    zero = counters.get("zero_retire_loss", {})
+    if set(zero) != {"recovery", "rob_empty", "rob_nonempty"} or not all(
+        isinstance(value, int) and value >= 0 for value in zero.values()
+    ):
+        fail("zero_retire_loss has an invalid schema")
+    if sum(zero.values()) != hist[0]:
+        fail("zero-retire causes do not conserve zero-width cycles")
+
+    rob = counters.get("rob", {})
+    rob_hist = rob.get("occupancy_histogram")
+    if not isinstance(rob_hist, list) or len(rob_hist) != 33 or not all(
+        isinstance(value, int) and value >= 0 for value in rob_hist
+    ):
+        fail("ROB occupancy histogram must contain 33 nonnegative integers")
+    if sum(rob_hist) != cycles:
+        fail("ROB occupancy histogram does not conserve cycles")
+    if rob.get("occupancy_sum") != sum(index * value for index, value in enumerate(rob_hist)):
+        fail("ROB occupancy sum does not match its histogram")
+    if rob.get("occupancy_max") != max((index for index, value in enumerate(rob_hist) if value), default=0):
+        fail("ROB occupancy max does not match its histogram")
+    if rob.get("full_cycles") != rob_hist[32]:
+        fail("ROB full cycles do not match occupancy bin 32")
+    if schema in {"miku-perf-observation-v4", "miku-perf-observation-v5"}:
+        head_reason_names = {
+            "invalid",
+            "payload_not_ready",
+            "incomplete",
+            "predictor_backpressure",
+            "ready_without_retire",
+        }
+        incomplete_class_names = {"load", "store", "branch", "system", "other"}
+        head_reasons = rob.get("zero_retire_head_reason", {})
+        incomplete_classes = rob.get("incomplete_head_class", {})
+        if set(head_reasons) != head_reason_names or not all(
+            isinstance(value, int) and value >= 0 for value in head_reasons.values()
+        ):
+            fail("ROB zero-retire head reasons have an invalid schema")
+        if set(incomplete_classes) != incomplete_class_names or not all(
+            isinstance(value, int) and value >= 0 for value in incomplete_classes.values()
+        ):
+            fail("ROB incomplete head classes have an invalid schema")
+        if sum(head_reasons.values()) != zero["rob_nonempty"]:
+            fail("ROB zero-retire head reasons do not conserve ROB-nonempty cycles")
+        if sum(incomplete_classes.values()) != head_reasons["incomplete"]:
+            fail("ROB incomplete head classes do not conserve incomplete cycles")
+
+    frontend = counters.get("frontend", {})
+    frontend_hist = frontend.get("occupancy_histogram")
+    if not isinstance(frontend_hist, list) or len(frontend_hist) != 17 or not all(
+        isinstance(value, int) and value >= 0 for value in frontend_hist
+    ):
+        fail("frontend occupancy histogram must contain 17 nonnegative integers")
+    if sum(frontend_hist) != cycles:
+        fail("frontend occupancy histogram does not conserve cycles")
+    frontend_intervals = frontend.get("request_interval_histogram")
+    if not isinstance(frontend_intervals, list) or len(frontend_intervals) != 8 or not all(
+        isinstance(value, int) and value >= 0 for value in frontend_intervals
+    ):
+        fail("frontend request interval histogram must contain eight nonnegative integers")
+    request_fire = frontend.get("cache_request_fire")
+    if schema in {
+        "miku-perf-observation-v2",
+        "miku-perf-observation-v3",
+        "miku-perf-observation-v4",
+        "miku-perf-observation-v5",
+    }:
+        request_sequences = frontend.get("request_interval_sequences")
+        if (
+            not isinstance(request_sequences, int)
+            or request_sequences < 0
+            or request_sequences > request_fire
+        ):
+            fail("frontend request interval sequence count is invalid")
+        expected_intervals = request_fire - request_sequences
+    else:
+        expected_intervals = max(request_fire - 1, 0)
+    if sum(frontend_intervals) != expected_intervals:
+        fail("frontend request intervals do not conserve request fires")
+
+    issue = counters.get("issue", {})
+    for name in ("ready_cycles", "ready_entries", "occupancy_sum", "full_cycles", "fire_by_port"):
+        values = issue.get(name)
+        if not isinstance(values, list) or len(values) != 4 or not all(
+            isinstance(value, int) and value >= 0 for value in values
+        ):
+            fail(f"issue {name} must contain four nonnegative integers")
+    if any(value > cycles for value in issue["ready_cycles"] + issue["full_cycles"]):
+        fail("issue cycle count exceeds observation cycles")
+    if any(value > 8 * cycles for value in issue["ready_entries"] + issue["occupancy_sum"]):
+        fail("issue entry sum exceeds queue capacity")
+    if issue.get("fire_sum") > issue.get("operand_valid_sum"):
+        fail("issue fire count exceeds valid operand count")
+    if sum(issue["fire_by_port"]) != issue.get("fire_sum"):
+        fail("issue fire_by_port does not conserve fire_sum")
+
+    dispatch = counters.get("dispatch", {})
+    dispatch_hist = dispatch.get("fire_histogram")
+    if not isinstance(dispatch_hist, list) or len(dispatch_hist) != 5 or not all(
+        isinstance(value, int) and value >= 0 for value in dispatch_hist
+    ):
+        fail("dispatch fire histogram must contain five nonnegative integers")
+    if sum(dispatch_hist) != cycles:
+        fail("dispatch fire histogram does not conserve cycles")
+    if sum(width * count for width, count in enumerate(dispatch_hist)) != dispatch.get("fire_sum"):
+        fail("dispatch fire histogram does not conserve accepted uops")
+    if dispatch.get("fire_sum") > dispatch.get("valid_sum"):
+        fail("dispatch fire count exceeds valid input count")
+
+    branch = counters.get("branch", {})
+    branch_hist = branch.get("commit_histogram")
+    if not isinstance(branch_hist, list) or len(branch_hist) != 4 or sum(branch_hist) != cycles:
+        fail("branch commit histogram does not conserve cycles")
+    if sum(width * count for width, count in enumerate(branch_hist)) != branch.get("retired"):
+        fail("branch commit histogram does not conserve branches")
+    resolved = branch.get("resolved")
+    mispredicted = branch.get("mispredicted")
+    matches = branch.get("recovery_matches")
+    unmatched = branch.get("recovery_without_resolution")
+    if not all(isinstance(value, int) and value >= 0 for value in (resolved, mispredicted, matches, unmatched)):
+        fail("branch counts must be nonnegative integers")
+    if matches > mispredicted or mispredicted > resolved:
+        fail("branch resolve/recovery counts violate containment")
+    latency_hist = branch.get("resolve_to_recovery_histogram")
+    if not isinstance(latency_hist, list) or len(latency_hist) != 8 or sum(latency_hist) != matches:
+        fail("branch recovery latency histogram does not conserve matches")
+    branch_recoveries = counters.get("recovery_cause", {}).get("branch_mispredict")
+    if matches + unmatched != branch_recoveries:
+        fail("branch recovery matching does not conserve branch recoveries")
+
+    lsq = counters.get("lsq", {})
+    lsq_events = lsq.get("events")
+    expected_lsq_events = 46 if schema == "miku-perf-observation-v5" else 28
+    if not isinstance(lsq_events, list) or len(lsq_events) != expected_lsq_events or not all(
+        isinstance(value, int) and 0 <= value <= cycles for value in lsq_events
+    ):
+        fail(f"LSQ events must contain {expected_lsq_events} per-cycle counters")
+    if lsq.get("load_occupancy_sum", -1) > 16 * cycles:
+        fail("load queue occupancy exceeds capacity")
+    if lsq.get("store_occupancy_sum", -1) > 8 * cycles:
+        fail("store queue occupancy exceeds capacity")
+
+    cache = counters.get("cache", {})
+    if not isinstance(cache.get("events"), list) or len(cache["events"]) != 20:
+        fail("cache events must contain 20 counters")
+    if not isinstance(cache.get("occupancy_sum"), list) or len(cache["occupancy_sum"]) != 3:
+        fail("cache occupancy_sum must contain three counters")
+
+    axi = counters.get("axi", {})
+    for name in ("valid", "fire", "backpressure"):
+        values = axi.get(name)
+        if not isinstance(values, list) or len(values) != 5 or not all(
+            isinstance(value, int) and 0 <= value <= cycles for value in values
+        ):
+            fail(f"AXI {name} must contain five per-cycle counters")
+    if not isinstance(axi.get("errors"), list) or len(axi["errors"]) != 2:
+        fail("AXI errors must contain read and write counters")
+    if any(fire > valid for fire, valid in zip(axi["fire"], axi["valid"])):
+        fail("AXI fire count exceeds valid count")
+
+    invariants = counters.get("invariants", {})
+    for name in (
+        "abi_valid", "retire_hist_cycles", "retire_hist_instructions",
+        "commit_observation", "source_retire_alignment",
+    ):
+        if invariants.get(name) is not True:
+            fail(f"invariant {name} is not true")
+    if schema in {
+        "miku-perf-observation-v2",
+        "miku-perf-observation-v3",
+        "miku-perf-observation-v4",
+        "miku-perf-observation-v5",
+    } and invariants.get("roi_complete") is not True:
+        fail("invariant roi_complete is not true")
+    for name in (
+        "abi_errors", "source_retire_alignment_errors",
+        "sampling_protocol_errors", "non_prefix_retire_cycles",
+    ):
+        if invariants.get(name) != 0:
+            fail(f"invariant counter {name} is nonzero")
+
+    print(
+        f"PerfObservation counters pass: schema={schema} cycles={cycles} instructions={instructions} "
+        f"ipc={instructions / cycles if cycles else 0:.6f} "
+        f"trace={counters.get('commit_trace_signature_fnv1a64')}"
+    )
+    raise SystemExit(0)
+
 if schema not in {"nscc-m01-v6", "nscc-m01-v7", "nscc-m01-v8"}:
     fail(f"unexpected schema {schema!r}")
 if counters.get("commit_observation_lag_cycles") != 4:

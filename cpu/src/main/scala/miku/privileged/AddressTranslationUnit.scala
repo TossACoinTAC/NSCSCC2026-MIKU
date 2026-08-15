@@ -94,7 +94,7 @@ final class AddressTranslationUnit(
   )
 
   val area = new ClockingArea(domain) {
-    val tlb = new HierarchicalTlb()
+    val tlb = new HierarchicalTlb(preloadDataProbeKey = config.enableDataTranslationProbePreload)
     tlb.io.clk := io.clk
     tlb.io.reset := io.reset
     tlb.io.writeValid := io.tlbFillValid || io.tlbWriteValid
@@ -187,6 +187,11 @@ final class AddressTranslationUnit(
     val instructionSearchPending = RegInit(False)
     val instructionResponseValid = RegInit(False)
     val instructionResponse = Reg(TranslationResponse(config))
+    val instructionDirectMemoryAttribute = Reg(Bits(2 bits))
+    val instructionDmw0MemoryAttribute = Reg(Bits(2 bits))
+    val instructionDmw1MemoryAttribute = Reg(Bits(2 bits))
+    val instructionDmw0PhysicalSegment = Reg(Bits(3 bits))
+    val instructionDmw1PhysicalSegment = Reg(Bits(3 bits))
     val instructionDmw0 = dmwEnabled(io.instructionRequest.virtualAddress, io.csrDmw0)
     val instructionDmw1 = dmwEnabled(io.instructionRequest.virtualAddress, io.csrDmw1)
     val instructionTranslate = pagingMode && !instructionDmw0 && !instructionDmw1
@@ -213,26 +218,34 @@ final class AddressTranslationUnit(
       instructionContext.translationEnabled := instructionTranslate
       instructionContext.dmw0Enabled := instructionDmw0
       instructionContext.dmw1Enabled := instructionDmw1
-      instructionContext.memoryAttribute := Mux(
-        instructionDmw0,
-        io.csrDmw0(5 downto 4),
-        Mux(instructionDmw1, io.csrDmw1(5 downto 4), io.instructionMat)
-      )
+      if (config.enableInstructionOwnerLateBypassPayload) {
+        // Snapshot every address-independent source beside the owner.  Selecting the DMW payload
+        // from registered owner flags on the response side removes the accepted VA from the MAT
+        // and physical-address register D cones without changing request or response latency.
+        instructionContext.memoryAttribute := io.instructionMat
+        instructionDirectMemoryAttribute := io.instructionMat
+        instructionDmw0MemoryAttribute := io.csrDmw0(5 downto 4)
+        instructionDmw1MemoryAttribute := io.csrDmw1(5 downto 4)
+        instructionDmw0PhysicalSegment := io.csrDmw0(27 downto 25)
+        instructionDmw1PhysicalSegment := io.csrDmw1(27 downto 25)
+      } else {
+        instructionContext.memoryAttribute := Mux(
+          instructionDmw0,
+          io.csrDmw0(5 downto 4),
+          Mux(instructionDmw1, io.csrDmw1(5 downto 4), io.instructionMat)
+        )
+      }
       instructionContext.privilege := io.csrPrivilege
       instructionContext.disableCache := io.disableCache
       val misaligned = io.instructionRequest.virtualAddress(1 downto 0) =/= 0
-      val memoryAttribute = Mux(
-        instructionDmw0,
-        io.csrDmw0(5 downto 4),
-        Mux(instructionDmw1, io.csrDmw1(5 downto 4), io.instructionMat)
-      )
       instructionResponse.virtualAddress := io.instructionRequest.virtualAddress
-      instructionResponse.physicalAddress := bypassPhysicalAddress(
-        io.instructionRequest.virtualAddress,
-        instructionDmw0,
-        instructionDmw1
-      )
-      instructionResponse.uncached := io.disableCache || memoryAttribute === 0
+      if (!config.enableInstructionOwnerLateBypassPayload) {
+        instructionResponse.physicalAddress := bypassPhysicalAddress(
+          io.instructionRequest.virtualAddress,
+          instructionDmw0,
+          instructionDmw1
+        )
+      }
       instructionResponse.cancelled := False
       instructionResponse.exception.valid := misaligned
       instructionResponse.exception.ecode := Mux(misaligned, U(8, 6 bits), U(0, 6 bits))
@@ -293,7 +306,48 @@ final class AddressTranslationUnit(
     }
     io.instructionResponse.valid := instructionResponseValid &&
       (!instructionContext.translationEnabled || !instructionSearchPending) && !tlbMutation
-    io.instructionResponse.payload := instructionResponse
+    val visibleInstructionResponse = TranslationResponse(config)
+    // Every visible response belongs to the registered instruction owner.  Source the identity
+    // from that owner so direct, paged and cancel completions do not each recreate a live
+    // response-payload path for the same virtual address.
+    visibleInstructionResponse.virtualAddress := instructionContext.virtualAddress
+    visibleInstructionResponse.physicalAddress := instructionResponse.physicalAddress
+    visibleInstructionResponse.uncached := instructionResponse.uncached
+    visibleInstructionResponse.cancelled := instructionResponse.cancelled
+    visibleInstructionResponse.exception := instructionResponse.exception
+    // Direct and DMW requests expose the accepted owner's registered MAT snapshot.  TLB
+    // completions retain their registered response payload, as do explicit cancel tokens.
+    when(!instructionContext.translationEnabled && !instructionResponse.cancelled) {
+      if (config.enableInstructionOwnerLateBypassPayload) {
+        val ownerPhysicalAddress = UInt(config.xlen bits)
+        ownerPhysicalAddress := instructionContext.virtualAddress
+        when(instructionContext.dmw0Enabled) {
+          ownerPhysicalAddress := (
+            instructionDmw0PhysicalSegment ## instructionContext.virtualAddress(28 downto 0).asBits
+          ).asUInt
+        }.elsewhen(instructionContext.dmw1Enabled) {
+          ownerPhysicalAddress := (
+            instructionDmw1PhysicalSegment ## instructionContext.virtualAddress(28 downto 0).asBits
+          ).asUInt
+        }
+        val ownerMemoryAttribute = Mux(
+          instructionContext.dmw0Enabled,
+          instructionDmw0MemoryAttribute,
+          Mux(
+            instructionContext.dmw1Enabled,
+            instructionDmw1MemoryAttribute,
+            instructionDirectMemoryAttribute
+          )
+        )
+        visibleInstructionResponse.physicalAddress := ownerPhysicalAddress
+        visibleInstructionResponse.uncached := instructionContext.disableCache ||
+          ownerMemoryAttribute === 0
+      } else {
+        visibleInstructionResponse.uncached := instructionContext.disableCache ||
+          instructionContext.memoryAttribute === 0
+      }
+    }
+    io.instructionResponse.payload := visibleInstructionResponse
 
     val dataContext = Reg(TranslationContext(config))
     val dataSearchPending = RegInit(False)
@@ -302,6 +356,11 @@ final class AddressTranslationUnit(
     val dataDmw0 = dmwEnabled(io.dataRequest.virtualAddress, io.csrDmw0)
     val dataDmw1 = dmwEnabled(io.dataRequest.virtualAddress, io.csrDmw1)
     val dataTranslate = pagingMode && !dataDmw0 && !dataDmw1
+    val dataRequestMemoryAttribute = Mux(
+      dataDmw0,
+      io.csrDmw0(5 downto 4),
+      Mux(dataDmw1, io.csrDmw1(5 downto 4), io.dataMat)
+    )
     // As on the instruction side, an available ATU owner implies that the data TLB port has no
     // accepted probe or walk.  Keep ready dependent on capacity and mutation only; routing the
     // accepted VA through DMW or the TLB remains acceptance-qualified below.
@@ -314,41 +373,37 @@ final class AddressTranslationUnit(
     tlb.io.dataRequest.oddPage := io.dataRequest.virtualAddress(12)
     tlb.io.dataRequest.asid := io.csrAsid
     io.tlbSearchReady := True
+    // Prefill the bypass payload whenever the response slot is free. Request
+    // acceptance then only qualifies visibility; a later TLB completion or
+    // mutation overrides these fields with higher assignment priority.
+    when(!dataResponseValid) {
+      dataResponse.virtualAddress := io.dataRequest.virtualAddress
+      dataResponse.physicalAddress := bypassPhysicalAddress(
+        io.dataRequest.virtualAddress,
+        dataDmw0,
+        dataDmw1
+      )
+      dataResponse.uncached := io.disableCache || dataRequestMemoryAttribute === 0
+      dataResponse.cancelled := False
+      dataResponse.exception.valid := False
+      dataResponse.exception.ecode := 0
+      dataResponse.exception.esubcode := 0
+      dataResponse.exception.badVAddrValid := False
+      dataResponse.exception.badVAddr := io.dataRequest.virtualAddress
+      dataResponse.exception.tlbRefill := False
+    }
     when(dataRequestFire) {
       dataContext.virtualAddress := io.dataRequest.virtualAddress
       dataContext.isWrite := io.dataRequest.isWrite
       dataContext.translationEnabled := dataTranslate
       dataContext.dmw0Enabled := dataDmw0
       dataContext.dmw1Enabled := dataDmw1
-      dataContext.memoryAttribute := Mux(
-        dataDmw0,
-        io.csrDmw0(5 downto 4),
-        Mux(dataDmw1, io.csrDmw1(5 downto 4), io.dataMat)
-      )
+      dataContext.memoryAttribute := dataRequestMemoryAttribute
       dataContext.privilege := io.csrPrivilege
       dataContext.disableCache := io.disableCache
       dataSearchPending := dataTranslate
       when(!dataTranslate) {
-        val memoryAttribute = Mux(
-          dataDmw0,
-          io.csrDmw0(5 downto 4),
-          Mux(dataDmw1, io.csrDmw1(5 downto 4), io.dataMat)
-        )
         dataResponseValid := True
-        dataResponse.virtualAddress := io.dataRequest.virtualAddress
-        dataResponse.physicalAddress := bypassPhysicalAddress(
-          io.dataRequest.virtualAddress,
-          dataDmw0,
-          dataDmw1
-        )
-        dataResponse.uncached := io.disableCache || memoryAttribute === 0
-        dataResponse.cancelled := False
-        dataResponse.exception.valid := False
-        dataResponse.exception.ecode := 0
-        dataResponse.exception.esubcode := 0
-        dataResponse.exception.badVAddrValid := False
-        dataResponse.exception.badVAddr := io.dataRequest.virtualAddress
-        dataResponse.exception.tlbRefill := False
       }
     }
     when(io.dataResponse.valid && io.dataResponse.ready) { dataResponseValid := False }

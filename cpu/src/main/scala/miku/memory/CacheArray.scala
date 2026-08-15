@@ -5,7 +5,8 @@ import spinal.core._
 
 final class CacheArray(
     geometry: CoreCacheGeometry,
-    addressWidth: Int = 32
+    addressWidth: Int = 32,
+    decoupleDataReadEnable: Boolean = false
 ) extends Component {
   require(geometry.lineBytes == CacheContract.LineBytes)
 
@@ -115,9 +116,14 @@ final class CacheArray(
       address = Mux(io.maintenanceReadValid, io.maintenanceReadIndex, requestIndex),
       enable = (lookupFire || maintenanceFire) && !tagWriteEnable
     )
+    val dataReadEnable = if (decoupleDataReadEnable) {
+      lookupFire || maintenanceFire
+    } else {
+      (lookupFire || maintenanceFire) && !externalWrite
+    }
     dataRead(way) := dataMemories(way).readSync(
       address = Mux(io.maintenanceReadValid, io.maintenanceReadIndex, requestIndex),
-      enable = (lookupFire || maintenanceFire) && !externalWrite
+      enable = dataReadEnable
     )
   }
 

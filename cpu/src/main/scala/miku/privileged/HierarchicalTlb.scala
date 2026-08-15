@@ -45,7 +45,11 @@ final case class TlbEntryState() extends Bundle {
   * priority over invalidation for the selected entry, and every mutation drops cached micro-TLB
   * state before a redirected request can be accepted.
   */
-final class HierarchicalTlb(microEntries: Int = 4, walkEntriesPerCycle: Int = 4)
+final class HierarchicalTlb(
+    microEntries: Int = 4,
+    walkEntriesPerCycle: Int = 4,
+    preloadDataProbeKey: Boolean = false
+)
     extends Component {
   require(microEntries == 4, "the timing-oriented micro-TLB currently has four entries")
   require(walkEntriesPerCycle == 4, "the main TLB currently walks four entries per cycle")
@@ -87,6 +91,14 @@ final class HierarchicalTlb(microEntries: Int = 4, walkEntriesPerCycle: Int = 4)
     // physical layout explicit prevents the four-lane walker from becoming four independent
     // 32:1 bundle muxes after RTL generation.
     val entryBanks = Vec.fill(walkEntriesPerCycle)(Vec.fill(8)(Reg(TlbEntryState())))
+
+    // Main-TLB contents are architecturally invalid after reset.  The payload may remain
+    // uninitialized, but no lookup or management search may observe it until software writes the
+    // entry.  Initializing only the qualification bit also avoids a wide reset tree over 32 full
+    // entries.
+    for (bank <- entryBanks; entry <- bank) {
+      entry.enabled.init(False)
+    }
 
     private def entryAt(index: Int): TlbEntryState =
       entryBanks(index % walkEntriesPerCycle)(index / walkEntriesPerCycle)
@@ -257,11 +269,22 @@ final class HierarchicalTlb(microEntries: Int = 4, walkEntriesPerCycle: Int = 4)
     when(io.instructionRequest.fire) {
       instructionProbePending := True
     }
-    when(io.dataRequest.fire) {
-      dataProbePending := True
-      dataVppn := io.dataRequest.vppn
-      dataOddPage := io.dataRequest.oddPage
-      dataAsid := io.dataRequest.asid
+    if (preloadDataProbeKey) {
+      when(io.dataRequest.ready) {
+        dataVppn := io.dataRequest.vppn
+        dataOddPage := io.dataRequest.oddPage
+        dataAsid := io.dataRequest.asid
+      }
+      when(io.dataRequest.fire) {
+        dataProbePending := True
+      }
+    } else {
+      when(io.dataRequest.fire) {
+        dataProbePending := True
+        dataVppn := io.dataRequest.vppn
+        dataOddPage := io.dataRequest.oddPage
+        dataAsid := io.dataRequest.asid
+      }
     }
 
     val instructionMicroMatch = Bits(microEntries bits)

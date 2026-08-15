@@ -50,15 +50,15 @@ T = cycle_count / f_cpu
 
 | 项目 | 当前证据 |
 | --- | --- |
-| CPU checkout | `dev/ECHO`；当前候选 RTL 源码冻结于 `013db4902e57...`，其后只整理文档与 harness |
-| 当前 RTL 身份 | CPU source tree SHA-256 `36a07dccff81...`；raw RTL `048e5e0974e9...`；published RTL `9939004de078...` |
+| CPU checkout | `dev/ECHO @ ecd4786fcc87...` 的 WT01；matching evidence 冻结于 workspace `445b777d84dd...` |
+| 当前 RTL 身份 | CPU source tree SHA-256 `232a0291e523...`；raw RTL `71cab587cb07...`；published RTL `f8aeca2dcfc5...` |
 | 固定 Chiplab | `c398d274812f164d387146fa7d8f612a4a1296d9`（官方 `nscscc2026`） |
-| 当前本地 perf 实现 | matching 100 MHz full implementation 已完成：setup `-0.552 ns` / `-116.580 ns`、hold `+0.018 ns` / `0 ns`、DRC 0 error/critical warning、fully routed、bitstream 成功；因 setup 未闭合，只归档为 candidate |
+| 最新本地 perf 实现 | WT01 matching 100 MHz full implementation：setup `-0.824 ns`、hold `+0.056 ns`、DRC 0 error/critical warning、fully routed、bitstream 成功；setup 未闭合，因此不是里程碑 |
 | 历史物理优化参考 | `627aca6... + c398d274...` 的同网表 post-route 曾得到 setup `+0.009 ns`、hold `+0.012 ns`、DRC 0 和探索用 bitstream；按当前合同只作路径参考，不是正式竞赛产物 |
 | 更早参考实现 | `60fba481... + c398d274...` 的 setup `+0.044 ns` 及 `d9bab16... + 68c20a5...` 均为历史网表证据 |
 | 器件 / 工具 | `xc7a200tfbg676-2` / Vivado 2023.2 |
 | Linux 状态 | 历史候选已有 Linux 5.14 early console/memory initialization；当前 RTL 本轮未重跑 Linux，且仍没有 shell 验收 |
-| 当前候选板测 | 板侧服务器暂不可用；当前 RTL 没有 matching 板测证据 |
+| 当前候选板测 | R5 `fbc9634` 的 matching 100 MHz direct-full bitstream 已在 LabAgent job `20260815-114325-2bc00a63` 完成 perf20 20/20 |
 
 ### 2.2 宽度与容量
 
@@ -86,25 +86,33 @@ T = cycle_count / f_cpu
 
 ### 2.3 完整 SoC 时序与资源
 
-当前候选的 matching 100 MHz full implementation 已完成。CPU、system、DDR 实际时钟为
+最新一次 matching 100 MHz full implementation 对应 WT01。CPU、system、DDR 实际时钟为
 100、100、200 MHz；bitstream 与 fully-routed DCP 均已产生，hold 和 DRC 通过，但 setup
-未闭合，因此它是可分析的 candidate，不是稳定 milestone。完整报告归档在
-`Post_Impl_Bundles/cpu_013db4902e57_chiplab_c398d274812f_perf_100mhz_20260814-071827/`。
+仍未闭合，因此归类为 candidate。完整报告归档在
+`Post_Impl_Bundles/cpu_445b777d84dd_chiplab_c398d274812f_perf_100mhz_20260814-203428/`。
 
-| 指标 | 当前 `013db490 + c398d274` full impl | `60fba481 + c398d274` 历史 | `8594150 + c398d274` 历史 |
-| --- | ---: | ---: | ---: |
-| Setup WNS / TNS | `-0.552 ns` / `-116.580 ns` | `+0.044 ns` / `0 ns` | `-0.225 ns` / `-12.096 ns` |
-| Setup failing endpoints | 890 | 0 | 190 |
-| Hold WNS / TNS | `+0.018 ns` / `0 ns` | `+0.050 ns` / `0 ns` | `+0.053 ns` / `0 ns` |
-| Placed LUT / FF | 89,320 / 54,073 | 88,967 / 53,697 | 未归档 |
-| Slice / BRAM tile / DSP | 27,218 / 56.5 / 8 | 27,171 / 65.5 / 8 | 未归档 |
+| 指标 | `445b777` WT01 | `50f998c` BT04（已否决） | `888d4e6` BT03 对照 | `013db490` 历史 |
+| --- | ---: | ---: | ---: | ---: |
+| Setup WNS / TNS | `-0.824 ns` / `-470.006 ns` | `-1.442 ns` / `-1550.156 ns` | `-0.694 ns` / `-190.761 ns` | `-0.552 ns` / `-116.580 ns` |
+| Setup failing endpoints | 1,644 | 3,195 | 756 | 890 |
+| Hold WNS / TNS | `+0.056 ns` / `0 ns` | `+0.050 ns` / `0 ns` | `+0.053 ns` / `0 ns` | `+0.018 ns` / `0 ns` |
+| Placed LUT / FF | 88,850 / 54,432 | 89,422 / 54,881 | 86,489 / 54,358 | 89,320 / 54,073 |
+| Slice / BRAM tile / DSP | 27,681 / 54.5 / 8 | 27,745 / 54.5 / 8 | 26,920 / 56.5 / 8 | 27,218 / 56.5 / 8 |
 
-当前最差 CPU setup 路径从 BTB bank BRAM 输出经过 tag hit、下一取指预测、speculative RAS
-选择与 instruction ATU 的 DMW/MAT 判定，到 `instructionResponse_uncached` 寄存器；数据路径
-10.442 ns，其中逻辑 4.272 ns、布线 6.170 ns，共 15 级逻辑。其后的 top-N 同时包含 L1I
-tag BRAM 到 data BRAM enable、PHT 地址和前端 response/next-lookup 的路径，说明当前 setup
-退化是前端命中回授路径簇，不是旧 RAS `+4` 加法器的单一孤立路径。FT01 已消除目标结构且
-周期中性，但单独不足以让这份网表闭合。首轮同网表 `AggressiveExplore` post-route 把
+BT04 的 top-50 全部属于 IQ。最差数据路径为 11.053 ns，其中逻辑 2.146 ns、布线
+8.907 ns，共 14 级逻辑；路径从 recovery 状态穿过另一个 IQ 的 source-ready/direct-wakeup，
+再经过目标 IQ 的 wakeup/select 和双槽复制输出 mux，到宽 issue payload 寄存器。top-50 平均
+route 占比为 80.45%。相对 BT03，BT04 增加 2,933 LUT、523 FF、825 slice，却没有任何
+perf20 周期收益，证明这条恢复方案同时恶化了 packing、拥塞和跨 IQ 级联。当前源码已恢复
+BT03 token 输出，并以 WT01 从 direct-wakeup 候选锥中移除 recovery/flush。WT01 matching
+route 中这条 recovery 到 IQ 的路径族已从 top-50 消失；剩余主导族为 instruction ATU、
+frontend next-PC、predictor update 与 L1I response prediction。
+
+较早的 `013db490` 最差 CPU setup 路径从 BTB bank BRAM 输出经过 tag hit、下一取指预测、
+speculative RAS 选择与 instruction ATU 的 DMW/MAT 判定，到 `instructionResponse_uncached`
+寄存器；数据路径 10.442 ns，其中逻辑 4.272 ns、布线 6.170 ns，共 15 级逻辑。其后的
+top-N 同时包含 L1I tag BRAM 到 data BRAM enable、PHT 地址和前端 response/next-lookup，
+说明该网表是前端命中回授路径簇。首轮同网表 `AggressiveExplore` post-route 把
 setup WNS/TNS 改善到 `-0.125/-4.616 ns`；第二次有界 pass 从首轮 DCP 进一步得到
 `-0.055/-1.050 ns`，hold 均保持正值。最终 top-N 包含 translation PC 到 PHT 地址、BTB
 到 ATU、LSQ load 地址 CE、redirect 到 IQ CE，以及 L1I predecode 到 frontend enqueue，
@@ -155,12 +163,12 @@ Standalone 最差路径是 P2 乘法输入到结果寄存器，数据路径 9.46
 
 | 层级 | 当前候选证据 | 结论边界 |
 | --- | --- | --- |
-| 本地 gates | Scala/Verilator 39 suites / 213 tests；Python、port、lint、Yosys、publication 全通过 | 结构与现有定向合同通过，不证明 Linux shell |
-| Chiplab func58 | random-AXI seeds `240/255/141` 全部通过 | matching RTL 的功能仿真保险，不用于 perf score |
-| Chiplab perf20 | 20/20；总计 `5,306,558` cycles | 相对本轮原始 baseline `5,543,953` 为 `-4.282053%`；详细单项归因见候选总账 |
+| 本地 gates | 当前 WT01 RTL：Scala/Verilator 39 suites / 219 tests；Python、port、lint、Yosys、publication 全通过 | 结构与现有定向合同通过，不证明 Linux shell |
+| Chiplab func58 | WT01 matching random-AXI seeds `240/255/141` 全部通过 | 功能仿真不能跨 RTL 继承，也不用于 perf score |
+| Chiplab perf20 | WT01 为 20/20、`5,057,854` cycles | 相对 BR01 20 项逐项精确相等；详细单项归因见候选总账 |
 | Linux | 本轮未重跑 | 历史 Linux 无 mismatch 不能跨 RTL 继承 |
-| 完整 SoC | full implementation setup `-0.552 ns`；首轮同网表 post-route setup `-0.125 ns`；两者 hold `+0.018 ns`、DRC 0 error/critical warning、fully routed、bitstream 成功 | full run 因 setup 未闭合为 candidate；post-route 永远仅作物理探索，不具备竞赛产物资格 |
-| 团队板 | 板侧服务器暂不可用 | 本轮边界止于完整 SoC 实现 |
+| 完整 SoC | WT01 matching direct full：setup/hold `-0.824/+0.056 ns`，DRC 0 error/critical warning、fully routed、bitstream 成功 | recovery 到 IQ 路径已移出 top-50，但 setup 未闭合；post-route 永远仅作物理探索，不具备竞赛产物资格 |
+| 团队板 | R5 `fbc9634` matching bitstream：perf20 20/20，40 次双跑均通过，保守选中 CPU 总周期 `43,489,002` | job `20260815-114325-2bc00a63`；后续 RTL 不能继承该证据 |
 
 ## 3. 全局心智模型
 

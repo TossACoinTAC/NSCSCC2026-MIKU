@@ -21,13 +21,19 @@ def main() -> int:
     architecture = (ROOT / "docs/architecture.md").read_text(encoding="utf-8")
     candidates = (ROOT / "docs/optimization-candidates.md").read_text(encoding="utf-8")
     workflow = (ROOT / "docs/verification-workflow.md").read_text(encoding="utf-8")
+    current_plan = (ROOT / "docs/current-optimization-plan.md").read_text(encoding="utf-8")
 
     require("docs/architecture.md" in readme, "README must link the architecture guide")
     require("docs/optimization-candidates.md" in readme, "README must link the candidate ledger")
+    require("docs/current-optimization-plan.md" in readme, "README must link the current optimization plan")
     require("[optimization-candidates.md](optimization-candidates.md)" in architecture,
             "architecture must link the candidate ledger")
     require("[optimization-candidates.md](optimization-candidates.md)" in workflow,
             "workflow must link the candidate ledger")
+    require("[verification-workflow.md](verification-workflow.md)" in current_plan,
+            "current plan must link the stable workflow contract")
+    require("[optimization-candidates.md](optimization-candidates.md)" in current_plan,
+            "current plan must link the candidate ledger")
     require("| ID | 方向 |" in candidates, "candidate ledger table is missing")
     require("| 状态 | 已测效果 |" in candidates,
             "candidate ledger must expose status and measured effect")

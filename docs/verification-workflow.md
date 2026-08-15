@@ -5,8 +5,9 @@
 
 ## 一、阶段顺序
 
-1. **冻结基线**：记录根仓库 HEAD、`cpu/` 内容 hash、Chiplab HEAD、dirty patch
-   hash、软件镜像 hash、Docker image/tool hash 和当前实现 manifest。
+1. **冻结基线**：先生成 matching RTL，再用 `make experiment-freeze` 记录根仓库 HEAD、
+   `cpu/` 内容 hash、Chiplab HEAD、dirty patch hash、Docker image/tool hash，以及显式列出的
+   软件仿真、比较和功能证据。冻结清单是归档输入，不靠目录名或短 hash 猜测证据。
 2. **变更分类与候选设计**：标为性能参数、内部结构、公开接口、RTL 生成文本、仿真
    harness 或工具环境变化。每一类声明预期不变量和观测指标。性能候选在设计和实现时
    同步检查寄存边界、组合锥、宽 mux、跨模块控制和高扇出，优先选择周期收益相同而
@@ -23,8 +24,9 @@
    三个 AXI seed；perf20 一次跑完整 20 项，包含 `stringsearch`。
 6. **性能归因**：保存每项 cycles、end reason、模型 hash 和 seed。对前端、后端、
    LSU/cache、memory/AXI、DIV 和 predictor 只使用同一 baseline 的 paired A/B；
-   不用几何平均掩盖单项退化。
-7. **实现验证**：性能候选使用 100 MHz clean SoC full implementation；功能里程碑补做
+   `make experiment-compare` 同时输出逐项变化、总周期和归一化几何平均。几何平均用于轮次
+   晋级，逐项表负责暴露回退，两者都必须保留。
+7. **实现验证**：性能候选按实验清单声明的目标频率执行 clean SoC full implementation；功能里程碑补做
    function implementation。保存 DRC、setup/hold WNS/TNS、top failing endpoints、
    LUT/FF/BRAM/DSP、requested/actual clock 和 bitstream hash。若 full route 已 fully routed、
    hold/DRC/bitstream 完整，只有 setup 小幅未闭合且路径以物理布线为主，才进入条件子阶段
@@ -34,6 +36,10 @@
 8. **板测交接**：只把本地 gates、仿真和 matching Vivado 产物交给团队板流；记录
    LabAgent job、UART/VIO、结果和 artifact hash。板卡队列冲突是基础设施结果，不能
    当作 DUT 通过或失败。
+
+阶段发布采用分支分工：`dev/*` 保存候选级提交、失败尝试和 manifest 关联的完整溯源；
+阶段性门禁通过后同步 `main` 可以使用 squash，`main` 只表示可复现的里程碑状态，不作为
+候选级实验记录。squash 前必须确认开发分支上的 matching RTL、测试和实现证据已归档。
 
 ## 二、并行与流水线
 
@@ -70,6 +76,23 @@ CPU 修改
 该修改属于下一候选版本，必须重新运行受影响的定向测试、完整门禁和 perf20，不能直接
 沿用修改前的周期或 RTL hash。
 
+### 实验身份入口
+
+```text
+make test-impact TEST_BASE=<baseline-commit>
+make experiment-compare BASE_MATRIX=<baseline.csv> CANDIDATE_MATRIX=<candidate.csv> \
+  COMPARE_ID=<candidate-id>
+make experiment-freeze EXPERIMENT_ID=<round-id> \
+  EXPERIMENT_EVIDENCE="<perf20.csv> <comparison.json> <func58.csv>"
+make timing-analyze TIMING_REPORT=<cpu_setup_top50.rpt>
+make soc-impl SOC_EXPERIMENT_MANIFEST=<experiment-manifest.json>
+```
+
+`test-impact` 由 `cpu/tests/manifest.yml` 路由到版本化 path-to-suite 映射；它给出最低定向
+集合，不替代完整 `cpu-check`。比较器要求两组矩阵均为完整 20/20 pass，且 Chiplab、profile、
+suite、memory mode、software key 与 workload/seed 集合一致。模型和 CPU 身份允许不同，
+因为这正是 A/B 的变量。
+
 ### 仿真缓存合同
 
 `build/sim/cache/` 下的三层缓存分别承担不同身份：
@@ -83,6 +106,9 @@ CPU 修改
 - `prepared/` 只保存本次请求到三层缓存的不可变引用及（若工作树意外 dirty）状态证据；
   正常干净 Chiplab 的 patch 文件为空。`runs/` 再按 model/software/workload/seed/memory
   mode 隔离运行输出。
+
+`linux-sim` 默认固定运行 50 ms、单 lane；正常跑满窗口的结构化结束原因为
+`linux-time-window-complete`。普通 smoke 使用的短 `TIME_LIMIT` 不能作为 Linux 里程碑证据。
 
 缓存命中前必须复核 manifest、模型 hash、软件文件 hash 和当前 RTL hash。任何不一致都
 归为 `artifact`，不得启动仿真。`SIM_REBUILD=1 make sim-prepare ...` 可显式重建当前身份的
@@ -114,12 +140,18 @@ harness 可构建，不能替代运行验证；超时首先与软件启动成本
 model hash。每个候选 manifest 至少包含 CPU source、RTL、software、clock、功能结果、
 实现报告和对应 hash。旧实现或旧 Chiplab 的 WNS 只能作为历史参考。
 
-完整 SoC 实现成功返回后由 `make soc-archive` 校验并归档。默认 `auto` 分类只允许从当前
+完整 SoC 实现成功返回后由 `make soc-archive` 校验并归档。调用方必须传入
+`SOC_EXPERIMENT_MANIFEST`；归档器只复制该清单逐项列出且 hash 仍匹配的证据，不再扫描
+同一短 hash 目录并模糊收集矩阵。显式证据若是 perf20 矩阵，矩阵每行的安全相对
+`result_path` 视为该矩阵的结构化组成，只补录后续 A/B 所需的 `run-manifest.txt` 和
+`perf20-result.json`；归档后的 CSV 因此仍可直接交给 `experiment-compare`，不会连带复制
+未被矩阵引用的其他 run。默认 `auto` 分类只允许从当前
 RTL 直接执行一次完整 implementation（`implementation_stage=full`），并同时满足 setup/hold
-非负、routed DRC 0 error/critical warning、fully routed 和 bitstream 完整的实现进入
+WNS 均严格大于零、routed DRC 0 error/critical warning、fully routed 和 bitstream 完整的实现进入
 `Stable_Backup/`；其余已产生完整报告的实现进入 `Post_Impl_Bundles/`。归档身份来自
 `build/rtl/generation-manifest.json`，并再次核对根发布 RTL 与 Vivado staging RTL 的哈希，
-不能用归档时的文档 HEAD 冒充生成 RTL 的源码提交。归档采用临时目录加原子改名；同一
+不能用归档时的文档 HEAD 冒充生成 RTL 的源码提交。实验清单中的源码树、raw/published
+RTL、generation manifest 和 Chiplab 身份还会再次与当前 implementation 输入核对。归档采用临时目录加原子改名；同一
 实现再次归档时，先核对 RTL 与 bitstream hash，再幂等补录新增的 top-N、route status 或
 资源报告，不覆盖身份不同的证据。
 
@@ -131,7 +163,7 @@ RTL 直接执行一次完整 implementation（`implementation_stage=full`），�
 post-route 结果只用于识别物理随机性、路径簇和下一轮 RTL/实现策略；正式竞赛 bitstream
 必须由对应 RTL 从头执行一次 full implementation，且该次 full run 自身满足全部门禁。
 
-## 四、当前优先级
+## 四、候选选择规则
 
 候选编号、当前状态、默认开关和可归因效果以
 [optimization-candidates.md](optimization-candidates.md) 为唯一总账；本文不维护第二份候选状态。
@@ -143,6 +175,13 @@ forwarding、dirty writeback 或 uncached ordering 问题时，即使只来自�
 性能方面优先选择能解释 IPC 或执行时间的候选：前端供给和预测命中、wakeup/select
 拥塞、LSQ/内存服务、DIV latency/throughput、ROB/PRF 容量和 cache critical return。
 最终以 `cycle_count / actual_cpu_mhz` 判断，IPC 只是归因指标。
+
+direct full implementation 的 top-N 路径用于给时序候选排序和验证物理效果，不是候选
+准入的必要条件。若静态结构能够证明一条实时输入或宽控制依赖与已注册 owner/context
+语义等价，且替换后不增加流水级、握手间隔或恢复延迟，即使它尚未出现在 top-N 中，也可
+作为周期透明候选进入验证链。此类候选仍必须覆盖 owner 复用、backpressure、flush/cancel
+等边界，检查生成 RTL 的目标依赖确已移除，完成 perf20 A/B，并由后续 matching direct full
+判断物理价值；不能仅凭 RTL 直觉宣称时序收益。
 
 ## 五、清理规则
 

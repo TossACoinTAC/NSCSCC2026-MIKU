@@ -85,18 +85,52 @@ final case class OooCoreConfig(
     storeQueueEntries: Int = 8,
     mshrEntries: Int = 4,
     enableDivideFastPath: Boolean = false,
-    enableFastStoreCompletion: Boolean = false,
+    enableFastStoreCompletion: Boolean = true,
     enableStoreTranslationLookahead: Boolean = true,
-    // Timing experiment: remove the low-ROI wakeup/retirement shortcuts while
-    // retaining F01 phase 1 and the cache response cut.
-    enableDirectWakeupEchoSuppression: Boolean = false,
+    // Keep first-time variable-latency completions while suppressing only the
+    // registered echo of a tag that was already broadcast by a direct wake.
+    enableDirectWakeupEchoSuppression: Boolean = true,
+    enableDirectOnlyPortEchoSuppression: Boolean = true,
+    enableMultiplyCompletionEchoSuppression: Boolean = false,
+    enableLsuRegisteredWakeSelectDecoupling: Boolean = true,
+    // Registered wakeups still update resident source-ready state, but only direct/early
+    // wakeups may make an ordinary IQ entry selectable in the same cycle.
+    enableOrdinaryRegisteredWakeSelectDecoupling: Boolean = true,
+    enableTokenizedOrdinaryIssueOutput: Boolean = true,
+    enableBalancedIssueSelection: Boolean = true,
+    enableBankedLoadForwardCompletion: Boolean = true,
+    enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,
+    enableBranchHeadCompletionBypass: Boolean = true,
+    // Keep the retirement qualification field beside ROB state instead of reading it through
+    // the wide payload bank.  The legacy payload path remains available for timing A/B.
+    enableRobSystemOperationState: Boolean = true,
+    // Keep the retirement PC beside ROB state so commit/recovery do not read it through the
+    // wide payload bank.  The legacy payload path remains available for timing A/B.
+    enableRobPcState: Boolean = true,
+    // Register speculative RAS operations before they drive the RAS array write enable.  The
+    // direct input path remains available for predictor timing A/B and older configurations.
+    enableRegisteredSpeculativeRasUpdate: Boolean = false,
     enableDirectDmwPretranslation: Boolean = true,
     enableLoadCompletionEarlyWakeup: Boolean = true,
+    // Preload the data-side micro-TLB probe key while the request stream is ready.  The request
+    // fire still owns probe state; disabling this flag preserves the legacy fire-time key capture.
+    enableDataTranslationProbePreload: Boolean = true,
     enableFrontendTranslationResponseBypass: Boolean = true,
     enableFrontendTranslationTurnover: Boolean = true,
     enableFrontendHistoryTurnover: Boolean = true,
+    enableBalancedFrontendPredictionSelect: Boolean = true,
     enableFrontendCacheHitTurnover: Boolean = true,
+    enableSpeculativeInstructionArrayRead: Boolean = true,
+    // L1I never performs a lookup and a refill install in the same controller state.  Keep the
+    // data-array read enable independent of the install write qualifier so the BRAM CE cone is
+    // driven by lookup/maintenance acceptance only.
+    enableInstructionArrayDataReadDecoupling: Boolean = true,
+    // L1D/L2 arbitration keeps lookup response and line installation mutually exclusive.  Keep
+    // data-array reads qualified by lookup/maintenance acceptance independently of write enable.
+    enableDataArrayDataReadDecoupling: Boolean = true,
+    enableDeferredFrontendCorrectionCleanup: Boolean = true,
+    enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,
     enableL2WriteBack: Boolean = true,
     resetVector: BigInt = BigInt("1c000000", 16),

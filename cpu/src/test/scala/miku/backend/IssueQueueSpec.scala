@@ -7,7 +7,11 @@ import spinal.core.sim._
 
 import scala.util.Random
 
-private final class IssueQueueProbe(config: OooCoreConfig, portIndex: Int = 0)
+private final class IssueQueueProbe(
+    config: OooCoreConfig,
+    portIndex: Int = 0,
+    separateSelectWakeup: Boolean = false
+)
     extends Component {
   val io = new Bundle {
     val enqueueValid = in Bool ()
@@ -15,6 +19,8 @@ private final class IssueQueueProbe(config: OooCoreConfig, portIndex: Int = 0)
     val enqueueReady = out Bool ()
     val wakeupValid = in Bits (config.writebackWidth bits)
     val wakeupPdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
+    val selectWakeupValid = in Bits (config.writebackWidth bits)
+    val selectWakeupPdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
     val issueValid = out Bool ()
     val issue = out(RenamedMicroOp(config))
     val issueReady = in Bool ()
@@ -29,6 +35,13 @@ private final class IssueQueueProbe(config: OooCoreConfig, portIndex: Int = 0)
   queue.io.enqueue := io.enqueue
   queue.io.wakeupValid := io.wakeupValid
   queue.io.wakeupPdst := io.wakeupPdst
+  if (separateSelectWakeup) {
+    queue.io.selectWakeupValid := io.selectWakeupValid
+    queue.io.selectWakeupPdst := io.selectWakeupPdst
+  } else {
+    queue.io.selectWakeupValid := io.wakeupValid
+    queue.io.selectWakeupPdst := io.wakeupPdst
+  }
   queue.io.issueReady := io.issueReady
   queue.io.robHeadPointer := io.robHeadPointer
   queue.io.flush := io.flush
@@ -55,8 +68,10 @@ class IssueQueueSpec extends AnyFunSuite {
     dut.io.enqueue.loadQueueIndex #= 0
     dut.io.enqueue.storeQueueIndex #= 0
     dut.io.wakeupValid #= 0
+    dut.io.selectWakeupValid #= 0
     for (lane <- 0 until config.writebackWidth) {
       dut.io.wakeupPdst(lane) #= 0
+      dut.io.selectWakeupPdst(lane) #= 0
     }
     dut.io.issueReady #= false
     dut.io.robHeadPointer #= 0
@@ -66,6 +81,54 @@ class IssueQueueSpec extends AnyFunSuite {
   private def sample(dut: IssueQueueProbe): Unit = {
     dut.clockDomain.waitSampling()
     sleep(1)
+  }
+
+  test("IQ balanced selection preserves oldest-ready priority") {
+    for (balanced <- Seq(false, true)) {
+      val config = OooCoreConfig.FourIssueThreeCommit.copy(
+        enableBalancedIssueSelection = balanced
+      )
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-iq-balanced-$balanced"
+        )
+        .compile(new IssueQueueProbe(config))
+        .doSim(s"ooo-iq-balanced-$balanced", if (balanced) 0x4971 else 0x4970) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearInputs(dut, config)
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          sample(dut)
+
+          val readyByAge = Seq(false, true, false, true, true, false, true, false)
+          dut.io.enqueueValid #= true
+          for ((ready, age) <- readyByAge.zipWithIndex) {
+            dut.io.enqueue.robPointer #= age
+            dut.io.enqueue.psrc1 #= (age + 1)
+            dut.io.enqueue.source1Ready #= ready
+            dut.io.enqueue.source2Ready #= true
+            sample(dut)
+          }
+          dut.io.enqueueValid #= false
+          dut.io.issueReady #= true
+
+          for (expected <- Seq(1, 3, 4, 6)) {
+            sleep(1)
+            assert(dut.io.issueValid.toBoolean)
+            assert(
+              dut.io.issue.robPointer.toInt == expected,
+              s"balanced=$balanced selected ${dut.io.issue.robPointer.toInt}, expected age $expected"
+            )
+            sample(dut)
+          }
+
+          dut.io.issueReady #= false
+          assert(!dut.io.issueValid.toBoolean)
+          assert(dut.io.occupancy.toInt == 4)
+        }
+    }
   }
 
   test("IQ randomized compaction preserves payload and wakeup state") {
@@ -577,6 +640,63 @@ class IssueQueueSpec extends AnyFunSuite {
         dut.io.enqueueValid #= false
         sample(dut)
         assert(!dut.io.issueValid.toBoolean)
+      }
+  }
+
+  test("LSU IQ persists registered wake while only fast wake bypasses select") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    val loadStorePort =
+      config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-iq-lsu-select-wake")
+      .compile(new IssueQueueProbe(config, loadStorePort, separateSelectWakeup = true))
+      .doSim("ooo-iq-lsu-select-wake", 0x4960) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        def enqueueBlocked(robPointer: Int, source: Int): Unit = {
+          dut.io.enqueueValid #= true
+          dut.io.enqueue.robPointer #= robPointer
+          dut.io.enqueue.psrc1 #= source
+          dut.io.enqueue.source1Ready #= false
+          dut.io.enqueue.source2Ready #= true
+          sample(dut)
+          dut.io.enqueueValid #= false
+          assert(!dut.io.issueValid.toBoolean)
+        }
+
+        enqueueBlocked(1, 5)
+        dut.io.wakeupValid #= 1
+        dut.io.wakeupPdst(0) #= 5
+        dut.io.selectWakeupValid #= 0
+        sample(dut)
+        dut.io.wakeupValid #= 0
+        assert(!dut.io.issueValid.toBoolean)
+
+        // The persistent wake is now stored. The registered LSU output sees it
+        // on the following edge even though the completion tag has disappeared.
+        sample(dut)
+        assert(dut.io.issueValid.toBoolean)
+        assert(dut.io.issue.robPointer.toBigInt == 1)
+
+        dut.io.flush #= true
+        sample(dut)
+        dut.io.flush #= false
+        enqueueBlocked(2, 6)
+
+        dut.io.wakeupValid #= 1
+        dut.io.wakeupPdst(0) #= 6
+        dut.io.selectWakeupValid #= 1
+        dut.io.selectWakeupPdst(0) #= 6
+        sample(dut)
+        dut.io.wakeupValid #= 0
+        dut.io.selectWakeupValid #= 0
+        assert(dut.io.issueValid.toBoolean)
+        assert(dut.io.issue.robPointer.toBigInt == 2)
       }
   }
 

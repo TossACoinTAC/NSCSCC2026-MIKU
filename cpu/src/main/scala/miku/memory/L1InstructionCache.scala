@@ -98,7 +98,10 @@ final class L1InstructionCache(
     val idle = out Bool ()
   }
 
-  val cacheArray = new CacheArray(geometry)
+  val cacheArray = new CacheArray(
+    geometry,
+    decoupleDataReadEnable = config.enableInstructionArrayDataReadDecoupling
+  )
   val state = RegInit(L1InstructionCacheState.idle)
   val invalidateSeen = RegInit(False)
   val invalidatePending = RegInit(False)
@@ -162,7 +165,6 @@ final class L1InstructionCache(
   when(newInvalidate) { invalidatePending := True }
   when(startInvalidate) { invalidatePending := False }
 
-  cacheArray.io.lookupValid := False
   cacheArray.io.lookupAddress := io.request.physicalAddress
   cacheArray.io.writeValid := False
   cacheArray.io.writeIndex := indexOf(request.physicalAddress)
@@ -198,6 +200,14 @@ final class L1InstructionCache(
   val requestFire = io.requestValid && io.requestReady
   val lookupHitTurnoverFire = requestFire && lookupHitTurnoverReady
   val refillRequestFire = requestFire && refillSameLineReady
+  val speculativeHitTurnoverLookup = if (config.enableSpeculativeInstructionArrayRead) {
+    state === L1InstructionCacheState.lookup && cacheArray.io.responseValid &&
+      io.requestValid && !io.request.uncached && !requestKilled && !io.kill &&
+      !newInvalidate && !io.maintenanceRequest.valid && cacheArray.io.lookupReady
+  } else {
+    False
+  }
+  cacheArray.io.lookupValid := speculativeHitTurnoverLookup
   when(requestFire) {
     request := io.request
     requestKilled := io.kill

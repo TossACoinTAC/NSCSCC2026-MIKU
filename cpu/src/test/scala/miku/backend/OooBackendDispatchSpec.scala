@@ -34,8 +34,8 @@ private final class OooBackendDispatchProbe(config: OooCoreConfig) extends Compo
     val loadWakeupPdst = in UInt (config.physicalRegIndexWidth bits)
     val loadWakeupRecoveryEpoch = in UInt (config.recoveryEpochWidth bits)
     val loadWakeupEpochCurrent = in Bool ()
-    val multiplyWakeupValid = in Bool ()
-    val multiplyWakeupPdst = in UInt (config.physicalRegIndexWidth bits)
+    val fixedPortWakeupValid = in Bool ()
+    val fixedPortWakeupPdst = in UInt (config.physicalRegIndexWidth bits)
     val multiplyForwardValid = in Bool ()
     val multiplyForwardPdst = in UInt (config.physicalRegIndexWidth bits)
     val multiplyForwardData = in Bits (config.xlen bits)
@@ -83,14 +83,18 @@ private final class OooBackendDispatchProbe(config: OooCoreConfig) extends Compo
 
   backend.io.issueReady := io.issueReady
   backend.io.completionValid := io.completionValid
+  backend.io.storeCompletionBypassValid := False
+  backend.io.storeCompletionBypass.assignFromBits(
+    B(0, backend.io.storeCompletionBypass.getBitsWidth bits)
+  )
   backend.io.directWakeupValid := 0
   backend.io.directWakeupValid(0) := io.directWakeupValid
   private val multiplyPort =
     config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Multiply))
-  backend.io.directWakeupValid(multiplyPort) := io.multiplyWakeupValid
+  backend.io.directWakeupValid(multiplyPort) := io.fixedPortWakeupValid
   for (lane <- 0 until config.executionWidth) {
     if (lane == multiplyPort) {
-      backend.io.directWakeupPdst(lane) := io.multiplyWakeupPdst
+      backend.io.directWakeupPdst(lane) := io.fixedPortWakeupPdst
     } else if (lane == 0) {
       backend.io.directWakeupPdst(lane) := io.directWakeupPdst
     } else {
@@ -181,8 +185,8 @@ class OooBackendDispatchSpec extends AnyFunSuite {
     dut.io.loadWakeupPdst #= 0
     dut.io.loadWakeupRecoveryEpoch #= 0
     dut.io.loadWakeupEpochCurrent #= true
-    dut.io.multiplyWakeupValid #= false
-    dut.io.multiplyWakeupPdst #= 0
+    dut.io.fixedPortWakeupValid #= false
+    dut.io.fixedPortWakeupPdst #= 0
     dut.io.multiplyForwardValid #= false
     dut.io.multiplyForwardPdst #= 0
     dut.io.multiplyForwardData #= 0
@@ -464,7 +468,74 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         }
 
         assert(observedPc == expectedPc)
-      }
+    }
+  }
+
+  test("ordinary issue address buffering holds payload and sustains one issue per cycle") {
+    for (tokenizedOutput <- Seq(false, true)) {
+      val testConfig = config.copy(enableTokenizedOrdinaryIssueOutput = tokenizedOutput)
+      val multiplyPort = testConfig.executionPorts.indexWhere(
+        _.capabilities.contains(ExecutionUnitKind.Multiply)
+      )
+      SimConfig.withVerilator
+        .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          s"/sim-workspace-ooo-backend-ordinary-output-$tokenizedOutput")
+        .compile(new OooBackendDispatchProbe(testConfig))
+        .doSim(s"ooo-backend-ordinary-address-buffer-$tokenizedOutput", 0x4c7c) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearControl(dut)
+        dut.io.issueReady #= 0xf & ~(1 << multiplyPort)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        val basePc = BigInt("1c000000", 16)
+        val expectedPc = (0 until 4).map(index => basePc + index * 4)
+        for (index <- expectedPc.indices) {
+          dut.io.inputValid #= 1
+          dut.io.pc(0) #= expectedPc(index)
+          dut.io.instruction(0) #= (BigInt("001c0000", 16) | (index + 1)) // mul.w rd,r0,r0
+          sleep(1)
+          assert(dut.io.renameReady.toBigInt == 7)
+          dut.clockDomain.waitSampling()
+        }
+        dut.io.inputValid #= 0
+
+        var waitCycles = 0
+        while (
+          (dut.io.issueValid.toBigInt & (BigInt(1) << multiplyPort)) == 0 && waitCycles < 12
+        ) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          waitCycles += 1
+        }
+        assert((dut.io.issueValid.toBigInt & (BigInt(1) << multiplyPort)) != 0)
+        assert(dut.io.issuePc(multiplyPort).toBigInt == expectedPc.head)
+        val heldPdst = dut.io.issuePdst(multiplyPort).toBigInt
+        for (_ <- 0 until 4) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          assert((dut.io.issueValid.toBigInt & (BigInt(1) << multiplyPort)) != 0)
+          assert(dut.io.issuePc(multiplyPort).toBigInt == expectedPc.head)
+          assert(dut.io.issuePdst(multiplyPort).toBigInt == heldPdst)
+        }
+
+        val observedPc = ArrayBuffer(expectedPc.head)
+        dut.io.issueReady #= 0xf
+        var cycles = 0
+        while (observedPc.size < expectedPc.size && cycles < 16) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          if ((dut.io.issueValid.toBigInt & (BigInt(1) << multiplyPort)) != 0) {
+            observedPc += dut.io.issuePc(multiplyPort).toBigInt
+          }
+          cycles += 1
+        }
+
+          assert(observedPc == expectedPc)
+        }
+    }
   }
 
   test("a Store address issues before its data dependency reaches writeback") {
@@ -721,6 +792,276 @@ class OooBackendDispatchSpec extends AnyFunSuite {
       }
   }
 
+  test("LSU select keeps direct wake latency while deferring registered-only wake") {
+    def measure(testConfig: OooCoreConfig, label: String, direct: Boolean, seed: Int): Int = {
+      var consumerIssueCycle = -1
+      SimConfig.withVerilator
+        .workspacePath(
+          s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-backend-lsu-select-$label"
+        )
+        .compile(new OooBackendDispatchProbe(testConfig))
+        .doSim(s"ooo-backend-lsu-select-$label", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearControl(dut)
+          dut.io.issueReady #= 0xf
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          dut.clockDomain.waitSampling()
+
+          val producerPc = BigInt("1c000000", 16)
+          val consumerPc = producerPc + 4
+          dut.io.inputValid #= 3
+          dut.io.pc(0) #= producerPc
+          dut.io.instruction(0) #= BigInt("0280040d", 16) // addi.w r13,r0,1
+          dut.io.pc(1) #= consumerPc
+          dut.io.instruction(1) #= BigInt("288001ae", 16) // ld.w r14,r13,0
+          dut.clockDomain.waitSampling()
+          dut.io.inputValid #= 0
+
+          var producerPdst = BigInt(0)
+          var producerRobPointer = BigInt(0)
+          for (_ <- 0 until 16 if producerPdst == 0) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            val producerPort = (0 until testConfig.executionWidth).find { port =>
+              (dut.io.issueValid.toBigInt & (BigInt(1) << port)) != 0 &&
+              dut.io.issuePc(port).toBigInt == producerPc
+            }
+            producerPort.foreach { port =>
+              producerPdst = dut.io.issuePdst(port).toBigInt
+              producerRobPointer = dut.io.issueRobPointer(port).toBigInt
+            }
+          }
+          assert(producerPdst != 0)
+          assert(dut.io.loadStoreIssueOccupancy.toBigInt != 0)
+
+          val result = BigInt("12345000", 16)
+          dut.io.completionValid #= 1
+          dut.io.completionLane #= 0
+          dut.io.completionRobPointer #= producerRobPointer
+          dut.io.completionPdst #= producerPdst
+          dut.io.completionWritesPdst #= true
+          dut.io.completionData #= result
+          dut.io.directWakeupValid #= direct
+          dut.io.directWakeupPdst #= producerPdst
+          dut.clockDomain.waitSampling()
+          dut.io.completionValid #= 0
+          dut.io.directWakeupValid #= false
+
+          for (cycle <- 1 to 6 if consumerIssueCycle < 0) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            if (
+              (dut.io.issueValid.toBigInt & (BigInt(1) << loadStorePort)) != 0 &&
+              dut.io.issuePc(loadStorePort).toBigInt == consumerPc
+            ) {
+              consumerIssueCycle = cycle
+              assert(dut.io.issueSource1(loadStorePort).toBigInt == result)
+            }
+          }
+          assert(consumerIssueCycle > 0)
+        }
+      consumerIssueCycle
+    }
+
+    val legacyConfig = config.copy(enableLsuRegisteredWakeSelectDecoupling = false)
+    val decoupledConfig = config.copy(enableLsuRegisteredWakeSelectDecoupling = true)
+    val legacyDirect = measure(legacyConfig, "legacy-direct", direct = true, 0x4c80)
+    val decoupledDirect = measure(decoupledConfig, "decoupled-direct", direct = true, 0x4c81)
+    val legacyRegistered = measure(legacyConfig, "legacy-registered", direct = false, 0x4c82)
+    val decoupledRegistered =
+      measure(decoupledConfig, "decoupled-registered", direct = false, 0x4c83)
+
+    assert(decoupledDirect == legacyDirect)
+    assert(decoupledRegistered == legacyRegistered + 1)
+  }
+
+  test("ordinary IQ select keeps source readiness while deferring registered-only wake") {
+    def measure(testConfig: OooCoreConfig, label: String, seed: Int): Int = {
+      var consumerIssueCycle = -1
+      SimConfig.withVerilator
+        .workspacePath(
+          s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-backend-ordinary-select-$label"
+        )
+        .compile(new OooBackendDispatchProbe(testConfig))
+        .doSim(s"ooo-backend-ordinary-select-$label", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearControl(dut)
+          dut.io.issueReady #= 0xf
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          dut.clockDomain.waitSampling()
+
+          val producerPc = BigInt("1c000000", 16)
+          val consumerPc = producerPc + 4
+          dut.io.inputValid #= 3
+          dut.io.pc(0) #= producerPc
+          dut.io.instruction(0) #= BigInt("0280040d", 16) // addi.w r13,r0,1
+          dut.io.pc(1) #= consumerPc
+          dut.io.instruction(1) #= BigInt("028005ae", 16) // addi.w r14,r13,1
+          dut.clockDomain.waitSampling()
+          dut.io.inputValid #= 0
+
+          var producerPdst = BigInt(0)
+          var producerRobPointer = BigInt(0)
+          for (_ <- 0 until 16 if producerPdst == 0) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            val producerPort = (0 until testConfig.executionWidth).find { port =>
+              (dut.io.issueValid.toBigInt & (BigInt(1) << port)) != 0 &&
+                dut.io.issuePc(port).toBigInt == producerPc
+            }
+            producerPort.foreach { port =>
+              producerPdst = dut.io.issuePdst(port).toBigInt
+              producerRobPointer = dut.io.issueRobPointer(port).toBigInt
+            }
+          }
+          assert(producerPdst != 0)
+
+          val result = BigInt("2468ace0", 16)
+          // Lane 1 models a registered-only completion (the ALU/Divide port), with no direct
+          // wake.  The consumer is resident in an ordinary IQ before this event arrives.
+          dut.io.completionValid #= 1 << 1
+          dut.io.completionLane #= 1
+          dut.io.completionRobPointer #= producerRobPointer
+          dut.io.completionPdst #= producerPdst
+          dut.io.completionWritesPdst #= true
+          dut.io.completionData #= result
+          dut.clockDomain.waitSampling()
+          dut.io.completionValid #= 0
+
+          for (cycle <- 1 to 8 if consumerIssueCycle < 0) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            if ((dut.io.issueValid.toBigInt & 0x7) != 0) {
+              val port = (0 until testConfig.executionWidth).find { candidate =>
+                (dut.io.issueValid.toBigInt & (BigInt(1) << candidate)) != 0 &&
+                  dut.io.issuePc(candidate).toBigInt == consumerPc
+              }
+              port.foreach { selected =>
+                consumerIssueCycle = cycle
+                assert(dut.io.issueSource1(selected).toBigInt == result)
+              }
+            }
+          }
+          assert(consumerIssueCycle > 0)
+        }
+      consumerIssueCycle
+    }
+
+    val legacyConfig = config.copy(enableOrdinaryRegisteredWakeSelectDecoupling = false)
+    val decoupledConfig = config.copy(enableOrdinaryRegisteredWakeSelectDecoupling = true)
+    val legacy = measure(legacyConfig, "legacy", 0x4c84)
+    val decoupled = measure(decoupledConfig, "decoupled", 0x4c85)
+    assert(decoupled == legacy + 1)
+  }
+
+  test("a direct-only completion port keeps resident and later consumers live") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-direct-only-echo")
+      .compile(new OooBackendDispatchProbe(config))
+      .doSim("ooo-backend-direct-only-port-echo", 0x4c73) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearControl(dut)
+        dut.io.issueReady #= 0xf
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        def addi(rd: Int, rj: Int, immediate: Int): BigInt =
+          BigInt("02800000", 16) | ((immediate & 0xfff) << 10) | (rj << 5) | rd
+
+        val basePc = BigInt("1c000000", 16)
+        val producerPcs = Vector.tabulate(3)(lane => basePc + lane * 4)
+        val producerRegisters = Vector(13, 15, 17)
+        val residentConsumerPcs = Vector.tabulate(3)(lane => basePc + 0x10 + lane * 4)
+
+        // Three independent ALUs occupy ports 0/1/2.  Their consumers enter behind them, so the
+        // r17 consumer is resident when the direct-only port-2 producer broadcasts its tag.
+        dut.io.inputValid #= 7
+        for (lane <- 0 until 3) {
+          dut.io.pc(lane) #= producerPcs(lane)
+          dut.io.instruction(lane) #= addi(producerRegisters(lane), 0, lane + 1)
+        }
+        dut.clockDomain.waitSampling()
+        dut.io.inputValid #= 7
+        for (lane <- 0 until 3) {
+          dut.io.pc(lane) #= residentConsumerPcs(lane)
+          dut.io.instruction(lane) #=
+            addi(producerRegisters(lane) + 1, producerRegisters(lane), 1)
+        }
+        dut.clockDomain.waitSampling()
+        dut.io.inputValid #= 0
+
+        val directPort = config.executionPorts.indexWhere(port =>
+          port.capabilities.contains(ExecutionUnitKind.Multiply)
+        )
+        var producerPdst = BigInt(0)
+        var producerRobPointer = BigInt(0)
+        for (_ <- 0 until 16 if producerPdst == 0) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          if (
+            (dut.io.issueValid.toBigInt & (BigInt(1) << directPort)) != 0 &&
+            dut.io.issuePc(directPort).toBigInt == producerPcs(2)
+          ) {
+            producerPdst = dut.io.issuePdst(directPort).toBigInt
+            producerRobPointer = dut.io.issueRobPointer(directPort).toBigInt
+          }
+        }
+        assert(producerPdst != 0)
+
+        val laterConsumerPc = basePc + 0x20
+        val observed = scala.collection.mutable.Map.empty[BigInt, BigInt]
+        def observeConsumers(): Unit = {
+          for (port <- 0 until config.executionWidth) {
+            if ((dut.io.issueValid.toBigInt & (BigInt(1) << port)) != 0) {
+              val pc = dut.io.issuePc(port).toBigInt
+              if (pc == residentConsumerPcs(2) || pc == laterConsumerPc) {
+                observed(pc) = dut.io.issueSource1(port).toBigInt
+              }
+            }
+          }
+        }
+
+        val result = BigInt("13579bdf", 16)
+        dut.io.completionValid #= BigInt(1) << directPort
+        dut.io.completionLane #= directPort
+        dut.io.completionRobPointer #= producerRobPointer
+        dut.io.completionPdst #= producerPdst
+        dut.io.completionWritesPdst #= true
+        dut.io.completionData #= result
+        dut.io.fixedPortWakeupValid #= true
+        dut.io.fixedPortWakeupPdst #= producerPdst
+        dut.clockDomain.waitSampling()
+        sleep(1)
+        observeConsumers()
+        dut.io.completionValid #= 0
+        dut.io.fixedPortWakeupValid #= false
+
+        // This consumer starts after the direct event.  It must use the raw registered completion
+        // through RenameMap/dispatch qualification even though that echo is absent from every IQ.
+        dut.io.inputValid #= 1
+        dut.io.pc(0) #= laterConsumerPc
+        dut.io.instruction(0) #= addi(20, producerRegisters(2), 1)
+        dut.clockDomain.waitSampling()
+        sleep(1)
+        observeConsumers()
+        dut.io.inputValid #= 0
+
+        for (_ <- 0 until 16 if observed.size < 2) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          observeConsumers()
+        }
+        assert(observed(residentConsumerPcs(2)) == result)
+        assert(observed(laterConsumerPc) == result)
+      }
+  }
+
   test("a registered writeback wake takes priority over a younger direct wake") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
@@ -822,7 +1163,10 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         (false, "legacy", 0x4c61),
         (true, "suppress-echo", 0x4c62)
       )) {
-      val testConfig = config.copy(enableDirectWakeupEchoSuppression = suppressEcho)
+      val testConfig = config.copy(
+        enableDirectWakeupEchoSuppression = suppressEcho,
+        enableOrdinaryRegisteredWakeSelectDecoupling = false
+      )
       SimConfig.withVerilator
         .workspacePath(s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-backend-direct-echo-$name")
         .compile(new OooBackendDispatchProbe(testConfig))
@@ -917,7 +1261,10 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         (true, "early", 0x4c71, 0),
         (true, "stale-epoch", 0x4c72, 1)
       )) {
-      val testConfig = config.copy(enableLoadCompletionEarlyWakeup = earlyWake)
+      val testConfig = config.copy(
+        enableLoadCompletionEarlyWakeup = earlyWake,
+        enableOrdinaryRegisteredWakeSelectDecoupling = false
+      )
       SimConfig.withVerilator
         .workspacePath(s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-backend-load-wakeup-$name")
         .compile(new OooBackendDispatchProbe(testConfig))
@@ -998,7 +1345,7 @@ class OooBackendDispatchSpec extends AnyFunSuite {
     }
   }
 
-  test("multiply issue wakes a dependant into the next-cycle result forward") {
+  test("multiply direct wake and raw result keep resident and later consumers live") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
       .compile(new OooBackendDispatchProbe(config))
@@ -1022,6 +1369,7 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         dut.io.inputValid #= 0
 
         var producerPdst = BigInt(0)
+        var producerRobPointer = BigInt(0)
         var producerSeen = false
         var cycles = 0
         while (!producerSeen && cycles < 16) {
@@ -1035,6 +1383,7 @@ class OooBackendDispatchSpec extends AnyFunSuite {
             ) {
               producerSeen = true
               producerPdst = dut.io.issuePdst(port).toBigInt
+              producerRobPointer = dut.io.issueRobPointer(port).toBigInt
             }
           }
           cycles += 1
@@ -1044,17 +1393,18 @@ class OooBackendDispatchSpec extends AnyFunSuite {
 
         // Wake on multiply issue.  The product itself becomes available from
         // the multiply pipeline during the following PRF-read cycle.
-        dut.io.multiplyWakeupValid #= true
-        dut.io.multiplyWakeupPdst #= producerPdst
+        dut.io.fixedPortWakeupValid #= true
+        dut.io.fixedPortWakeupPdst #= producerPdst
         dut.clockDomain.waitSampling()
-        dut.io.multiplyWakeupValid #= false
+        dut.io.fixedPortWakeupValid #= false
 
         val product = BigInt("76543210", 16)
         dut.io.multiplyForwardValid #= true
         dut.io.multiplyForwardPdst #= producerPdst
         dut.io.multiplyForwardData #= product
-        dut.io.completionValid #= 1
-        dut.io.completionRobPointer #= 0
+        dut.io.completionValid #= BigInt(1) << config.executionWidth
+        dut.io.completionLane #= config.executionWidth
+        dut.io.completionRobPointer #= producerRobPointer
         dut.io.completionPdst #= producerPdst
         dut.io.completionWritesPdst #= true
         dut.io.completionData #= product
@@ -1067,6 +1417,28 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         }
         assert(consumerPort.nonEmpty)
         assert(dut.io.issueSource1(consumerPort.get).toBigInt == product)
+
+        dut.io.multiplyForwardValid #= false
+        dut.io.completionValid #= 0
+        val laterConsumerPc = consumerPc + 4
+        dut.io.inputValid #= 1
+        dut.io.pc(0) #= laterConsumerPc
+        dut.io.instruction(0) #= BigInt("028005af", 16) // addi.w r15,r13,1
+        dut.clockDomain.waitSampling()
+        dut.io.inputValid #= 0
+
+        var laterResult = Option.empty[BigInt]
+        for (_ <- 0 until 16 if laterResult.isEmpty) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          for (port <- 0 until config.executionWidth) {
+            if (
+              (dut.io.issueValid.toBigInt & (BigInt(1) << port)) != 0 &&
+              dut.io.issuePc(port).toBigInt == laterConsumerPc
+            ) laterResult = Some(dut.io.issueSource1(port).toBigInt)
+          }
+        }
+        assert(laterResult.contains(product))
       }
   }
 
