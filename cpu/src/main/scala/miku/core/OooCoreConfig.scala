@@ -92,6 +92,7 @@ final case class OooCoreConfig(
     enableDirectWakeupEchoSuppression: Boolean = true,
     enableDirectOnlyPortEchoSuppression: Boolean = true,
     enableMultiplyCompletionEchoSuppression: Boolean = false,
+    enableStoreDataDirectWakeup: Boolean = true,
     enableLsuRegisteredWakeSelectDecoupling: Boolean = true,
     // Registered wakeups still update resident source-ready state, but only direct/early
     // wakeups may make an ordinary IQ entry selectable in the same cycle.

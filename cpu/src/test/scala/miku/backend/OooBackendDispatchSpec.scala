@@ -198,6 +198,81 @@ class OooBackendDispatchSpec extends AnyFunSuite {
     }
   }
 
+  private def measureStoreDataWakeLatency(enableDirectWakeup: Boolean): Int = {
+    val testConfig = config.copy(enableStoreDataDirectWakeup = enableDirectWakeup)
+    var observedLatency = -1
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          s"/sim-workspace-ooo-store-data-direct-$enableDirectWakeup"
+      )
+      .compile(new OooBackendDispatchProbe(testConfig))
+      .doSim(s"ooo-store-data-direct-$enableDirectWakeup", 0x4c61) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearControl(dut)
+        dut.io.issueReady #= 0xf
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        val producerPc = BigInt("1c000000", 16)
+        val storePc = producerPc + 4
+        dut.io.inputValid #= 3
+        dut.io.pc(0) #= producerPc
+        dut.io.instruction(0) #= BigInt("0280040d", 16) // addi.w r13,r0,1
+        dut.io.pc(1) #= storePc
+        dut.io.instruction(1) #= BigInt("2980000d", 16) // st.w r13,r0,0
+        dut.clockDomain.waitSampling()
+        dut.io.inputValid #= 0
+
+        var producerPdst = BigInt(0)
+        var storeIssued = false
+        for (_ <- 0 until 16 if producerPdst == 0 || !storeIssued) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          val mask = dut.io.issueValid.toBigInt
+          for (port <- 0 until testConfig.executionWidth) {
+            if ((mask & (BigInt(1) << port)) != 0) {
+              if (dut.io.issuePc(port).toBigInt == producerPc) {
+                producerPdst = dut.io.issuePdst(port).toBigInt
+              }
+              if (dut.io.issuePc(port).toBigInt == storePc) {
+                storeIssued = true
+              }
+            }
+          }
+        }
+        assert(producerPdst != 0)
+        assert(storeIssued)
+        assert(!dut.io.storeDataValid.toBoolean)
+
+        val result = BigInt("89abcdef", 16)
+        dut.io.directWakeupValid #= true
+        dut.io.directWakeupPdst #= producerPdst
+        dut.io.completionValid #= 1
+        dut.io.completionRobPointer #= 0
+        dut.io.completionPdst #= producerPdst
+        dut.io.completionWritesPdst #= true
+        dut.io.completionData #= result
+        dut.clockDomain.waitSampling()
+        dut.io.directWakeupValid #= false
+        dut.io.completionValid #= 0
+
+        for (cycle <- 1 to 5 if observedLatency < 0) {
+          sleep(1)
+          if (dut.io.storeDataValid.toBoolean) {
+            observedLatency = cycle
+            assert(dut.io.storeData.toBigInt == result)
+          } else {
+            dut.clockDomain.waitSampling()
+          }
+        }
+        assert(observedLatency > 0)
+      }
+    observedLatency
+  }
+
   test("unused encoded source fields do not create rename dependencies") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")
@@ -723,6 +798,13 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         assert(dut.io.storeDataStoreQueueIndex.toBigInt == 0)
         assert(dut.io.storeData.toBigInt == loadResult)
       }
+  }
+
+  test("Store data direct wake reaches the PRF boundary one cycle earlier") {
+    val legacyLatency = measureStoreDataWakeLatency(enableDirectWakeup = false)
+    val directLatency = measureStoreDataWakeLatency(enableDirectWakeup = true)
+    assert(legacyLatency == 2)
+    assert(directLatency == 1)
   }
 
   test("Store dispatch remains atomic when the address IQ is full") {

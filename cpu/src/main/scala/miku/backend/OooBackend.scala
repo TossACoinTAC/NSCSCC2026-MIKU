@@ -220,10 +220,6 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   storeDataQueue.io.enqueueValid := lsuDispatchIsStore &&
     issueQueues(loadStorePort).io.enqueueReady
   storeDataQueue.io.enqueue := router.io.portInput(loadStorePort)
-  storeDataQueue.io.wakeupValid := rob.io.completionWakeupValid
-  for (write <- 0 until config.writebackWidth) {
-    storeDataQueue.io.wakeupPdst(write) := rob.io.completionWakeupPdst(write)
-  }
   storeDataQueue.io.readReady := io.storeDataReady && !io.flush
   storeDataQueue.io.flush := io.flush
 
@@ -429,6 +425,21 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
       earlyWakeupPdst(write) := rob.io.completionWakeupPdst(write)
       fastSelectWakeupValid(write) := False
       fastSelectWakeupPdst(write) := 0
+    }
+  }
+
+  if (config.enableStoreDataDirectWakeup) {
+    // Store data only needs the producer tag here. The registered output stage
+    // reaches the PRF on the following cycle, together with the same write-through
+    // boundary used by ordinary direct-wakeup consumers.
+    storeDataQueue.io.wakeupValid := earlyWakeupValid
+    for (write <- 0 until config.writebackWidth) {
+      storeDataQueue.io.wakeupPdst(write) := earlyWakeupPdst(write)
+    }
+  } else {
+    storeDataQueue.io.wakeupValid := rob.io.completionWakeupValid
+    for (write <- 0 until config.writebackWidth) {
+      storeDataQueue.io.wakeupPdst(write) := rob.io.completionWakeupPdst(write)
     }
   }
 
