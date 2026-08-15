@@ -246,6 +246,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "store_queue_occupancy_sum": 0,
         "load_queue_full_cycles": 0,
         "store_queue_full_cycles": 0,
+        "store_data_multiple_ready_cycles": 0,
+        "store_data_out_of_age_order_cycles": 0,
         "lsq_events": [0] * len(LSQ_EVENT_NAMES_V7),
         "cache_events": [0] * len(CACHE_EVENT_NAMES),
         "axi_valid": [0] * 5,
@@ -280,8 +282,9 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             "miku-perf-observation-v6",
             "miku-perf-observation-v7",
             "miku-perf-observation-v8",
+            "miku-perf-observation-v9",
         }:
-            raise ExperimentError(f"观测汇总要求 v3-v8 ROI 结构: {counters_path}")
+            raise ExperimentError(f"观测汇总要求 v3-v9 ROI 结构: {counters_path}")
         if source_schema is None:
             source_schema = row_schema
         elif row_schema != source_schema:
@@ -329,6 +332,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                 "miku-perf-observation-v6",
                 "miku-perf-observation-v7",
                 "miku-perf-observation-v8",
+                "miku-perf-observation-v9",
             }
             else None
         )
@@ -342,6 +346,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                 "miku-perf-observation-v6",
                 "miku-perf-observation-v7",
                 "miku-perf-observation-v8",
+                "miku-perf-observation-v9",
             }
             else None
         )
@@ -354,11 +359,15 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             "miku-perf-observation-v6": LSQ_EVENT_NAMES_V6,
             "miku-perf-observation-v7": LSQ_EVENT_NAMES_V7,
             "miku-perf-observation-v8": LSQ_EVENT_NAMES_V7,
+            "miku-perf-observation-v9": LSQ_EVENT_NAMES_V7,
         }.get(row_schema, LSQ_EVENT_NAMES_V4)
         lsq_events = _vector(counters, "lsq.events", len(lsq_event_names))
         row_load_capacity = (
             _integer(counters, "lsq.load_capacity")
-            if row_schema == "miku-perf-observation-v8"
+            if row_schema in {
+                "miku-perf-observation-v8",
+                "miku-perf-observation-v9",
+            }
             else (8 if row_schema == "miku-perf-observation-v7" else 16)
         )
         if load_queue_capacity is None:
@@ -370,6 +379,16 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         axi_fire = _vector(counters, "axi.fire", 5)
         axi_backpressure = _vector(counters, "axi.backpressure", 5)
         axi_errors = _vector(counters, "axi.errors", 2)
+        store_data_multiple_ready = (
+            _integer(counters, "store_data.multiple_ready_cycles")
+            if row_schema == "miku-perf-observation-v9"
+            else 0
+        )
+        store_data_out_of_age = (
+            _integer(counters, "store_data.out_of_age_order_cycles")
+            if row_schema == "miku-perf-observation-v9"
+            else 0
+        )
 
         row = {
             "benchmark": benchmark,
@@ -435,6 +454,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                         "miku-perf-observation-v6",
                         "miku-perf-observation-v7",
                         "miku-perf-observation-v8",
+                        "miku-perf-observation-v9",
                     }
                     else 0
                 ),
@@ -445,6 +465,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                         "miku-perf-observation-v6",
                         "miku-perf-observation-v7",
                         "miku-perf-observation-v8",
+                        "miku-perf-observation-v9",
                     }
                     else 0
                 ),
@@ -458,6 +479,12 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                     _integer(counters, "lsq.store_occupancy_sum"), roi_cycles
                 ),
                 "events": dict(zip(lsq_event_names, lsq_events)),
+            },
+            "store_data": {
+                "multiple_ready_cycles": store_data_multiple_ready,
+                "out_of_age_order_cycles": store_data_out_of_age,
+                "multiple_ready_ratio": _ratio(store_data_multiple_ready, roi_cycles),
+                "out_of_age_order_ratio": _ratio(store_data_out_of_age, roi_cycles),
             },
             "cache_events": dict(zip(CACHE_EVENT_NAMES, cache_events)),
             "axi": counters["axi"],
@@ -514,6 +541,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             "miku-perf-observation-v6",
             "miku-perf-observation-v7",
             "miku-perf-observation-v8",
+            "miku-perf-observation-v9",
         }:
             totals["branch_head_completion_opportunity"] += _integer(
                 counters, "branch.head_completion_opportunity"
@@ -533,6 +561,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         totals["store_queue_full_cycles"] += _integer(
             counters, "lsq.store_full_cycles"
         )
+        totals["store_data_multiple_ready_cycles"] += store_data_multiple_ready
+        totals["store_data_out_of_age_order_cycles"] += store_data_out_of_age
         for index, value in enumerate(lsq_events):
             totals["lsq_events"][index] += value
         _add_vector(totals["cache_events"], cache_events)
@@ -593,6 +623,16 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "store_queue_full_cycle_ratio": _ratio(
             totals["store_queue_full_cycles"], cycles
         ),
+        "store_data_multiple_ready_cycle_ratio": _ratio(
+            totals["store_data_multiple_ready_cycles"], cycles
+        ),
+        "store_data_out_of_age_order_cycle_ratio": _ratio(
+            totals["store_data_out_of_age_order_cycles"], cycles
+        ),
+        "store_data_out_of_age_per_multiple_ready": _ratio(
+            totals["store_data_out_of_age_order_cycles"],
+            totals["store_data_multiple_ready_cycles"],
+        ),
     }
     if source_schema in {
         "miku-perf-observation-v4",
@@ -600,6 +640,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "miku-perf-observation-v6",
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
+        "miku-perf-observation-v9",
     }:
         derived["rob_zero_retire_head_reason_ratio"] = {
             name: _ratio(value, cycles)
@@ -616,6 +657,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "miku-perf-observation-v6": LSQ_EVENT_NAMES_V6,
         "miku-perf-observation-v7": LSQ_EVENT_NAMES_V7,
         "miku-perf-observation-v8": LSQ_EVENT_NAMES_V7,
+        "miku-perf-observation-v9": LSQ_EVENT_NAMES_V7,
     }[source_schema]
     raw_totals = {
         **totals,

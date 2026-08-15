@@ -9,8 +9,8 @@
     },
     {
       "name": "load-store-queue",
-      "paths": ["cpu/src/main/scala/miku/backend/LoadStoreQueue*.scala"],
-      "scala_suites": ["miku.backend.LoadStoreQueueSpec", "miku.backend.OooBackendWithDataCacheSpec", "miku.core.OooCoreIntegrationSpec"],
+      "paths": ["cpu/src/main/scala/miku/backend/LoadStoreQueue*.scala", "cpu/src/main/scala/miku/backend/StoreDataQueue.scala"],
+      "scala_suites": ["miku.backend.LoadStoreQueueSpec", "miku.backend.StoreDataQueueSpec", "miku.backend.OooBackendWithDataCacheSpec", "miku.core.OooCoreIntegrationSpec"],
       "python_contracts": ["tests/python/test_cache_memory_contract.py"]
     },
     {
@@ -63,8 +63,8 @@
     },
     {
       "name": "performance-observation",
-      "paths": ["cpu/src/main/scala/miku/observe/PerfObservationV1.scala", "cpu/src/main/scala/miku/core/OooCore*.scala", "cpu/src/main/scala/miku/frontend/OooFrontend.scala", "cpu/src/main/scala/miku/backend/OooBackend.scala", "cpu/src/main/scala/miku/backend/ReorderBuffer.scala", "cpu/src/main/scala/miku/backend/LoadStoreQueue.scala", "cpu/src/main/scala/miku/memory/SharedCacheHierarchy.scala", "scripts/sim/perf_monitor.*", "scripts/sim/check-m01-counters", "scripts/sim/m01-perf-monitor.patch", "scripts/sim/manifest.sha256", "cpu/tests/python/test_perf_observation_contract.py"],
-      "scala_suites": ["miku.core.OooCoreIntegrationSpec"],
+      "paths": ["cpu/src/main/scala/miku/observe/PerfObservationV1.scala", "cpu/src/main/scala/miku/core/OooCore*.scala", "cpu/src/main/scala/miku/frontend/OooFrontend.scala", "cpu/src/main/scala/miku/backend/OooBackend.scala", "cpu/src/main/scala/miku/backend/ReorderBuffer.scala", "cpu/src/main/scala/miku/backend/LoadStoreQueue.scala", "cpu/src/main/scala/miku/backend/StoreDataQueue.scala", "cpu/src/main/scala/miku/memory/SharedCacheHierarchy.scala", "scripts/sim/perf_monitor.*", "scripts/sim/check-m01-counters", "scripts/sim/m01-perf-monitor.patch", "scripts/sim/manifest.sha256", "cpu/tests/python/test_perf_observation_contract.py"],
+      "scala_suites": ["miku.backend.StoreDataQueueSpec", "miku.core.OooCoreIntegrationSpec"],
       "python_contracts": ["tests/python/test_perf_observation_contract.py", "tests/python/test_perf_observation_summary.py", "tests/python/test_core_interface.py", "tests/python/test_generation_contract.py"]
     },
     {

@@ -190,6 +190,8 @@ void PerfMonitor::reset_accumulators() {
     store_queue_occupancy_sum_ = 0;
     load_queue_full_cycles_ = 0;
     store_queue_full_cycles_ = 0;
+    store_data_multiple_ready_cycles_ = 0;
+    store_data_out_of_age_order_cycles_ = 0;
     std::fill(std::begin(lsq_events_), std::end(lsq_events_), 0);
     std::fill(std::begin(cache_events_), std::end(cache_events_), 0);
     std::fill(std::begin(cache_occupancy_sum_),
@@ -255,6 +257,8 @@ void PerfMonitor::save_accumulator_checkpoint() {
     SAVE_SCALAR(store_queue_occupancy_sum);
     SAVE_SCALAR(load_queue_full_cycles);
     SAVE_SCALAR(store_queue_full_cycles);
+    SAVE_SCALAR(store_data_multiple_ready_cycles);
+    SAVE_SCALAR(store_data_out_of_age_order_cycles);
     SAVE_ARRAY(lsq_events);
     SAVE_ARRAY(cache_events);
     SAVE_ARRAY(cache_occupancy_sum);
@@ -321,6 +325,8 @@ void PerfMonitor::restore_accumulator_checkpoint() {
     RESTORE_SCALAR(store_queue_occupancy_sum);
     RESTORE_SCALAR(load_queue_full_cycles);
     RESTORE_SCALAR(store_queue_full_cycles);
+    RESTORE_SCALAR(store_data_multiple_ready_cycles);
+    RESTORE_SCALAR(store_data_out_of_age_order_cycles);
     RESTORE_ARRAY(lsq_events);
     RESTORE_ARRAY(cache_events);
     RESTORE_ARRAY(cache_occupancy_sum);
@@ -448,6 +454,8 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     dispatch_valid_sum_ += dispatch_valid;
     dispatch_fire_sum_ += dispatch_fire;
     dispatch_fire_hist_[dispatch_fire]++;
+    store_data_multiple_ready_cycles_ += field(issue, 62, 1);
+    store_data_out_of_age_order_cycles_ += field(issue, 63, 1);
 
     const unsigned committed_branches = popcount(field(core, 35, 3));
     branch_commit_hist_[committed_branches]++;
@@ -611,7 +619,7 @@ void PerfMonitor::write_json(const char *path) {
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
 
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v8\",\n");
+    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v9\",\n");
     std::fprintf(file, "  \"observation_abi\": {\"magic\": \"MIKU\", \"version\": 1, \"word_count\": 8},\n");
     std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"nested_counter_read_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
                  roi_marker_seen_ ? "outermost-counter-read-pair" : "full-run",
@@ -734,6 +742,9 @@ void PerfMonitor::write_json(const char *path) {
                      static_cast<unsigned long long>(lsq_events_[index]));
     }
     std::fprintf(file, "]},\n");
+    std::fprintf(file, "  \"store_data\": {\"multiple_ready_cycles\": %llu, \"out_of_age_order_cycles\": %llu},\n",
+                 static_cast<unsigned long long>(store_data_multiple_ready_cycles_),
+                 static_cast<unsigned long long>(store_data_out_of_age_order_cycles_));
     std::fprintf(file, "  \"cache\": {\"events\": [");
     for (unsigned index = 0; index < 20; index++) {
         std::fprintf(file, "%s%llu", index == 0 ? "" : ", ",

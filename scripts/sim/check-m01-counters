@@ -28,6 +28,7 @@ if schema in {
     "miku-perf-observation-v6",
     "miku-perf-observation-v7",
     "miku-perf-observation-v8",
+    "miku-perf-observation-v9",
 }:
     abi = counters.get("observation_abi")
     if abi != {"magic": "MIKU", "version": 1, "word_count": 8}:
@@ -43,6 +44,7 @@ if schema in {
         "miku-perf-observation-v6",
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
+        "miku-perf-observation-v9",
     }:
         roi = counters.get("roi")
         if not isinstance(roi, dict):
@@ -132,6 +134,7 @@ if schema in {
         "miku-perf-observation-v6",
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
+        "miku-perf-observation-v9",
     }:
         head_reason_names = {
             "invalid",
@@ -178,6 +181,7 @@ if schema in {
         "miku-perf-observation-v6",
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
+        "miku-perf-observation-v9",
     }:
         request_sequences = frontend.get("request_interval_sequences")
         if (
@@ -249,12 +253,13 @@ if schema in {
         "miku-perf-observation-v6": 46,
         "miku-perf-observation-v7": 53,
         "miku-perf-observation-v8": 53,
+        "miku-perf-observation-v9": 53,
     }.get(schema, 28)
     if not isinstance(lsq_events, list) or len(lsq_events) != expected_lsq_events or not all(
         isinstance(value, int) and 0 <= value <= cycles for value in lsq_events
     ):
         fail(f"LSQ events must contain {expected_lsq_events} per-cycle counters")
-    if schema == "miku-perf-observation-v8":
+    if schema in {"miku-perf-observation-v8", "miku-perf-observation-v9"}:
         load_capacity = lsq.get("load_capacity")
         if load_capacity not in {8, 16, 32, 64}:
             fail("load queue capacity must be a supported power of two")
@@ -265,11 +270,27 @@ if schema in {
         fail("load queue occupancy exceeds capacity")
     if lsq.get("store_occupancy_sum", -1) > 8 * cycles:
         fail("store queue occupancy exceeds capacity")
-    if schema in {"miku-perf-observation-v7", "miku-perf-observation-v8"}:
+    if schema in {
+        "miku-perf-observation-v7",
+        "miku-perf-observation-v8",
+        "miku-perf-observation-v9",
+    }:
         if lsq.get("load_full_cycles") != lsq_events[46]:
             fail("load queue full count does not match DUT observation")
         if lsq.get("store_full_cycles") != lsq_events[47]:
             fail("store queue full count does not match DUT observation")
+
+    if schema == "miku-perf-observation-v9":
+        store_data = counters.get("store_data", {})
+        multiple_ready = store_data.get("multiple_ready_cycles")
+        out_of_age = store_data.get("out_of_age_order_cycles")
+        if not all(
+            isinstance(value, int) and 0 <= value <= cycles
+            for value in (multiple_ready, out_of_age)
+        ):
+            fail("store-data observation counters must be per-cycle nonnegative integers")
+        if out_of_age > multiple_ready:
+            fail("store-data out-of-age count exceeds multiple-ready opportunities")
 
     cache = counters.get("cache", {})
     if not isinstance(cache.get("events"), list) or len(cache["events"]) != 20:
@@ -304,6 +325,7 @@ if schema in {
         "miku-perf-observation-v6",
         "miku-perf-observation-v7",
         "miku-perf-observation-v8",
+        "miku-perf-observation-v9",
     } and invariants.get("roi_complete") is not True:
         fail("invariant roi_complete is not true")
     for name in (

@@ -600,5 +600,7 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     perfObservationV1Word3(58 + queue) :=
       router.io.portValid(queue) && router.io.portReady(queue)
   }
+  perfObservationV1Word3(62) := storeDataQueue.io.multipleReady
+  perfObservationV1Word3(63) := storeDataQueue.io.physicalSelectionOutOfAgeOrder
   PerfObservationV1.expose(perfObservationV1Word3, 3)
 }

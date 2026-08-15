@@ -24,7 +24,7 @@ OBSERVATION_SOURCES = (
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v8",
+        "schema_version": "miku-perf-observation-v9",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
         "roi": {
             "mode": "outermost-counter-read-pair",
@@ -106,6 +106,10 @@ def valid_document() -> dict:
             "load_full_cycles": 0,
             "store_full_cycles": 0,
             "events": [0] * 53,
+        },
+        "store_data": {
+            "multiple_ready_cycles": 0,
+            "out_of_age_order_cycles": 0,
         },
         "cache": {"events": [0] * 20, "occupancy_sum": [0] * 3},
         "axi": {
@@ -208,6 +212,13 @@ class PerfObservationContractTest(unittest.TestCase):
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
 
+    def test_accepts_existing_v8_evidence_without_store_data_fields(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v8"
+        document.pop("store_data")
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_accepts_self_described_sixteen_entry_load_queue(self) -> None:
         document = copy.deepcopy(valid_document())
         document["lsq"]["load_capacity"] = 16
@@ -238,6 +249,13 @@ class PerfObservationContractTest(unittest.TestCase):
         document["lsq"]["events"][46] = 1
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_store_data_out_of_age_count_without_opportunity(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["store_data"]["out_of_age_order_cycles"] = 1
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("out-of-age count exceeds", result.stdout)
 
     def test_rejects_harness_queue_full_mismatch(self) -> None:
         document = copy.deepcopy(valid_document())

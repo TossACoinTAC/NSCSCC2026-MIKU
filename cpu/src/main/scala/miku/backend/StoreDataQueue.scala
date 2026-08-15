@@ -17,6 +17,11 @@ final class StoreDataQueue(
   private val entryCount = config.storeQueueEntries
   private val slotWidth = log2Up(entryCount)
 
+  private def isOlder(older: UInt, younger: UInt): Bool = {
+    val distance = (younger - older).resize(config.robPointerWidth)
+    (distance =/= U(0, config.robPointerWidth bits)) && !distance.msb
+  }
+
   private def selectLowest(mask: Bits): UInt = {
     val selected = UInt(slotWidth bits)
     selected := 0
@@ -42,6 +47,8 @@ final class StoreDataQueue(
 
     val flush = in Bool ()
     val occupancy = out UInt (log2Up(entryCount + 1) bits)
+    val multipleReady = out Bool ()
+    val physicalSelectionOutOfAgeOrder = out Bool ()
   }
 
   val slotValid = Vec.fill(entryCount)(Reg(Bool()) init (False))
@@ -69,6 +76,16 @@ final class StoreDataQueue(
   val outputStoreQueueIndex = Reg(UInt(config.storeQueueIndexWidth bits))
   val outputReady = !outputValid || io.readReady
   val selectedSlot = selectLowest(readyMap)
+  val oldestReadyMap = Bits(entryCount bits)
+  for (slot <- 0 until entryCount) {
+    val olderReady = Bits(entryCount bits)
+    for (other <- 0 until entryCount) {
+      olderReady(other) := readyMap(other) &&
+        isOlder(slotRobPointer(other), slotRobPointer(slot))
+    }
+    oldestReadyMap(slot) := readyMap(slot) && !olderReady.orR
+  }
+  val oldestReadySlot = selectLowest(oldestReadyMap)
   val dequeue = outputReady && readyMap.orR
 
   val enqueueReadyReg = RegInit(True)
@@ -118,4 +135,7 @@ final class StoreDataQueue(
   io.readRobPointer := outputRobPointer
   io.readStoreQueueIndex := outputStoreQueueIndex
   io.occupancy := (CountOne(slotValid.asBits) + outputValid.asUInt).resized
+  io.multipleReady := CountOne(readyMap) > 1
+  io.physicalSelectionOutOfAgeOrder :=
+    io.multipleReady && selectedSlot =/= oldestReadySlot
 }

@@ -85,6 +85,8 @@ private:
         std::uint64_t store_queue_occupancy_sum = 0;
         std::uint64_t load_queue_full_cycles = 0;
         std::uint64_t store_queue_full_cycles = 0;
+        std::uint64_t store_data_multiple_ready_cycles = 0;
+        std::uint64_t store_data_out_of_age_order_cycles = 0;
         std::uint64_t lsq_events[kLsqEventCount] = {};
         std::uint64_t cache_events[20] = {};
         std::uint64_t cache_occupancy_sum[3] = {};
@@ -176,6 +178,8 @@ private:
     std::uint64_t store_queue_occupancy_sum_ = 0;
     std::uint64_t load_queue_full_cycles_ = 0;
     std::uint64_t store_queue_full_cycles_ = 0;
+    std::uint64_t store_data_multiple_ready_cycles_ = 0;
+    std::uint64_t store_data_out_of_age_order_cycles_ = 0;
     unsigned load_queue_capacity_ = 0;
     std::uint64_t lsq_events_[kLsqEventCount] = {};
     std::uint64_t cache_events_[20] = {};
