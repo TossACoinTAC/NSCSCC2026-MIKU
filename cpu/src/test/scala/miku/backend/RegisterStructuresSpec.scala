@@ -87,6 +87,49 @@ class RegisterStructuresSpec extends AnyFunSuite {
       }
   }
 
+  test("physical register banks retain simultaneous same-bank writes") {
+    val config = OooCoreConfig.ExpandedWindow
+    val destinations = Seq(4, 36, 68, 100, 124)
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+        "/sim-workspace-ooo-registers-banked-write")
+      .compile(new PhysicalRegisterFile(config))
+      .doSim("ooo-prf-banked-write", 0x50524642) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        dut.io.writeValid #= 0
+        dut.io.flush #= false
+        dut.io.debugReadAddress #= 0
+        for (port <- 0 until config.executionWidth * 2) {
+          dut.io.readAddress(port) #= 0
+        }
+        for (port <- 0 until config.writebackWidth) {
+          dut.io.write(port).pdst #= 0
+          dut.io.write(port).data #= 0
+        }
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+
+        for (port <- destinations.indices) {
+          dut.io.write(port).pdst #= destinations(port)
+          dut.io.write(port).data #= BigInt(0x5100 + port)
+          dut.io.readAddress(port) #= destinations(port)
+        }
+        dut.io.writeValid #= (BigInt(1) << config.writebackWidth) - 1
+        sleep(1)
+        for (port <- destinations.indices) {
+          assert(dut.io.readData(port).toBigInt == BigInt(0x5100 + port))
+        }
+
+        dut.clockDomain.waitSampling()
+        dut.io.writeValid #= 0
+        sleep(1)
+        for (port <- destinations.indices) {
+          assert(dut.io.readData(port).toBigInt == BigInt(0x5100 + port))
+        }
+      }
+  }
+
   private def clearFreeListInputs(dut: PhysicalRegisterFreeList, config: OooCoreConfig): Unit = {
     dut.io.allocateValid #= 0
     dut.io.allocateAccept #= false

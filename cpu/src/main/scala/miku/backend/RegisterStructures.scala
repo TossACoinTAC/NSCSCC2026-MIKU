@@ -23,13 +23,35 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
 
   val registers = Vec.fill(config.physicalRegs)(Reg(Bits(config.xlen bits)))
   registers(0) := B(0, config.xlen bits)
+  private val writeDataBankCount = 4
+  private val writeDataBankWidth = log2Up(writeDataBankCount)
+  require(config.physicalRegs % writeDataBankCount == 0)
   val writeTargets = Vec(Bits(config.physicalRegs bits), config.writebackWidth)
+  val writeBankValid = Vec(Bits(writeDataBankCount bits), config.writebackWidth)
+  val writeBankData = Vec.fill(config.writebackWidth)(
+    Vec(Bits(config.xlen bits), writeDataBankCount)
+  )
   for (writePort <- 0 until config.writebackWidth) {
     writeTargets(writePort) := Mux(
       io.writeValid(writePort) && io.write(writePort).pdst =/= 0,
       UIntToOh(io.write(writePort).pdst, config.physicalRegs),
       B(0, config.physicalRegs bits)
     )
+    writeBankValid(writePort) := Mux(
+      io.writeValid(writePort) && io.write(writePort).pdst =/= 0,
+      UIntToOh(
+        io.write(writePort).pdst(writeDataBankWidth - 1 downto 0),
+        writeDataBankCount
+      ),
+      B(0, writeDataBankCount bits)
+    )
+    for (bank <- 0 until writeDataBankCount) {
+      writeBankData(writePort)(bank) := Mux(
+        writeBankValid(writePort)(bank),
+        io.write(writePort).data,
+        B(0, config.xlen bits)
+      )
+    }
   }
 
   for (readPort <- 0 until config.executionWidth * 2) {
@@ -69,7 +91,8 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
   for (registerIndex <- 1 until config.physicalRegs) {
     for (writePort <- 0 until config.writebackWidth) {
       when(writeTargets(writePort)(registerIndex)) {
-        registers(registerIndex) := io.write(writePort).data
+        registers(registerIndex) :=
+          writeBankData(writePort)(registerIndex % writeDataBankCount)
       }
     }
   }
