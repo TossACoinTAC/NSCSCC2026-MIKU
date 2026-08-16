@@ -307,32 +307,47 @@ final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourI
     Reg(UInt(countWidth bits)) init U(usableCapacity, countWidth bits)
 
   val allocateOffset = Vec(UInt(pointerWidth bits), config.renameWidth)
-  val allocateAddress = Vec(UInt(pointerWidth bits), config.renameWidth)
-  val allocateBank = Vec(UInt(bankSelectWidth bits), config.renameWidth)
-  val allocateRow = Vec(UInt(bankRowWidth bits), config.renameWidth)
   for (lane <- 0 until config.renameWidth) {
     allocateOffset(lane) := (if (lane == 0) U(0)
                              else
                                CountOne(
                                  io.allocateValid(lane - 1 downto 0)
                                )).resized
-    allocateAddress(lane) := advance(headPtr, allocateOffset(lane))
-    allocateBank(lane) := allocateAddress(lane)(bankSelectWidth - 1 downto 0)
-    allocateRow(lane) := allocateAddress(lane)(pointerWidth - 1 downto bankSelectWidth)
+  }
+  // Always read the next three physical queue entries. Destination decode
+  // only selects among these candidates at the final narrow mux, rather than
+  // driving the free-list bank and row address cones.
+  val candidateAddress = Vec(UInt(pointerWidth bits), config.renameWidth)
+  val candidateBank = Vec(UInt(bankSelectWidth bits), config.renameWidth)
+  val candidateRow = Vec(UInt(bankRowWidth bits), config.renameWidth)
+  for (candidate <- 0 until config.renameWidth) {
+    candidateAddress(candidate) := advance(
+      headPtr,
+      U(candidate, pointerWidth bits)
+    )
+    candidateBank(candidate) := candidateAddress(candidate)(bankSelectWidth - 1 downto 0)
+    candidateRow(candidate) :=
+      candidateAddress(candidate)(pointerWidth - 1 downto bankSelectWidth)
   }
   val bankReadData = Vec(UInt(config.physicalRegIndexWidth bits), bankCount)
   for (bank <- 0 until bankCount) {
     val selectedRow = UInt(bankRowWidth bits)
-    selectedRow := allocateRow(0)
-    for (lane <- 0 until config.renameWidth) {
-      when(allocateBank(lane) === U(bank, bankSelectWidth bits)) {
-        selectedRow := allocateRow(lane)
+    selectedRow := candidateRow(0)
+    for (candidate <- 0 until config.renameWidth) {
+      when(candidateBank(candidate) === U(bank, bankSelectWidth bits)) {
+        selectedRow := candidateRow(candidate)
       }
     }
     bankReadData(bank) := freeEntryBanks(bank)(selectedRow)
   }
+  val candidatePdst = Vec(UInt(config.physicalRegIndexWidth bits), config.renameWidth)
+  for (candidate <- 0 until config.renameWidth) {
+    candidatePdst(candidate) := bankReadData(candidateBank(candidate))
+  }
   for (lane <- 0 until config.renameWidth) {
-    io.allocatePdst(lane) := bankReadData(allocateBank(lane))
+    val writerIndex = UInt(log2Up(config.renameWidth) bits)
+    writerIndex := allocateOffset(lane).resized
+    io.allocatePdst(lane) := candidatePdst(writerIndex)
   }
 
   val requested = CountOne(io.allocateValid)
