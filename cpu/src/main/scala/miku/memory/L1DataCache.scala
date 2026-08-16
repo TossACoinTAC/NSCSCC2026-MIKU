@@ -248,7 +248,16 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       indexOf(misses(entry).lineAddress) === indexOf(requestLineAddress)
   }
   val lineMatch = lineMatchMask.orR
-  val lineMatchId = selectLowest(lineMatchMask, config.mshrEntries)
+  val lineMatchGrant = OHMasking.first(lineMatchMask)
+  val lineMatchId = OHToUInt(lineMatchGrant)
+  val lineMatchCanMergeStore = Bool()
+  lineMatchCanMergeStore := False
+  for (entry <- 0 until config.mshrEntries) {
+    when(lineMatchGrant(entry)) {
+      lineMatchCanMergeStore := misses(entry).state =/= L1DataMshrState.install &&
+        misses(entry).state =/= L1DataMshrState.respond
+    }
+  }
   val freeMissId = selectLowest(freeMissMask, config.mshrEntries)
   val freeWaiterId = selectLowest(freeWaiterMask, config.loadQueueEntries)
 
@@ -272,9 +281,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     !cacheArray.io.invalidateBusy && !lookupPending && !installMask.orR && !io.request.uncached &&
     !io.maintenanceRequest.valid
   val mergeLoadReady = lineMatch && !io.request.isWrite && freeWaiterMask.orR
-  val mergeStoreReady = lineMatch && io.request.isWrite &&
-    misses(lineMatchId).state =/= L1DataMshrState.install &&
-    misses(lineMatchId).state =/= L1DataMshrState.respond &&
+  val mergeStoreReady = lineMatch && io.request.isWrite && lineMatchCanMergeStore &&
     pendingStoreReady
   val newLookupReady = !lineMatch && !setConflictMask.orR && freeMissMask.orR &&
     (io.request.isWrite || freeWaiterMask.orR) &&
