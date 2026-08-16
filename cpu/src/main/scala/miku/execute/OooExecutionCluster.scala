@@ -31,9 +31,19 @@ final class MultiplyPipeline(config: OooCoreConfig = OooCoreConfig.FourIssueThre
   val valid = RegInit(False)
   val uop = Reg(RenamedMicroOp(config))
   val result = Reg(Bits(config.xlen bits))
-  val unsignedProduct = (io.source1.asUInt * io.source2.asUInt).resize(64).asBits
-  val signedProduct = (io.source1.asSInt * io.source2.asSInt).resize(64).asBits
-  val product = Mux(io.uop.decoded.mulDivSigned, signedProduct, unsignedProduct)
+  // One 33x33 signed multiply covers both LA32R signed and unsigned forms.
+  // Zero extension represents unsigned operands as positive signed values;
+  // sign extension preserves the signed form. This avoids implementing two
+  // parallel 32x32 products followed by a wide result mux.
+  val source1Extended = SInt((config.xlen + 1) bits)
+  val source2Extended = SInt((config.xlen + 1) bits)
+  source1Extended := io.source1.asUInt.resize(config.xlen + 1).asSInt
+  source2Extended := io.source2.asUInt.resize(config.xlen + 1).asSInt
+  when(io.uop.decoded.mulDivSigned) {
+    source1Extended := io.source1.asSInt.resize(config.xlen + 1)
+    source2Extended := io.source2.asSInt.resize(config.xlen + 1)
+  }
+  val product = (source1Extended * source2Extended).asBits
   val selectedResult =
     Mux(io.uop.decoded.mulDivOperation(1), product(63 downto 32), product(31 downto 0))
 

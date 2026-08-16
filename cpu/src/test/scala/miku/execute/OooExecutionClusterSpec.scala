@@ -8,6 +8,8 @@ import org.scalatest.funsuite.AnyFunSuite
 import spinal.core._
 import spinal.core.sim._
 
+import scala.util.Random
+
 private final class OooExecutionClusterProbe(config: OooCoreConfig) extends Component {
   private val loadStorePort =
     config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
@@ -1022,6 +1024,76 @@ class OooExecutionClusterSpec extends AnyFunSuite {
         assert(dut.io.completionValid.toBoolean)
         assert(dut.io.completionPdst.toBigInt == 10)
         assert(dut.io.completionData.toBigInt == 63)
+      }
+  }
+
+  test("multiply preserves signed and unsigned high-half semantics with one product") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-execution-cluster-multiply-arithmetic"
+      )
+      .compile(new OooMultiplyWakeupProbe(config))
+      .doSim("ooo-execution-cluster-multiply-arithmetic", 0x4c76) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        dut.io.issueValid #= false
+        dut.io.source1 #= 0
+        dut.io.source2 #= 0
+        dut.io.pdst #= 10
+        dut.io.instruction #= 0
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        val mask32 = (BigInt(1) << 32) - 1
+        val mask64 = (BigInt(1) << 64) - 1
+        val mulW = BigInt("001c0000", 16)
+        val mulhW = BigInt("001c8000", 16)
+        val mulhWu = BigInt("001d0000", 16)
+        def signed32(value: BigInt): BigInt = {
+          val bits = value & mask32
+          if (bits.testBit(31)) bits - (BigInt(1) << 32) else bits
+        }
+        def expected(a: BigInt, b: BigInt, signed: Boolean, high: Boolean): BigInt = {
+          val product =
+            (if (signed) signed32(a) * signed32(b) else (a & mask32) * (b & mask32)) & mask64
+          if (high) (product >> 32) & mask32 else product & mask32
+        }
+        def launch(instruction: BigInt, a: BigInt, b: BigInt, result: BigInt): Unit = {
+          dut.io.instruction #= instruction
+          dut.io.source1 #= a & mask32
+          dut.io.source2 #= b & mask32
+          dut.io.issueValid #= true
+          sleep(1)
+          assert(dut.io.directWakeupValid.toBoolean)
+          dut.clockDomain.waitSampling()
+          dut.io.issueValid #= false
+          sleep(1)
+          assert(dut.io.completionValid.toBoolean)
+          assert(dut.io.completionData.toBigInt == result)
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          assert(!dut.io.completionValid.toBoolean)
+        }
+
+        val directed = Seq(
+          (BigInt(0), BigInt(0)),
+          (BigInt(1), mask32),
+          (BigInt("80000000", 16), BigInt(2)),
+          (BigInt("80000000", 16), mask32),
+          (mask32, mask32),
+          (BigInt("7fffffff", 16), BigInt("7fffffff", 16))
+        )
+        val random = new Random(0x4c76)
+        val vectors = directed ++ Seq.fill(96) {
+          (BigInt(32, random), BigInt(32, random))
+        }
+        for ((a, b) <- vectors) {
+          launch(mulW, a, b, expected(a, b, signed = true, high = false))
+          launch(mulhW, a, b, expected(a, b, signed = true, high = true))
+          launch(mulhWu, a, b, expected(a, b, signed = false, high = true))
+        }
       }
   }
 
