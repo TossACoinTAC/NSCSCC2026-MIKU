@@ -551,8 +551,10 @@ DRC/route/bitstream 完整且 Linux 门禁通过后，`main` 可将该阶段 squ
 
 ### 下一步
 
-- 若官方/团队构建不接受 `Performance_ExplorePostRoutePhysOpt` 策略，需要回到
-  RTL 侧继续收敛默认 `Performance_Explore` 的 `-0.170 ns` 级负 slack；
+- 默认 `Performance_Explore` direct full 实测 setup `-0.223 ns`、TNS `-3.801 ns`
+  （50 个失败 endpoint）；`dev/L03-pc-bypass-match` 正在把 staged head bypass
+  从 commit-count 预取锥改为对已注册 commit head 的当拍匹配，目标是让默认策略
+  也闭合，而不仅依赖 `Performance_ExplorePostRoutePhysOpt`。
   `dev/L03-l02-flags` 是保留 L02 性能、只加 commit 预解码的保守候选。
 - 在时序预算允许时再评估 PHT candidate B（4x16384）；本地 ideal 总周期
   `3,940,987`，比 candidate A 再少 `0.31%`，但 16k-cycle PHT reset sweep
