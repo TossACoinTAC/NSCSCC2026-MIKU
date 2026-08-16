@@ -284,6 +284,12 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val oldestPendingLoadHead =
     (loadBase + loadHeadOffset).resize(config.loadQueueIndexWidth)
   val selectedLoadHead = Mux(selectYoungerLoad, youngerRetryIndex, oldestPendingLoadHead)
+  val selectedLoadMask = UIntToOh(selectedLoadHead, config.loadQueueEntries)
+  val selectedLoad = LoadQueueEntry(config)
+  selectedLoad := loads(0)
+  for (entry <- 0 until config.loadQueueEntries) {
+    when(selectedLoadMask(entry)) { selectedLoad := loads(entry) }
+  }
   val selectedLoadValid = pendingLoads.orR
   // Match the registered uop boundary used by the reference LoadQueue.  The
   // selected index and immutable payload are state: translation, forwarding,
@@ -297,7 +303,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     scheduledLoadWasYoungerBypass := selectYoungerLoad
     when(selectedLoadValid) {
       loadHead := selectedLoadHead
-      val selectedLoad = loads(selectedLoadHead)
       youngerRetryOwnerRobPointer := selectedLoad.robPointer
       scheduledLoadOwner.robPointer := selectedLoad.robPointer
       scheduledLoadOwner.recoveryEpoch := selectedLoad.recoveryEpoch
