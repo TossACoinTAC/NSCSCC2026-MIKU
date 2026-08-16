@@ -418,9 +418,21 @@ matching func58 random-AXI seeds `240/255/141` 均为 `58/58`。matrix 为
 `build/sim/runs/cpu_4b1a4e012e39_chiplab_c398d274812f/clean-func58_model_77c1eb518231_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`；
 组合 perf20 matrix 为
 `build/sim/runs/cpu_4b1a4e012e39_chiplab_c398d274812f/clean-perf20_model_a8739c977aba_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`。
-下一门禁是 expanded-window locked gates、实验身份冻结和一次 matching 100 MHz direct
-full implementation；重点检查 ROB/rename/FreeList 路径、资源占用以及 `RT06` 局部 raw
-LTP 增加是否在器件映射中形成新压力。
+expanded-window locked gates 与实验冻结均通过。matching 100 MHz direct full 已完成：
+fully routed、bitstream 成功、DRC 0 error/critical warning，setup/hold WNS 为
+`-0.355/+0.046 ns`，因此归档为 candidate，尚未形成里程碑。placed utilization 为
+`112,618 LUT`（`84.17%`）、`62,689 FF`、`64.5 BRAM tile`、`8 DSP`；其中 CPU 为
+`100,221 LUT`，ROB 单模块占 `38,098 LUT/8,974 FF/8 BRAM`，PRF 占 `8,800 LUT/4,064 FF`。
+
+top-50 中 `48/50` 属于 ROB/CSR，平均 route delay 占 `82.99%`、最差 slack
+`-0.355 ns`；其源端集中于 LSQ `drainAfterFlush`，终点集中于 ROB entry 的
+`sideEffectData` CE、完整 pointer CE 和 completion-exception 状态。IQ 与 L1D 各占一条。
+这证明当前主要矛盾是 64-entry ROB 宽多写状态造成的布局布线压力，不是 RT06 FreeList
+局部 LTP。下一批按 `RT07 -> RT08 -> RT09` 线性验证：压缩 resident generation tag、共享
+completion one-hot decode，并把冷 completion payload 迁入按生产端口组织的同步存储。
+实现归档为
+`Post_Impl_Bundles/cpu_04d25fdef318_chiplab_c398d274812f_perf_100mhz_20260816-171551/manifest.json`，
+路径分类为 `build/reports/timing/R8-R02-RT04-RT05-RT06-direct-top50.json`。
 
 ## R1：时序候选与周期验证
 
