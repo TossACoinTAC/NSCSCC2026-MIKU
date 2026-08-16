@@ -305,12 +305,20 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     payloadReadBase := allocatePointer
   }
   val payloadReadPointer = Vec(UInt(config.robPointerWidth bits), config.commitWidth)
+  val payloadReadBank = Vec(UInt(payloadBankWidth bits), config.commitWidth)
+  val payloadReadRow = Vec(
+    UInt((config.robIndexWidth - payloadBankWidth) bits),
+    config.commitWidth
+  )
   val candidatePointer = Vec.fill(config.commitWidth)(
     Reg(UInt(config.robPointerWidth bits)) init (0)
   )
   for (lane <- 0 until config.commitWidth) {
     payloadReadPointer(lane) :=
       (payloadReadBase + U(lane, config.robPointerWidth bits)).resized
+    payloadReadBank(lane) := payloadReadPointer(lane)(payloadBankWidth - 1 downto 0)
+    payloadReadRow(lane) :=
+      payloadReadPointer(lane)(config.robIndexWidth - 1 downto payloadBankWidth)
     candidatePointer(lane) := payloadReadPointer(lane)
   }
   val payloadBankRead = Vec(Bits(payloadWidth bits), payloadBankCount)
@@ -320,20 +328,15 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   for (bank <- 0 until payloadBankCount) {
     val readMask = Bits(config.commitWidth bits)
     for (lane <- 0 until config.commitWidth) {
-      readMask(lane) := payloadReadPointer(lane)(payloadBankWidth - 1 downto 0) ===
-        U(bank, payloadBankWidth bits)
+      readMask(lane) := payloadReadBank(lane) === U(bank, payloadBankWidth bits)
     }
     payloadBankReadLane(bank) := selectLowest(readMask, log2Up(config.commitWidth))
     payloadBankRead(bank) := payloadBanks(bank).readSync(
-      address = payloadReadPointer(payloadBankReadLane(bank))(
-        config.robIndexWidth - 1 downto payloadBankWidth
-      ),
+      address = payloadReadRow(payloadBankReadLane(bank)),
       enable = True
     )
     retirementMetadataBankRead(bank) := retirementMetadataBanks(bank).readSync(
-      address = payloadReadPointer(payloadBankReadLane(bank))(
-        config.robIndexWidth - 1 downto payloadBankWidth
-      ),
+      address = payloadReadRow(payloadBankReadLane(bank)),
       enable = True
     )
   }
@@ -344,9 +347,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   for (producerLane <- 0 until config.writebackWidth; bank <- 0 until payloadBankCount) {
     completionPayloadBankRead(producerLane)(bank) :=
       completionPayloadMemories(producerLane)(bank).readSync(
-        address = payloadReadPointer(payloadBankReadLane(bank))(
-          config.robIndexWidth - 1 downto payloadBankWidth
-        ),
+        address = payloadReadRow(payloadBankReadLane(bank)),
         enable = True
       )
   }
@@ -360,8 +361,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     Vec(ReorderBufferRetirementMetadata(config), config.commitWidth)
   for (lane <- 0 until config.commitWidth) {
     val pointer = candidatePointer(lane)
-    val bank = pointer(payloadBankWidth - 1 downto 0)
-    candidates(lane).state := entries(pointer(config.robIndexWidth - 1 downto 0))
+    val candidateIndex = pointer(config.robIndexWidth - 1 downto 0)
+    val bank = candidateIndex(payloadBankWidth - 1 downto 0)
+    candidates(lane).state := entries(candidateIndex)
     candidates(lane).payload.assignFromBits(payloadBankRead(bank))
     candidateRetirementMetadata(lane).assignFromBits(retirementMetadataBankRead(bank))
     val selectedCompletionPayload = Bits(completionPayloadWidth bits)
