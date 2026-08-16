@@ -22,6 +22,8 @@ final case class ReorderBufferPayload(config: OooCoreConfig) extends Bundle {
 final case class ReorderBufferRetirementMetadata(config: OooCoreConfig) extends Bundle {
   val serializing = Bool()
   val systemOperation = UInt(SystemOperation.Width bits)
+  val systemOperationIsNone = Bool()
+  val systemOperationIsMemoryBarrier = Bool()
   val pc = UInt(config.xlen bits)
   val isLoad = Bool()
   val isStore = Bool()
@@ -212,6 +214,12 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       io.allocate(lane).uop.decoded.serializing
     allocationRetirementMetadata(lane).systemOperation :=
       io.allocate(lane).uop.decoded.systemOperation
+    allocationRetirementMetadata(lane).systemOperationIsNone :=
+      io.allocate(lane).uop.decoded.systemOperation === SystemOperation.none
+    allocationRetirementMetadata(lane).systemOperationIsMemoryBarrier :=
+      io.allocate(lane).uop.decoded.systemOperation === SystemOperation.dataBarrier ||
+        io.allocate(lane).uop.decoded.systemOperation === SystemOperation.instructionBarrier ||
+        io.allocate(lane).uop.decoded.systemOperation === SystemOperation.cacheOperation
     allocationRetirementMetadata(lane).pc := io.allocate(lane).uop.decoded.pc
     allocationRetirementMetadata(lane).isLoad := io.allocate(lane).uop.decoded.isLoad
     allocationRetirementMetadata(lane).isStore := io.allocate(lane).uop.decoded.isStore
@@ -479,6 +487,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       io.commit(lane).result := candidateCompletionPayload(lane).result
     }
     io.commit(lane).systemOperation := candidateRetirementMetadata(lane).systemOperation
+    io.commit(lane).systemOperationIsMemoryBarrier :=
+      candidateRetirementMetadata(lane).systemOperationIsMemoryBarrier
     io.commit(lane).csrAddress := candidates(lane).payload.csrAddress
     io.commit(lane).csrWrite := candidates(lane).payload.csrWrite
     io.commit(lane).csrMask := candidates(lane).payload.csrMask
@@ -755,13 +765,12 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     // Ordinary current-epoch completions and, when enabled, fully resolved branches
     // may bypass the final entry.complete register. Serializing/system operations and
     // either decoded or completion exceptions retain the precise retirement boundary.
-    val candidateSystemOperation = candidateRetirementMetadata(0).systemOperation
     headCompletionBypass := !io.flush && candidates(0).state.payloadReady &&
       stagedHeadCompletionBypassValid &&
       candidates(0).state.valid && !candidates(0).state.complete &&
       !candidates(0).exception.valid && !candidateRetirementMetadata(0).serializing &&
       !candidateRetirementMetadata(0).isBranch &&
-      candidateSystemOperation === SystemOperation.none
+      candidateRetirementMetadata(0).systemOperationIsNone
     headCompletionBypassResult := stagedHeadCompletionBypassResult
     if (config.enableBranchHeadCompletionBypass) {
       headBranchBypass := !io.flush && candidates(0).state.payloadReady &&
@@ -769,7 +778,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         !candidates(0).state.complete && !candidates(0).exception.valid &&
         !candidateRetirementMetadata(0).serializing &&
         candidateRetirementMetadata(0).isBranch &&
-        candidateSystemOperation === SystemOperation.none
+        candidateRetirementMetadata(0).systemOperationIsNone
     } else {
       headBranchBypass := False
     }
@@ -842,7 +851,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   perfObservationV1Word4(48) := candidateRetirementMetadata(0).isStore
   perfObservationV1Word4(49) := candidateRetirementMetadata(0).isBranch
   perfObservationV1Word4(50) :=
-    candidateRetirementMetadata(0).systemOperation =/= SystemOperation.none
+    !candidateRetirementMetadata(0).systemOperationIsNone
   perfObservationV1Word4(51) := headCompletionBypass
   val observationIncomingHeadBranchCompletion = Bits(config.writebackWidth bits)
   val observationIncomingHeadMispredictCompletion = Bits(config.writebackWidth bits)

@@ -302,9 +302,7 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val committedBarrier = Bits(config.commitWidth bits)
   for (lane <- 0 until config.commitWidth) {
     committedBarrier(lane) := rob.io.commitValid(lane) && rob.io.commit(lane).retired &&
-      (rob.io.commit(lane).systemOperation === SystemOperation.dataBarrier ||
-        rob.io.commit(lane).systemOperation === SystemOperation.instructionBarrier ||
-        rob.io.commit(lane).systemOperation === SystemOperation.cacheOperation)
+      rob.io.commit(lane).systemOperationIsMemoryBarrier
   }
   val committedBarrierCount = CountOne(committedBarrier).resize(config.memoryEpochWidth)
   val nextCommittedMemoryEpoch = committedMemoryEpoch + committedBarrierCount

@@ -192,6 +192,7 @@ final case class CommitRecord(config: OooCoreConfig) extends Bundle {
   val storeQueueIndex = UInt(config.storeQueueIndexWidth bits)
   val exception = ExceptionMetadata()
   val systemOperation = UInt(SystemOperation.Width bits)
+  val systemOperationIsMemoryBarrier = Bool()
   val csrAddress = UInt(14 bits)
   val csrWrite = Bool()
   val csrMask = Bool()
