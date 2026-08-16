@@ -64,13 +64,16 @@ final case class ScheduledLoadPayload(config: OooCoreConfig) extends Bundle {
   val pdst = UInt(config.physicalRegIndexWidth bits)
   val writesPdst = Bool()
   val virtualAddress = UInt(config.xlen bits)
-  val physicalAddress = UInt(config.xlen bits)
-  val translationDone = Bool()
-  val uncached = Bool()
   val size = Bits(3 bits)
   val byteMask = Bits(4 bits)
   val signExtend = Bool()
   val isLl = Bool()
+}
+
+final case class ScheduledLoadTranslation(config: OooCoreConfig) extends Bundle {
+  val physicalAddress = UInt(config.xlen bits)
+  val done = Bool()
+  val uncached = Bool()
 }
 
 final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
@@ -236,6 +239,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val loadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val scheduledLoadOwner = Reg(ScheduledLoadOwner(config))
   val scheduledLoadPayload = Reg(ScheduledLoadPayload(config))
+  val scheduledLoadTranslation = Reg(ScheduledLoadTranslation(config))
   // Younger-retry selection only needs the age token. Keeping a local copy
   // avoids feeding the full scheduled-load owner bundle into every load CAM
   // comparator while preserving the same registered retry boundary.
@@ -301,9 +305,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       scheduledLoadPayload.pdst := selectedLoad.pdst
       scheduledLoadPayload.writesPdst := selectedLoad.writesPdst
       scheduledLoadPayload.virtualAddress := selectedLoad.virtualAddress
-      scheduledLoadPayload.physicalAddress := selectedLoad.physicalAddress
-      scheduledLoadPayload.translationDone := selectedLoad.translationDone
-      scheduledLoadPayload.uncached := selectedLoad.uncached
+      scheduledLoadTranslation.physicalAddress := selectedLoad.physicalAddress
+      scheduledLoadTranslation.done := selectedLoad.translationDone
+      scheduledLoadTranslation.uncached := selectedLoad.uncached
       scheduledLoadPayload.size := selectedLoad.size
       scheduledLoadPayload.byteMask := selectedLoad.byteMask
       scheduledLoadPayload.signExtend := selectedLoad.signExtend
@@ -324,13 +328,13 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
         scheduledLoadPayload.pdst := io.agu.uop.pdst
         scheduledLoadPayload.writesPdst := io.agu.uop.pdst =/= 0
         scheduledLoadPayload.virtualAddress := io.agu.virtualAddress
-        scheduledLoadPayload.physicalAddress := Mux(
+        scheduledLoadTranslation.physicalAddress := Mux(
           aguTranslationBypass,
           io.translationBypass.physicalAddress,
           U(0, config.xlen bits)
         )
-        scheduledLoadPayload.translationDone := aguTranslationBypass
-        scheduledLoadPayload.uncached := aguTranslationBypass && io.translationBypass.uncached
+        scheduledLoadTranslation.done := aguTranslationBypass
+        scheduledLoadTranslation.uncached := aguTranslationBypass && io.translationBypass.uncached
         scheduledLoadPayload.size := io.agu.size
         scheduledLoadPayload.byteMask := io.agu.byteMask
         scheduledLoadPayload.signExtend := io.agu.uop.decoded.memorySignExtend
@@ -454,9 +458,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     // A virtual synonym is not an alias decision.  Hold every younger load
     // until the older store has a translation, then compare the physical word
     // addresses that the cache and external memory will actually observe.
-    val physicalAddressesKnown = store.translationDone && scheduledLoadPayload.translationDone
+    val physicalAddressesKnown = store.translationDone && scheduledLoadTranslation.done
     val sameWord = store.physicalAddress(config.xlen - 1 downto 2) ===
-      scheduledLoadPayload.physicalAddress(config.xlen - 1 downto 2)
+      scheduledLoadTranslation.physicalAddress(config.xlen - 1 downto 2)
     val overlap = (store.byteMask & scheduledLoadPayload.byteMask).orR
     val covers = (store.byteMask & scheduledLoadPayload.byteMask) === scheduledLoadPayload.byteMask
     unknownOlderStore(entry) := older && (!store.addressReady || !store.translationDone)
@@ -483,13 +487,13 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val loadOrderClear = !bufferedCommittedStore && !unknownOlderStore.orR &&
     !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
     !partialOverlapStore.orR && !pendingDataStore.orR
-  val forwardCandidate = loadHeadReady && scheduledLoadPayload.translationDone &&
-    !scheduledLoadPayload.uncached && !scheduledLoadPayload.isLl && loadOrderClear &&
+  val forwardCandidate = loadHeadReady && scheduledLoadTranslation.done &&
+    !scheduledLoadTranslation.uncached && !scheduledLoadPayload.isLl && loadOrderClear &&
     forwardingCount === 1
   val cacheLoadBase = loadHeadReady && loadOrderClear && forwardingCount === 0
-  val loadAtRequiredOrderPoint = !scheduledLoadPayload.uncached ||
+  val loadAtRequiredOrderPoint = !scheduledLoadTranslation.uncached ||
     scheduledLoadOwner.robPointer === io.robHeadPointer
-  val cacheLoadCandidate = cacheLoadBase && scheduledLoadPayload.translationDone &&
+  val cacheLoadCandidate = cacheLoadBase && scheduledLoadTranslation.done &&
     loadAtRequiredOrderPoint
   val uncachedStoreAtHead = headStore.uncached && !headStore.completed &&
     !headStore.requestSent && headStore.robPointer === io.robHeadPointer
@@ -517,7 +521,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     !headStore.translationDone
   // Translation has no memory side effect, so overlap it with the unresolved-store window.
   // Store ordering and forwarding are still checked before a translated load reaches D-cache.
-  val loadNeedsTranslation = loadHeadReady && !scheduledLoadPayload.translationDone
+  val loadNeedsTranslation = loadHeadReady && !scheduledLoadTranslation.done
   val pendingStoreTranslations = Bits(config.storeQueueEntries bits)
   for (entry <- 0 until config.storeQueueEntries) {
     pendingStoreTranslations(entry) := stores(entry).valid && stores(entry).addressReady &&
@@ -568,12 +572,12 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
   val requestCandidate = CacheRequest(config)
   requestCandidate.virtualAddress := scheduledLoadPayload.virtualAddress
-  requestCandidate.physicalAddress := scheduledLoadPayload.physicalAddress
+  requestCandidate.physicalAddress := scheduledLoadTranslation.physicalAddress
   requestCandidate.isWrite := False
   requestCandidate.size := scheduledLoadPayload.size
   requestCandidate.byteMask := scheduledLoadPayload.byteMask
   requestCandidate.writeData := B(0, config.xlen bits)
-  requestCandidate.uncached := scheduledLoadPayload.uncached
+  requestCandidate.uncached := scheduledLoadTranslation.uncached
   requestCandidate.robPointer := scheduledLoadOwner.robPointer
   requestCandidate.recoveryEpoch := scheduledLoadOwner.recoveryEpoch
   requestCandidate.pdst := scheduledLoadPayload.pdst
@@ -1214,9 +1218,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       }
     }
     when(scheduledLoadTranslationOwner) {
-      scheduledLoadPayload.physicalAddress := io.translationResponse.physicalAddress
-      scheduledLoadPayload.uncached := io.translationResponse.uncached
-      when(translationResponseFire) { scheduledLoadPayload.translationDone := True }
+      scheduledLoadTranslation.physicalAddress := io.translationResponse.physicalAddress
+      scheduledLoadTranslation.uncached := io.translationResponse.uncached
+      when(translationResponseFire) { scheduledLoadTranslation.done := True }
     }
 
     when(translationResponseFire && translationActive) {
@@ -1360,10 +1364,10 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val oldestLoadAddressNotReady = scheduledLoadValid && headLoadState.valid &&
     headLoadState.robPointer === scheduledLoadOwner.robPointer && !headLoadState.addressReady
   val oldestLoadOrderBlocked = loadHeadReady && !loadOrderClear
-  val multipleForwardingStoresBlock = loadHeadReady && scheduledLoadPayload.translationDone &&
-    !scheduledLoadPayload.uncached && !scheduledLoadPayload.isLl && forwardingCount > 1
-  val oldestLoadLocalAliasBlocked = loadHeadReady && scheduledLoadPayload.translationDone &&
-    !scheduledLoadPayload.uncached && !scheduledLoadPayload.isLl && !bufferedCommittedStore &&
+  val multipleForwardingStoresBlock = loadHeadReady && scheduledLoadTranslation.done &&
+    !scheduledLoadTranslation.uncached && !scheduledLoadPayload.isLl && forwardingCount > 1
+  val oldestLoadLocalAliasBlocked = loadHeadReady && scheduledLoadTranslation.done &&
+    !scheduledLoadTranslation.uncached && !scheduledLoadPayload.isLl && !bufferedCommittedStore &&
     !unknownOlderStore.orR && !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
     (partialOverlapStore.orR || pendingDataStore.orR || forwardingCount > 1)
   when(io.flush) {
