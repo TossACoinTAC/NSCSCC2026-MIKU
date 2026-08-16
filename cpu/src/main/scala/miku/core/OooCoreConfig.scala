@@ -138,7 +138,7 @@ final case class OooCoreConfig(
     enableDataArrayDataReadDecoupling: Boolean = true,
     // When multiple refill waiters are ready, prefer the oldest ROB entry if all candidates share
     // one recovery epoch.  Fall back to physical waiter order across epochs.
-    enableL1DWaiterAgeSelect: Boolean = true,
+    enableL1DWaiterAgeSelect: Boolean = false,
     enableDeferredFrontendCorrectionCleanup: Boolean = true,
     enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,
