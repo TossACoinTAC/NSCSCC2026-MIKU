@@ -480,8 +480,35 @@ PRF 的 hierarchy cells 分别减少 `9,000/1,891/641`；全核 LTP 仍为 104�
 `build/reports/yosys/R8-R02-RT04-RT05-RT06-v2/`、
 `build/reports/yosys/R8-RT07-RT08-RT09-DT01-RF01-v2/` 和
 `build/reports/yosys/R8-second-timing-batch-v2.json`。这些数字仍是结构代理，不能替代
-matching Vivado；第二批必须由 100 MHz direct full 判断是否消除了首轮 ROB 拥塞并形成
-正 WNS 里程碑。
+matching Vivado。
+
+第二批 matching 100 MHz direct full 已在 `a3f03ca` 完成。实现 fully routed、bitstream
+成功、DRC 0 error/critical warning，setup/hold WNS 为 `-1.850/+0.050 ns`，因此只归档为
+candidate，未形成里程碑。placed utilization 为 `94,023 LUT/55,372 FF/84 BRAM tile/8 DSP`；
+相对第一批减少 `18,595 LUT`（`-16.51%`）和 `7,317 FF`（`-11.67%`），但增加
+`19.5 BRAM tile`。这证明 Yosys 结构降压确实进入了 Vivado 网表，同时也证明资源类型和
+连接拓扑发生了不健康的迁移，不能把总 cell 下降直接等同于物理收益。
+
+route 阶段峰值为 `117,377` 个 overlap，出现 2 次 Route 35-447 拥塞警告和 7 个含
+overlap 的 Global Iteration；`route_design` 用时 `6,429 s`（`1h47m09s`）。最终 net
+全部布通、overlap 为 0，但方向热点峰值达到 South `94.6509%`、West `91.9060%`、
+East `91.2684%`。top-50 为 ROB/CSR `45`、IQ `4`、LSQ `1`；最差路径是
+`ROB stagedResult -> PRF register D`，slack `-1.850 ns`、route delay 占 `95.008%`，
+部分 write-data net fanout 为 `138`。旧 LSQ-drain 到 ROB 宽 entry payload CE 路径已消失，
+但新 PRF 数据广播和 completion 存储拓扑成为更严重的物理墙。
+
+该结果的归因边界是五项组合：不能把全部退化独立归给 RT09 或 RF01。RT07/RT08/DT01
+的目标路径未在新 top-50 重现，可继续保留；RT09 的 `15 x (64 x 83)` 同步存储使 BRAM
+增加，RF01 的全表 one-hot 写法让每路 result 广播到 128 项 PRF，二者进入下一批替代设计。
+`RT10` 将每个 producer 的 completion payload 按 ROB pointer 低两位拆为四个 16-entry
+bank，三路连续 commit 天然访问不同 bank，以 4 个浅 bank 代替 3 个全深度副本；`RF02`
+按 PRF bank 先局部资格化 write data，使原始数据只驱动少量 bank gate，再由 bank-local
+net 更新 32 项寄存器。两项均保持 completion-to-commit、writeback 和 PRF 可见拍数不变，
+先做定向/完整门禁、Yosys 和组合 perf20，再与本轮 `route-health.json` 做 matching direct
+full A/B。实现归档、路径和拥塞证据分别见
+`Post_Impl_Bundles/cpu_a3f03ca9c5b6_chiplab_c398d274812f_perf_100mhz_20260816-202318/manifest.json`、
+`build/reports/timing/R8-second-timing-batch-direct-top50.json` 和
+`build/reports/timing/R8-second-timing-batch-route-health.json`。
 
 ## R1：时序候选与周期验证
 

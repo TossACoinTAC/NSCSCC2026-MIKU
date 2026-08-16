@@ -88,6 +88,7 @@ make yosys-analyze YOSYS_RTL=<frozen-mycpu_top.v> YOSYS_LABEL=<candidate-id>
 make yosys-compare YOSYS_BASE_REPORT=<baseline-summary.json> \
   YOSYS_CANDIDATE_REPORT=<candidate-summary.json>
 make timing-analyze TIMING_REPORT=<cpu_setup_top50.rpt>
+make route-analyze ROUTE_LOG=<implementation.log>
 make soc-impl SOC_EXPERIMENT_MANIFEST=<experiment-manifest.json>
 ```
 
@@ -175,6 +176,12 @@ WNS 均严格大于零、routed DRC 0 error/critical warning、fully routed 和 
 RTL、generation manifest 和 Chiplab 身份还会再次与当前 implementation 输入核对。归档采用临时目录加原子改名；同一
 实现再次归档时，先核对 RTL 与 bitstream hash，再幂等补录新增的 top-N、route status 或
 资源报告，不覆盖身份不同的证据。
+
+归档器同时从完整 Vivado log 生成 `route-health.json`，并把 `physical_health` 写入 manifest。
+至少记录 route 用时、拥塞警告次数、Global Iteration 的 overlap 轨迹、峰值与最终 overlap、
+方向最大拥塞和 post-route setup/hold。fully routed 只能证明最终可布通；高 overlap、反复
+全局迭代或 85% 以上局部拥塞仍需作为下一轮 RTL 拓扑信息。不同 RTL 的物理健康比较必须与
+资源、top-N、WNS/TNS 和周期同时解释，不能仅以总 cell 数或最终 overlap 为零判断优化成功。
 
 `make soc-postroute-opt` 复用现有 fully-routed DCP 执行 `AggressiveExplore`，不重新生成 RTL、
 不改变周期结果。它把输出写入独立的 `build/vivado/postroute-*`，重新生成 setup/hold、限定
