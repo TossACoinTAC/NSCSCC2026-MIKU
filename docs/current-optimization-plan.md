@@ -503,12 +503,30 @@ East `91.2684%`。top-50 为 ROB/CSR `45`、IQ `4`、LSQ `1`；最差路径是
 `RT10` 将每个 producer 的 completion payload 按 ROB pointer 低两位拆为四个 16-entry
 bank，三路连续 commit 天然访问不同 bank，以 4 个浅 bank 代替 3 个全深度副本；`RF02`
 按 PRF bank 先局部资格化 write data，使原始数据只驱动少量 bank gate，再由 bank-local
-net 更新 32 项寄存器。两项均保持 completion-to-commit、writeback 和 PRF 可见拍数不变，
-先做定向/完整门禁、Yosys 和组合 perf20，再与本轮 `route-health.json` 做 matching direct
+net 更新 32 项寄存器；`MT10` 对 LQ/SQ rename allocation 只做一次 one-hot target decode，
+并以四份 bank-local payload 替代全队列动态写广播。三项均保持原有可见拍数，先做定向/
+完整门禁、Yosys 和组合 perf20，再与本轮 `route-health.json` 做 matching direct
 full A/B。实现归档、路径和拥塞证据分别见
 `Post_Impl_Bundles/cpu_a3f03ca9c5b6_chiplab_c398d274812f_perf_100mhz_20260816-202318/manifest.json`、
 `build/reports/timing/R8-second-timing-batch-direct-top50.json` 和
 `build/reports/timing/R8-second-timing-batch-route-health.json`。
+
+第三批结构降压的 matching RTL 身份冻结在 `4890747`，发布 RTL SHA256 为
+`8a6a74e1608a06582eae7928d641800e41b9bd8f71edc495c8901548c03db066`。`RT10` 将
+ROB completion 存储从 15 个全深度副本改为每 producer 四个浅 bank，使 completion
+memory bits 约 `79,680 -> 26,560`；`RF02` 将五路 PRF write data 各自限制在四个 bank gate
+和 32-entry bank-local net；`MT10` 进一步让 LSQ cells `8,031 -> 7,470`（`-6.985%`）。
+完整门禁为 41 suites/256 tests、Python 合同 92/92；clean perf20 相对第二批 20 项逐项
+精确相等，均为 `4,167,970` cycles，func58 random-AXI seeds `240/255/141` 均为 58/58。
+证据冻结在
+`build/reports/experiments/R8-RT10-RF02-MT10-direct-100mhz/experiment-manifest.json`。
+
+本轮物理比较不能只看 WNS。第二批的 `117,377` peak overlaps、2 次拥塞警告、7 个含
+overlap 的 Global Iteration、`6,429 s` route 用时和 `94.6509%` 方向最大拥塞共同构成
+健康基线。第三批必须同时报告这些指标；即使 setup 改善，overlap、拥塞警告或 route 用时
+没有显著下降，也只能说明关键路径被转移，不能证明全局布局布线压力已经解决。若第三批仍
+严重拥塞，下一轮优先从 matching high-fanout 与跨区 net 抽取新的 bank-local/owner-local
+RTL 拓扑候选，不使用 `max_fanout`、Pblock 等启发式指令掩盖结构性广播。
 
 ## R1：时序候选与周期验证
 
