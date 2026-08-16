@@ -110,6 +110,16 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
   val writeVictimData = Reg(Bits(CacheContract.LineBits bits))
   val writeResponseValid = RegInit(False)
   val writeResponse = Reg(LineWriteResponse(config))
+  // Keep normal-operation and write-state qualification as narrow shared
+  // domains. Maintenance controls should not rebuild the same enum compares
+  // alongside the wide cache payload paths.
+  val stateNormal = state === L2CacheState.normal
+  val writeStateIdle = writeState === L2WriteState.idle
+  val writeStateInstall = writeState === L2WriteState.install
+  val writeStateVictimWriteback = writeState === L2WriteState.victimWriteback
+  val writeStateWriteThrough = writeState === L2WriteState.writeThrough
+  val writeStateVictimWritebackWait = writeState === L2WriteState.victimWritebackWait
+  val writeStateWriteThroughWait = writeState === L2WriteState.writeThroughWait
   writeResponseValid := False
   io.writeResponseValid := writeResponseValid
   io.writeResponse := writeResponse
@@ -141,14 +151,14 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     activeMissMask(entry) := misses(entry).valid
   }
   val normalBusy = lookupPending || activeMissMask.orR ||
-    writeState =/= L2WriteState.idle
+    !writeStateIdle
   val maintenanceRequest = invalidatePending || newInvalidate ||
     writebackInvalidatePending || newWritebackInvalidate
   val startInvalidate = (invalidatePending || newInvalidate) && !normalBusy &&
-    state === L2CacheState.normal && !cacheArray.io.invalidateBusy &&
+    stateNormal && !cacheArray.io.invalidateBusy &&
     !io.maintenanceRequest.valid
   val startWritebackInvalidate = (writebackInvalidatePending || newWritebackInvalidate) &&
-    !normalBusy && state === L2CacheState.normal &&
+    !normalBusy && stateNormal &&
     !(invalidatePending || newInvalidate) && !cacheArray.io.invalidateBusy &&
     !io.maintenanceRequest.valid
   when(startInvalidate) { invalidatePending := False }
@@ -183,23 +193,23 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     writeSetConflict(entry) := misses(entry).valid &&
       indexOf(misses(entry).lineAddress) === indexOf(io.write.lineAddress)
   }
-  val writeContextConflictsRead = writeState =/= L2WriteState.idle &&
+  val writeContextConflictsRead = !writeStateIdle &&
     indexOf(writeAddress) === indexOf(io.read.lineAddress)
-  val canStartLookup = state === L2CacheState.normal && !maintenanceRequest &&
+  val canStartLookup = stateNormal && !maintenanceRequest &&
     !cacheArray.io.invalidateBusy && !lookupPending && !installMask.orR &&
-    !missWritebackMask.orR && writeState =/= L2WriteState.install &&
+    !missWritebackMask.orR && !writeStateInstall &&
     cacheArray.io.lookupReady && !io.maintenanceRequest.valid
 
   // A dirty L1D eviction has priority over a read lookup.  The write decision is intentionally
   // independent of readValid: otherwise the L1D state crosses the shared MSHR router and returns
   // to the 512-bit write-data register enable in the same cycle.
-  io.writeReady := canStartLookup && writeState === L2WriteState.idle &&
+  io.writeReady := canStartLookup && writeStateIdle &&
     !writeSetConflict.orR && io.write.byteMask.andR
   val writeFire = io.writeValid && io.writeReady
   io.readReady := canStartLookup && !writeFire && !misses(io.read.mshrId).valid &&
     !readSetConflict.orR && !writeContextConflictsRead
   val readFire = io.readValid && io.readReady
-  io.maintenanceRequest.ready := state === L2CacheState.normal &&
+  io.maintenanceRequest.ready := stateNormal &&
     !normalBusy && !maintenanceRequest && !cacheArray.io.invalidateBusy &&
     cacheArray.io.lookupReady
   val exactMaintenanceFire = io.maintenanceRequest.valid &&
@@ -345,13 +355,13 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     CacheContract.LineBytes bits
   )
   io.memoryWrite.mshrId := missWritebackId
-  when(state === L2CacheState.normal) {
-    when(writeState === L2WriteState.victimWriteback) {
+  when(stateNormal) {
+    when(writeStateVictimWriteback) {
       io.memoryWriteValid := True
       io.memoryWrite.lineAddress := writeVictimAddress
       io.memoryWrite.data := writeVictimData
       io.memoryWrite.mshrId := writeMshrId
-    }.elsewhen(writeState === L2WriteState.writeThrough) {
+    }.elsewhen(writeStateWriteThrough) {
       io.memoryWriteValid := True
       io.memoryWrite.lineAddress := writeAddress
       io.memoryWrite.data := writeData
@@ -367,18 +377,18 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     io.memoryWrite.mshrId := 0
   }
   val memoryWriteFire = io.memoryWriteValid && io.memoryWriteReady
-  when(state === L2CacheState.normal && memoryWriteFire) {
-    when(writeState === L2WriteState.victimWriteback) {
+  when(stateNormal && memoryWriteFire) {
+    when(writeStateVictimWriteback) {
       writeState := L2WriteState.victimWritebackWait
-    }.elsewhen(writeState === L2WriteState.writeThrough) {
+    }.elsewhen(writeStateWriteThrough) {
       writeState := L2WriteState.writeThroughWait
     }.otherwise {
       misses(missWritebackId).state := L2MshrState.writebackWait
     }
   }
-  when(state === L2CacheState.normal && io.memoryWriteResponseValid) {
+  when(stateNormal && io.memoryWriteResponseValid) {
     when(
-      writeState === L2WriteState.victimWritebackWait &&
+      writeStateVictimWritebackWait &&
         io.memoryWriteResponse.mshrId === writeMshrId
     ) {
       when(io.memoryWriteResponse.error) {
@@ -394,7 +404,7 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
         })
       }
     }.elsewhen(
-      writeState === L2WriteState.writeThroughWait &&
+      writeStateWriteThroughWait &&
         io.memoryWriteResponse.mshrId === writeMshrId
     ) {
       when(io.memoryWriteResponse.error) {
@@ -418,7 +428,7 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
   }
 
   val readRequestId = selectLowest(readRequestMask, config.mshrEntries)
-  io.memoryReadValid := state === L2CacheState.normal && readRequestMask.orR
+  io.memoryReadValid := stateNormal && readRequestMask.orR
   io.memoryRead.lineAddress := misses(readRequestId).lineAddress
   io.memoryRead.mshrId := readRequestId
   io.memoryRead.criticalBeat := misses(readRequestId).criticalBeat
@@ -529,9 +539,8 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
         beat * CacheContract.BeatBits
     ) := lineMemories(beat).readAsync(installId)
   }
-  val writeInstall = state === L2CacheState.normal &&
-    writeState === L2WriteState.install && !lookupResponse
-  val missInstall = state === L2CacheState.normal && installMask.orR &&
+  val writeInstall = stateNormal && writeStateInstall && !lookupResponse
+  val missInstall = stateNormal && installMask.orR &&
     !writeInstall && !lookupResponse
   when(writeInstall) {
     cacheArray.io.writeValid := True
@@ -612,7 +621,7 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
 
   io.invalidateBusy := cacheArray.io.invalidateBusy || maintenanceRequest ||
     state =/= L2CacheState.normal
-  val idleNow = state === L2CacheState.normal && !normalBusy &&
+  val idleNow = stateNormal && !normalBusy &&
     !maintenanceRequest && !cacheArray.io.invalidateBusy &&
     !refillOutputValid && !hitOutputValid && !hitCaptureValid &&
     !io.readValid && !io.writeValid && !io.invalidate && !io.writebackInvalidate &&
