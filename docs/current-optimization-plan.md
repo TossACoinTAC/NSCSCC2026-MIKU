@@ -303,10 +303,20 @@ expanded 配置通过 `ReorderBufferSpec` 默认/expanded 两种完整指针绕�
 `lookup_table -8.39206%`。逐项证据见
 `build/reports/comparisons/R8-R02-expanded-window.json`。
 
+为区分 ROB 与 PRF 的贡献，又以相同软件、seed 和仿真合同测试了 `ROB 64 / PRF 64`
+对照点。该变体总周期为 `4,195,770`，相对 A01 仅下降 `0.466665%`，几何平均加速
+`1.006604867x`；在此基础上把 PRF 扩到 128 后再下降 `0.662572%`，几何平均加速
+`1.008652260x`。因此 `64/128` 的约 `1.13%` 不是 ROB 单独扩容的效果，额外 PRF
+在更大 ROB 上具有可测的协同收益。`64/64` 保留为可复现实验变体
+`CPU_VARIANT=expanded-rob`，主 R02 仍为 `CPU_VARIANT=expanded-window`。配对证据分别为
+`build/reports/comparisons/R8-R02-expanded-rob.json` 和
+`build/reports/comparisons/R8-R02-prf128-increment.json`。
+
 expanded 发布 RTL 为 `build/rtl/package-expanded-r02/rtl/mycpu_top.v`，SHA-256
 `712df1c5f6c177d2e45e1a48f5f2c53036883e3168dc28c9af1eff79364c2c3e`；Yosys
 `core-top-yosys-check` 通过。generic cell 数约 `89,083`，当前默认 RTL 同门禁约
-`72,059`，增加约 `23.6%`；该统计不等同 Vivado LUT/FF，也不能推断时序。expanded
+`72,059`，增加约 `23.6%`；`64/64` 对照点为 `84,603`，说明本次成本主要来自 ROB，
+而 PRF 64 -> 128 的边际成本约 4,480 cells。该统计不等同 Vivado LUT/FF，也不能推断时序。expanded
 实验因此保留为性能候选但默认关闭，下一门禁是与至少一个独立候选合并后的 matching
 100 MHz direct implementation；在得到正 WNS 前不得进入稳定组合。
 根入口使用 `make cpu-generate CPU_VARIANT=expanded-window` 显式生成该变体；省略参数时
