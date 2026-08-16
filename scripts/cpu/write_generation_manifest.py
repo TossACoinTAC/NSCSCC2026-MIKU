@@ -30,7 +30,12 @@ def main() -> int:
     parser.add_argument("--published", type=Path, required=True)
     parser.add_argument(
         "--core-variant",
-        choices=("default", "expanded-rob", "expanded-window"),
+        choices=(
+            "default",
+            "expanded-rob",
+            "expanded-stores",
+            "expanded-window",
+        ),
         default="default",
     )
     parser.add_argument("--out", type=Path, required=True)

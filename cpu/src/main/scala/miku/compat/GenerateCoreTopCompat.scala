@@ -30,7 +30,7 @@ private object CoreTopCompatGeneratorSupport {
       case _ =>
         throw new IllegalArgumentException(
           "usage: GenerateCoreTopCompat [--out-dir] <output-directory> " +
-            "[--core-variant default|expanded-rob|expanded-window]"
+            "[--core-variant default|expanded-rob|expanded-stores|expanded-window]"
         )
     }
 
@@ -38,6 +38,7 @@ private object CoreTopCompatGeneratorSupport {
     variant match {
       case "default"         => OooCoreConfig.FourIssueThreeCommit
       case "expanded-rob"    => OooCoreConfig.ExpandedRob
+      case "expanded-stores" => OooCoreConfig.ExpandedStores
       case "expanded-window" => OooCoreConfig.ExpandedWindow
       case other =>
         throw new IllegalArgumentException(s"unsupported core variant: $other")

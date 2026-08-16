@@ -238,6 +238,12 @@ object OooCoreConfig {
     robEntries = 64
   )
 
+  // L15 experiment only.  Both the speculative Store queue and the Store-data
+  // queue use this capacity; the public/default core remains unchanged.
+  val ExpandedStores: OooCoreConfig = FourIssueThreeCommit.copy(
+    storeQueueEntries = 16
+  )
+
   // R02 experiment only.  The public/default core remains FourIssueThreeCommit;
   // this variant is selected explicitly by the core-top generator.
   val ExpandedWindow: OooCoreConfig = ExpandedRob.copy(
