@@ -427,16 +427,29 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     }
   }
 
-  val readRequestId = selectLowest(readRequestMask, config.mshrEntries)
+  val readRequestGrant = OHMasking.first(readRequestMask)
+  val readRequestId = OHToUInt(readRequestGrant)
+  val readRequestLineAddress = UInt(config.xlen bits)
+  val readRequestCriticalBeat = UInt(CacheContract.BeatIndexWidth bits)
+  readRequestLineAddress := U(0, config.xlen bits)
+  readRequestCriticalBeat := U(0, CacheContract.BeatIndexWidth bits)
+  for (entry <- 0 until config.mshrEntries) {
+    when(readRequestGrant(entry)) {
+      readRequestLineAddress := misses(entry).lineAddress
+      readRequestCriticalBeat := misses(entry).criticalBeat
+    }
+  }
   io.memoryReadValid := stateNormal && readRequestMask.orR
-  io.memoryRead.lineAddress := misses(readRequestId).lineAddress
+  io.memoryRead.lineAddress := readRequestLineAddress
   io.memoryRead.mshrId := readRequestId
-  io.memoryRead.criticalBeat := misses(readRequestId).criticalBeat
+  io.memoryRead.criticalBeat := readRequestCriticalBeat
   val memoryReadFire = io.memoryReadValid && io.memoryReadReady
-  when(memoryReadFire) {
-    misses(readRequestId).state := L2MshrState.refill
-    misses(readRequestId).refillMask := B(0, CacheContract.BeatsPerLine bits)
-    misses(readRequestId).error := False
+  for (entry <- 0 until config.mshrEntries) {
+    when(memoryReadFire && readRequestGrant(entry)) {
+      misses(entry).state := L2MshrState.refill
+      misses(entry).refillMask := B(0, CacheContract.BeatsPerLine bits)
+      misses(entry).error := False
+    }
   }
 
   val memoryResponseId = io.memoryReadBeat.mshrId
