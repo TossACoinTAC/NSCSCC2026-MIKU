@@ -317,8 +317,8 @@ expanded 发布 RTL 为 `build/rtl/package-expanded-r02/rtl/mycpu_top.v`，SHA-2
 `core-top-yosys-check` 通过。generic cell 数约 `89,083`，当前默认 RTL 同门禁约
 `72,059`，增加约 `23.6%`；`64/64` 对照点为 `84,603`，说明本次成本主要来自 ROB，
 而 PRF 64 -> 128 的边际成本约 4,480 cells。该统计不等同 Vivado LUT/FF，也不能推断时序。expanded
-实验因此保留为性能候选但默认关闭，下一门禁是与至少一个独立候选合并后的 matching
-100 MHz direct implementation；在得到正 WNS 前不得进入稳定组合。
+实验因此保留为性能候选但默认关闭。本轮已与周期透明的 `RT04/RT05/RT06`
+结构优化合并；在 matching 100 MHz direct implementation 得到正 WNS 前不得进入稳定组合。
 根入口使用 `make cpu-generate CPU_VARIANT=expanded-window` 显式生成该变体；省略参数时
 始终生成 `default`，不依赖容器环境中的隐式开关。
 
@@ -404,6 +404,23 @@ perf20 为 `4,215,442 -> 4,215,442`，20 项逐项精确相等。default FreeLis
 证据见 `build/reports/comparisons/R8-RT06-vs-RT05.json`、
 `build/reports/yosys/R8-RT05-vs-RT06-default-word-v1.json` 和
 `build/reports/yosys/R8-RT05-vs-RT06-R02-expanded-word-v1.json`。
+
+### R02 + RT04/RT05/RT06 组合软件门禁
+
+`RT04/RT05/RT06` 在 `CPU_VARIANT=expanded-window` 下相对原 R02 的完整 perf20
+20 项逐项精确相等，总周期仍为 `4,167,970`；相对当前 default 组合仍为
+`4,215,442 -> 4,167,970`（`-1.126145%`），归一化几何平均加速
+`1.015314274x`。这证明三个结构候选没有改变 R02 的软件周期收益。配对证据分别为
+`build/reports/comparisons/R8-R02-RT04-RT05-RT06-vs-R02.json` 和
+`build/reports/comparisons/R8-R02-RT04-RT05-RT06-vs-default.json`。
+
+matching func58 random-AXI seeds `240/255/141` 均为 `58/58`。matrix 为
+`build/sim/runs/cpu_4b1a4e012e39_chiplab_c398d274812f/clean-func58_model_77c1eb518231_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`；
+组合 perf20 matrix 为
+`build/sim/runs/cpu_4b1a4e012e39_chiplab_c398d274812f/clean-perf20_model_a8739c977aba_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`。
+下一门禁是 expanded-window locked gates、实验身份冻结和一次 matching 100 MHz direct
+full implementation；重点检查 ROB/rename/FreeList 路径、资源占用以及 `RT06` 局部 raw
+LTP 增加是否在器件映射中形成新压力。
 
 ## R1：时序候选与周期验证
 
