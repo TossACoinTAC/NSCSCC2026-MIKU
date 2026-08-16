@@ -11,8 +11,12 @@
   `fbc9634`，已 squash 发布到 `main @ 6b559ec`。R6 `L11+L13` matching 源码身份为
   `6bbf9ed`；它已经完成新的 direct full implementation，但 setup 未闭合，因此仍是候选，
   不替代 R5 稳定里程碑。
+- 当前 IPC 实验基线为 `R8 A01 @ 363abd6`：clean perf20 `4,215,442` cycles，20/20
+  通过；相对 SD01 `4,246,698` 减少 `0.736007%`，几何平均加速 `1.004974278x`，
+  18 项改善、2 项退化。A01 尚未执行 matching direct full，因此没有可继承的 WNS、
+  资源或板测结论。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：R6 L13 clean RTL 为 `4,423,675` cycles，20/20 pass，相对 L11 `4,865,310`
+- 历史 R6 L13：clean RTL 为 `4,423,675` cycles，20/20 pass，相对 L11 `4,865,310`
   下降 `9.077222%`，几何平均加速 `1.085725368x`；20 项全部改善。L13 的 clean
   matrix 为 `build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/clean-perf20_model_4f54ae244f79_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`。
 - func58：L13 random-AXI seeds `240/255/141` 均为 58/58，摘要为
@@ -235,6 +239,26 @@ implementation 交叉验证，不能仅凭静态 RTL 宣称时序已修复。
 个包含两个及以上条件分支，占 `11.6163%`，当前少折叠约 `108k` 个 GHR bit，B02-D
 据此晋级。L1D 新 hit 压过更老 miss waiter 仅 81 cycles（ROI `0.0019%`），H08 关闭；
 同拍多个 ready waiter 为 `83,442` cycles（ROI `1.9575%`），H09 进入可回退 A/B。
+
+## R8：Rename oldest fallback
+
+`A01 @ 363abd6` 针对 rename 整组资源阻塞：当完整三宽组无法同时获得 ROB、FreeList、
+LSQ allocator 或 dispatch queue 资源时，只要 lane 0 可以接受，就接受最老 uop，并在
+`DecodeRenameBuffer` 中压缩 lane 1/2、从空出的尾槽补入新 decode uop。ROB、FreeList、
+LSQ allocator 和 dispatch queue 均使用 accepted mask 计数，FreeList 进一步按 GPR
+destination 资格化，避免 Store/branch 等不写 PRF 的 uop 消耗物理寄存器。
+
+实现过程中捕获并修正两项真实边界：FreeList 不能按 accepted uop 总数扣减，且 accepted
+mask 为零时不能把“已接受但无 GPR 写回的 lane”误判为旧布尔接口的未接受状态。新增的
+DecodeRenameBuffer、backend fallback 和 FreeList 回归覆盖了这两项语义；完整 `cpu-check`
+通过，clean perf20 20/20 通过。
+
+本轮相对 SD01 的总周期为 `4,246,698 -> 4,215,442`（`-0.736007%`），几何平均加速
+`1.004974278x`，18 项改善、2 项退化。几何平均略低于常用的 `0.5%` 单候选保留门槛，
+但总周期下降明确且改善分布并非单一长尾，因此先保留 A01，待与另外 1 至 2 个独立 IPC
+候选累积后再做一次 matching direct full。当前没有新的 WNS 或资源数据；下一门禁仍是
+受影响定向 suite、完整 `cpu-check`、完整 perf20，并在组合稳定后再运行 func58 和一次
+100 MHz direct full。
 
 ## R1：时序候选与周期验证
 

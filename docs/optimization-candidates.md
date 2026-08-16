@@ -1,6 +1,6 @@
 # MIKU 优化候选账本与实验状态
 
-最后同步：2026-08-15。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)。本轮 top-50 之外的静态时序审计见 [timing-static-audit-r5.md](timing-static-audit-r5.md)。
+最后同步：2026-08-16。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)。本轮 top-50 之外的静态时序审计见 [timing-static-audit-r5.md](timing-static-audit-r5.md)。
 
 ## 1. 状态与编号合同
 
@@ -31,6 +31,8 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 ## 2. 当前默认组合与本轮证据
 
 当前默认启用的主要候选包括 F01/H03 frontend turnover、B03-full、L02、L03、L05、L07、L08、L11、L13、W02、H01、Q01，以及 E02、FT01、FT02、FT03、BT02、MT03、BT03、WT01、FT04、MT04、FT05、WT02、FT06、MT05、WT04、PT01、AT01、RT01、IT01、MT06、CT01、FT08、WT05、CT02 与重新启用的 W01；BT04 和 WT03 作为已否决的可配置 A/B 结构保留，E01 默认关闭。R5 direct full 的 setup/hold 为 `+0.028/+0.047 ns`，并已用 matching bitstream 完成远程 perf20 20/20；这些实现和板测证据仅代表旧 RTL 组合。R6 `L11+L13 @ 6bbf9ed` 的软件基线为 perf20 `4,423,675`；matching direct full 为 setup/hold `-0.057/+0.048 ns`、setup TNS `-0.138 ns`，fully routed、DRC 与 bitstream 完整，但尚未满足 100 MHz setup 门禁，因此只作为 candidate 保留。R7 `L02+L03` 的 clean perf20 为 `4,262,710`（相对 R6 `-3.638717%`）；matching 系统回归和 direct full 尚未完成，不能继承 R6 或 R5 的实现、Linux 与板测结论。
+
+当前源码已包含并默认启用 `A01 @ 363abd6`；A01 的 matching direct full、Linux 和板测证据尚未产生，因此只继承本次软件门禁结果，不继承任何旧 RTL 的 WNS 或实现结果。
 
 本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。L07 窄 Store completion 将其降至 `5,104,911`（增量 `-3.663820%`，几何平均 `1.038957091x`），BR01 再降至 `5,057,854`（增量 `-0.921799%`，几何平均 `1.009753745x`；相对原始 baseline 累计 `-8.768094%`），W01/FT06/MT05/WT04/PT01/AT01/RT01 节点为 `5,014,520`，逐项周期透明。R3 matching direct full 为 `-0.440/+0.009 ns`，相对 WT04 的 setup WNS 改善 `0.149 ns`、TNS 改善 `28.035 ns`，但仍未闭合。各增量的逐项变化均单独记录，不能把累计收益拆分给其他候选。MT03+BT03 matching 100 MHz direct full 的 setup/hold 为 `-0.694/+0.053 ns`；L07+BR01+BT04 matching direct full 为 `-1.442/+0.050 ns`，因此 BT04 已否决。恢复 BT03 并加入 WT01 后，matching direct full 为 `-0.824/+0.056 ns`；WT01 将 recovery 驱动的 IQ 路径从 top-50 的 47 条降为 0 条，但 frontend、predictor、L1I 和 ATU 路径转为主导，R1 仍未闭合。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
 
@@ -99,7 +101,7 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | R01 | 将未使用的 rename 源规范化为 `p0/ready` | decoder 已产生 `source1Used/source2Used`，但当前 RAT、dispatch 和 IQ 仍把两个编码字段都当作依赖；立即数、PC 源等指令可能被无关未完成寄存器阻塞 | 必须逐类核对 store、branch、CSR、CACOP/InvTLB 等特殊编码，错误的 used 位会直接造成功能错误 | 假依赖事件/阻塞周期、按 opcode 分类、IQ occupancy、perf20 分项、wakeup 比较翻转、LUT/WNS、定向与 DiffTest | 已采用 | unused source 已规范化，当前保留；没有可单独复用的完整 perf20 数字。 |
 | FUS01 | 只融合无同步例外的整数指令对 | `ADDI/ANDI/XORI/SLTI[U]` 结果接 `BEQ/BNE r0` 可合并 ALU 与 branch，`LU12I.W + ORI` 是手册明确给出的常量装载对；F1 可减少 IQ/issue 工作并缩短真依赖，F2 才能进一步减少 ROB/中间 PRF 压力 | 固定 32-bit 编码意味着不减少取指字节；当前一条指令对应一个 ROB/commit/DiffTest 身份。真正压成一个复合 uop 需要第二 PC/指令、`archCount=2`、双退休/branch training 和精确中断合同，检测与宽 payload 还可能恶化前端/rename 时序 | 按模式的 retired adjacent-pair 数、eligible/fused 比例、producer-to-consumer exposed latency、decode/dispatch/IQ/ROB stall、每项 cycles、复合 payload LUT/route、matching SoC WNS | **中等潜力：先 trace/replay** | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | R02 | ROB 与 PRF/FreeList 协同扩容 | 更大的 in-flight window 可能跨越 cache miss、DIV 等长延迟，找到更多独立指令；PRF 必须随最大在途 GPR writer 数增长 | 当前 ROB 被 memory-epoch proof 限制为 32；64-entry ROB 至少需要 96 个 physical register，而现配置的 2 次幂约束会推到 128。8R5W 异步 PRF 的 LUT/mux、地址位宽和布线成本可能显著降低 Fmax | ROB-full 周期、head-blocked 时 younger-ready 数、FreeList-only stall、在途 writer 分布、PRF/ROB/IQ LUT 与路径、perf20 cycles、完整 SoC WNS | 待测量 | observer 显示 ROB 平均约 9.05/32、full 约 1.64%，当前不支持优先扩容；未改 RTL。 |
-| A01 | Rename 整组阻塞改为可接受最老 prefix | 当前 lane 2 因 LQ/STQ 等资源不足时，资源充足的 lane 0/1 也无法分配；接受最老 prefix 可减少队头阻塞 | Decode/Rename buffer 必须压缩并保留余项，同拍 RAT bypass、FreeList/ROB/LSQ 计数和异常边界都要按 accepted prefix 重证 | 各资源导致的 group stall、可接受 prefix 长度、被无关 younger lane 浪费的 uop-slot、LUT/WNS、随机握手测试 | 待测量 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
+| A01 | Rename 整组阻塞改为可接受最老 prefix | 当前 lane 2 因 LQ/STQ 等资源不足时，资源充足的 lane 0/1 也无法分配；接受最老 prefix 可减少队头阻塞 | Decode/Rename buffer 必须压缩并保留余项，同拍 RAT bypass、FreeList/ROB/LSQ 计数和异常边界都要按 accepted prefix 重证 | 各资源导致的 group stall、可接受 prefix 长度、被无关 younger lane 浪费的 uop-slot、LUT/WNS、随机握手测试 | 已实现并默认启用；软件门禁通过，待 matching direct full | `363abd6`：完整 `cpu-check` 通过，clean perf20 20/20；相对 SD01 `4,246,698 -> 4,215,442`（总周期 `-0.736007%`，几何平均加速 `1.004974278x`），18 项改善、2 项退化。几何平均略低于 0.5% 单候选门槛，但总周期下降和多项独立改善支持保留；FreeList 非写回 uop 计数及零 mask 兼容语义均由定向回归覆盖。证据见 `build/reports/experiments/R8-A01/experiment-manifest.json`。 |
 | D01 | Load dispatch 与 SDQ fullness 解耦 | 当前 P3 `portReady` 同时要求 IQ 和 SDQ ready，因此 SDQ 满会阻止不需要 SDQ 的 load 进入 LSU IQ | Router 需要按输入 uop 类型判断 P3 credit，同时继续保证 store 对 IQ+SDQ 的双写原子性；不能形成 ready 组合环 | `P3 IQ ready && !SDQ ready && head is load` 周期、load dispatch stall、SDQ occupancy、perf20 cycles、router path WNS | 测量后停止 | observer 暴露仅 ppm 量级，停止实现；无性能改动。 |
 | D02 | Capability-aware maximum-prefix dispatch matching | 当前三路 router 按 lane 贪心选择最低编号可用端口；flexible ALU 可能占用 younger CSR/DIV/branch/multiply 的唯一端口，使可行的三路匹配退化成两路 | 3x4 matching、occupancy-aware tie-break 会增加 router 控制深度和跨 IQ ready 路由，可能重新制造已切断的 dispatch 关键路径 | greedy prefix 与最大可行 prefix 差异次数、各 IQ occupancy/空闲 issue、opcode 组合、LUT/WNS、perf20 cycles | 待测量 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | Q01 | 缩窄 dispatch/IQ scheduling uop | Queue/Window/IQ 当前保存完整 `RenamedMicroOp`，包含许多只在 ROB commit 或特定 FU 使用的冷字段；按调度/端口保留必要字段可减少约 11k-LUT 调度存储与 compaction 布线 | 多种 payload 或 side table 增加接口和对齐验证；branch/CSR/LSU 所需字段不能遗漏，可能增加取回 mux | 各 bundle bit width、hierarchical LUT/FF、dispatch/IQ 路径、cycle count、完整 SoC WNS、所有 FU 定向测试 | 已采用 | 周期语义中性；历史 Yosys generic cells 约 -7.32%，matching 100 MHz 曾 +0.009 ns 并板测 20/20。组合 -26.91% 不归因给 Q01。 |
@@ -152,14 +154,19 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
 
-当前 P1 正确性 gate（含 C09）已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。R4 matching direct full 的 setup/hold 为 `-0.106/+0.051 ns`，前端路径已退出 top-50，剩余路径墙集中在 IQ/ROB、cache/L2 和少量 LSQ。R5 已将 WT05、CT02、RT02、MT08、CT03、RT03 纳入软件验证；top-N 用于排序但不限制候选准入，能证明不增加拍数或具有受控小代价的候选可进入同一线性验证批次。
+当前 P1 正确性 gate（含 C09）已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。R4 matching direct full 的 setup/hold 为 `-0.106/+0.051 ns`，前端路径已退出 top-50，剩余路径墙集中在 IQ/ROB、cache/L2 和少量 LSQ；这些是历史网表证据，不能直接继承给 A01。R5 已将 WT05、CT02、RT02、MT08、CT03、RT03 纳入软件验证；top-N 用于排序但不限制候选准入，能证明不增加拍数或具有受控小代价的候选可进入同一线性验证批次。
 
-1. 本轮周期从 5,543,953 降至当前 R4 节点的 5,014,546，累计减少 529,407（`-9.549269%`）；IT01 与 MT06+CT01 组合保持逐项周期中性，FT08 总周期增加 `0.000518%`、归一化几何平均性能回退 `0.005882%`。R4 direct full 已将 setup 从 R3 的 `-0.440 ns` 改善到 `-0.106 ns`，但尚未闭合；新的 IQ/ROB 路径必须通过 WT05 等候选继续验证。
+1. 历史 R4 组合从 `5,543,953` 降至 `5,014,546`，并将 setup 从 R3 的 `-0.440 ns` 改善到
+   `-0.106 ns`，但未闭合。当前 R8 A01 软件基线为 `4,215,442` cycles，相对 SD01
+   `4,246,698` 下降 `0.736007%`；该数字已有 20/20 和完整门禁证据，但没有 matching
+   direct full，不能沿用任何历史 WNS。
 2. P02 post-route 仅用于判断物理随机性和提取最新 top-N 路径；其结果无论是否闭合都不能晋级 Stable_Backup 或正式竞赛产物。
 3. 下一份正式 bitstream 必须从 matching RTL 直接执行一次 full implementation，并由该 run 自身满足 setup/hold、DRC、route 和 bitstream 门禁。
 4. 下一轮 IPC 候选仍优先从前端持续供给、分支训练/恢复和已量化的 load-use 暴露中选择；ROB/PRF 扩容因当前占用证据降为低优先级。
 5. 候选设计阶段同时控制寄存边界、宽 mux、高扇出和跨模块控制；任何后续 RTL 修改必须重新运行受影响 suite、完整门禁、perf20 和 func58。
-6. R4 已从 L1I/frontend、LSQ completion 和 IQ issue output 三个独立路径族积累 IT01、MT06、CT01、FT08；matching full 已完成，结果为 `-0.106/+0.051 ns`。R5 已积累 WT05 与 CT02 两个独立候选；先完成组合 perf20/func58，再只启动一次 direct full。MT07 仅在 LSQ 重新进入负 slack top-50 时实施。
+6. 当前优先积累 A01 之外的 1 至 2 个独立 IPC 候选；每个候选先完成受影响定向 suite、
+   完整门禁和 perf20 A/B，再做组合 perf20/func58，最后只启动一次 matching direct full。
+   R4/R5 的 WNS 仅作历史路径参考；MT07 仅在 LSQ 重新进入负 slack top-50 时实施。
 
 ## 5. 详细说明的维护边界
 
@@ -176,6 +183,7 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 - R7 L02、L03 独立比较分别为 `build/reports/comparisons/R7-L02.json`、`R7-L03.json`；组合 clean 与 instrumented matrix 分别为 `build/sim/runs/cpu_f8b361c94f84_chiplab_c398d274812f/clean-perf20_model_c8d9cdd130b6_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`、`build/sim/runs/cpu_f8b361c94f84_chiplab_c398d274812f/instrumented-perf20_model_feb37e86de58_software_f6e7c20f71a4/ideal/matrix_168c541ab78a_perf20.csv`；v8 汇总为 `build/reports/observations/R7-L02-L03-v8.json`。
 - R7 func58：`build/sim/runs/cpu_f8b361c94f84_chiplab_c398d274812f/clean-func58_model_cb54ad3c77ab_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`，random-AXI seeds `240/255/141` 均为 58/58；Linux 固定窗口摘要为 `build/sim/runs/cpu_f8b361c94f84_chiplab_c398d274812f/clean_model_dd4ec07b5f3d_software_d3ce90aca67c/random/matrix_517ad2574f10_summary.txt`。
 - 当前实验冻结：R4 证据冻结后更新为 `build/reports/experiments/R4-IT01-MT06-CT01-FT08/experiment-manifest.json`。
+- R8 A01：`build/reports/experiments/R8-A01/experiment-manifest.json`；clean perf20 matrix 为 `build/sim/runs/cpu_24bb6b6d70fe_chiplab_c398d274812f/clean-perf20_model_d67c3e9ca8ec_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`，逐项比较为 `build/reports/comparisons/R8-A01-vs-SD01.json`。本轮仅有软件和 RTL 门禁证据，尚无 matching implementation、WNS 或板测证据。
 - 当前 perf20：`build/sim/runs/cpu_88051f7ba468_chiplab_c398d274812f/clean-perf20_model_97f70770e5ef_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；FT08 逐项比较为 `build/reports/comparisons/R4-FT08.json`。
 - R5 perf20：`build/sim/runs/cpu_8cc74e1d4e58_chiplab_c398d274812f/clean-perf20_model_408602150177_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；CT02 独立比较与 R5 组合比较分别为 `build/reports/comparisons/R5-CT02.json`、`build/reports/comparisons/R5-WT05-CT02.json`。
 - 当前 func58：`build/sim/runs/cpu_88051f7ba468_chiplab_c398d274812f/clean-func58_model_cd24212cea13_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`；random-AXI seeds `240/255/141` 均为 58/58。
