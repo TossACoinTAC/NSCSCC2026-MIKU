@@ -464,7 +464,18 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     readRequestMask(entry) := misses(entry).valid && misses(entry).readRequestPending
   }
   val writebackId = selectLowest(writebackMask, config.mshrEntries)
-  val readRequestId = selectLowest(readRequestMask, config.mshrEntries)
+  val readRequestGrant = OHMasking.first(readRequestMask)
+  val readRequestId = OHToUInt(readRequestGrant)
+  val readRequestLineAddress = UInt(config.xlen bits)
+  val readRequestCriticalBeat = UInt(CacheContract.BeatIndexWidth bits)
+  readRequestLineAddress := U(0, config.xlen bits)
+  readRequestCriticalBeat := U(0, CacheContract.BeatIndexWidth bits)
+  for (entry <- 0 until config.mshrEntries) {
+    when(readRequestGrant(entry)) {
+      readRequestLineAddress := misses(entry).lineAddress
+      readRequestCriticalBeat := misses(entry).criticalBeat
+    }
+  }
   val missVictimData = Bits(CacheContract.LineBits bits)
   for (beat <- 0 until CacheContract.BeatsPerLine) {
     missVictimData(
@@ -505,15 +516,17 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   }
 
   io.lineReadValid := state === L1DataCacheState.normal && readRequestMask.orR
-  io.lineRead.lineAddress := misses(readRequestId).lineAddress
+  io.lineRead.lineAddress := readRequestLineAddress
   io.lineRead.mshrId := readRequestId
-  io.lineRead.criticalBeat := misses(readRequestId).criticalBeat
+  io.lineRead.criticalBeat := readRequestCriticalBeat
   val lineReadFire = io.lineReadValid && io.lineReadReady
-  when(lineReadFire) {
-    misses(readRequestId).state := L1DataMshrState.refill
-    misses(readRequestId).readRequestPending := False
-    misses(readRequestId).refillMask := B(0, CacheContract.BeatsPerLine bits)
-    misses(readRequestId).refillError := False
+  for (entry <- 0 until config.mshrEntries) {
+    when(lineReadFire && readRequestGrant(entry)) {
+      misses(entry).state := L1DataMshrState.refill
+      misses(entry).readRequestPending := False
+      misses(entry).refillMask := B(0, CacheContract.BeatsPerLine bits)
+      misses(entry).refillError := False
+    }
   }
 
   val pendingStoreRefillBankConflict = pendingStoreApply &&
