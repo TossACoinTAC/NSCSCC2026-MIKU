@@ -546,6 +546,9 @@ DRC/route/bitstream 完整且 Linux 门禁通过后，`main` 可将该阶段 squ
   - `soc_count = 33,404,839`，`cpu_count = 33,393,790`；
   - 相对 R6 板测 `41,203,093 / 41,191,272` 分别 `-18.93% / -18.93%`；
   - 相对 L02 direct 板测 `37,726,040 / 37,714,405` 分别 `-11.45% / -11.46%`。
+- 同一 matching bitstream 以 PR head `b295c8e` 重新组包后为 job
+  `20260816-134457-28c2cca0`：`soc_count = 33,404,984`，
+  `cpu_count = 33,393,915`，20/20 pass。
 - 该 bitstream 的 timing summary 与 board package 中的 `timing_summary.rpt` 均为
   `WNS +0.004 / TNS 0.000`，属于 matching direct full，而非 post-route 探索产物。
 
