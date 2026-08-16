@@ -589,14 +589,23 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       )
       if (config.enableBranchHeadCompletionBypass) {
         stagedHeadBranchBypassValid := incomingHeadBranchBypassMask.orR
+        // Build the bypass payload as a combinational one-hot mux and register
+        // the selected value every cycle.  A per-lane `when` would put the
+        // ROB-head candidate comparators on the CE of 32+ bits of the target.
+        val branchResultCandidates = Vec(Bits(config.xlen bits), config.writebackWidth)
+        val branchTakenCandidates = Vec(Bool(), config.writebackWidth)
+        val branchTargetCandidates = Vec(UInt(config.xlen bits), config.writebackWidth)
+        val branchMispredictCandidates = Vec(Bool(), config.writebackWidth)
         for (lane <- 0 until config.writebackWidth) {
-          when(incomingHeadBranchBypassMask(lane)) {
-            stagedHeadBranchBypassResult := io.completion(lane).data
-            stagedHeadBranchBypassTaken := io.completion(lane).branchTaken
-            stagedHeadBranchBypassTarget := io.completion(lane).branchTarget
-            stagedHeadBranchBypassMispredict := io.completion(lane).branchMispredict
-          }
+          branchResultCandidates(lane) := io.completion(lane).data
+          branchTakenCandidates(lane) := io.completion(lane).branchTaken
+          branchTargetCandidates(lane) := io.completion(lane).branchTarget
+          branchMispredictCandidates(lane) := io.completion(lane).branchMispredict
         }
+        stagedHeadBranchBypassResult := branchResultCandidates(OHToUInt(incomingHeadBranchBypassMask))
+        stagedHeadBranchBypassTaken := branchTakenCandidates(OHToUInt(incomingHeadBranchBypassMask))
+        stagedHeadBranchBypassTarget := branchTargetCandidates(OHToUInt(incomingHeadBranchBypassMask))
+        stagedHeadBranchBypassMispredict := branchMispredictCandidates(OHToUInt(incomingHeadBranchBypassMask))
       } else {
         stagedHeadBranchBypassValid := False
         stagedHeadBranchBypassResult := 0
