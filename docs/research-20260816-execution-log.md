@@ -47,3 +47,40 @@
   - L1DataCacheSpec + L2CacheSpec：20/20。
 - GenerateCoreTopCompat 本地生成成功，顶层 49 端口不变，PHT 为 4 x 4096 x 2b。
 - 尚未在锁定 WSL/Docker 环境跑完整 cpu-check、func58/perf20/Linux 仿真、Vivado direct full 和真实板测；这些门禁必须回到 WSL 后执行。
+
+## 2026-08-16 首次真实板测（perf20，100 MHz）
+
+- EPYC2 锁定容器（sbt 1.10.11 / Verilator 5.020 / Yosys 0.33）运行
+  `cpu-generate` 与 `cpu-locked-gates` 通过。
+- 发布 RTL SHA-256：`623d6c658eb208c7e8dbd40d606998e42779b65c6d57c4832d5e250aae5b4c48`；
+  raw RTL SHA-256：`646f09d326792905e1bc5589cdb09a54efdc5194204298deefd66c06c0587868`。
+- Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`，Vivado 2023.2，
+  part `xc7a200tfbg676-2`，perf 100 MHz。
+- Vivado 实现/bitstream 完成，DRC 0 Error、26 Warning、fully routed；
+  **setup WNS -0.506 ns，hold WNS +0.024 ns**：板测通过但不构成 100 MHz
+  时序闭合声明。
+- LabAgent `10.19.75.72` 任务：
+  - job：`20260816-085628-96443f0d`；
+  - package SHA-256：`f3d9eaac1f46598ecc9c352d1de85296108614a6e1bb1c3bacab71c5f45d5e9f`；
+  - verdict：`passed`，`nscscc-system-reset-v1`，20/20 全部通过；
+  - selected 双跑合计：`soc_count=33,384,117`、`cpu_count=33,373,331`，
+    `cpu/soc=0.99968`，实际 CPU 100.000000 MHz；
+  - 相对 R5 板测 `cpu_count=43,489,002` 下降 `10,115,671` cycles，
+    `-23.26%`。
+- 取回证据哈希全部匹配服务端声明：
+  - `programming-summary.txt`：`780e41c2...`
+  - `board-summary.txt`：`6f51bdaa...`
+  - `perf_vio.csv`：`de7d99df...`
+  - `perf_vio_runs.csv`：`9408fdf4...`
+  - `vivado-metrics.txt`：`e7a04719...`
+- 本地证据目录：
+  `.codex-tmp-linux/board-research-20260816-perf20/`。
+
+## 本轮尚未完成
+
+- func58 真板测试未跑；应补一个 func profile 实现 + LabAgent 任务。
+- 100 MHz setup 未闭合，下一步按 WNS 路径修时序后重做 direct full。
+- perf20 只完成一次正式任务；按仓库门禁还需要重复板测取最低值。
+- EPYC2 根分区曾 100% 满，已删除 6 个已停止 Docker 容器释放约 9.25 GB；
+  当前仍只有约 8.4 GB 可用，后续大构建前需要继续清理旧 build 目录或 Docker
+  volume（需与协作者确认）。
