@@ -264,7 +264,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   for (entry <- 0 until config.loadQueueEntries) {
     val load = loads(entry)
     youngerReadyLoads(entry) := pendingLoads(entry) && load.addressReady &&
-      load.translationDone && !load.uncached && !load.isLl && scheduledLoadValid &&
+      load.translationDone && !load.uncached && !load.isLl &&
       isOlder(youngerRetryOwnerRobPointer, load.robPointer)
   }
   val youngerSearchBase = (loadHead + 1).resize(config.loadQueueIndexWidth)
