@@ -384,6 +384,7 @@ final class IssueQueue(
   val issueAgeIndexWide = UInt(count.getWidth bits)
   issueAgeIndexWide := issueAgeIndex.resize(count.getWidth)
   val issueSlot = ageOrder(issueAgeIndex)
+  val issueSlotMask = UIntToOh(issueSlot, physicalSlotCount)
   val selectedUop = RenamedMicroOp(config)
   unpackIssueEntry(selectedUop, payloadSlots(issueSlot))
   val queueDequeue = Bool()
@@ -481,6 +482,7 @@ final class IssueQueue(
   val enqueueFire = io.enqueueValid && io.enqueueReady
   val freeSlots = ~slotOccupied
   val enqueueSlot = selectLowest(freeSlots)
+  val enqueueSlotMask = UIntToOh(enqueueSlot, physicalSlotCount)
   val enqueueAgeIndex = UInt(entryIndexWidth bits)
   enqueueAgeIndex := count.resized
   when(queueDequeue) { enqueueAgeIndex := (count - 1).resized }
@@ -501,19 +503,28 @@ final class IssueQueue(
     io.enqueue.source2Ready || enqueueWakeup2
   )
 
+  val slotClearMask = Bits(physicalSlotCount bits)
+  slotClearMask := 0
+  if (!tokenizedIssueOutput) {
+    when(queueDequeue) { slotClearMask := issueSlotMask }
+  } else {
+    when(tokenOutputDequeue) {
+      slotClearMask := UIntToOh(tokenOutputSlot, physicalSlotCount)
+    }
+  }
+  val slotSetMask = Mux(
+    enqueueFire,
+    enqueueSlotMask,
+    B(0, physicalSlotCount bits)
+  )
+  val nextSlotOccupied = (slotOccupied & ~slotClearMask) | slotSetMask
+
   when(io.flush) {
     count := 0
     slotOccupied := 0
   }.otherwise {
     count := count + enqueueFire.asUInt - queueDequeue.asUInt
-    if (!tokenizedIssueOutput) {
-      when(queueDequeue) { slotOccupied(issueSlot) := False }
-    } else {
-      // The tokenized output owns its payload slot until execution accepts it.
-      // A simultaneous replacement token keeps its independently selected slot.
-      when(tokenOutputDequeue) { slotOccupied(tokenOutputSlot) := False }
-    }
-    when(enqueueFire) { slotOccupied(enqueueSlot) := True }
+    slotOccupied := nextSlotOccupied
   }
 
   for (age <- 0 until entryCount) {
@@ -535,7 +546,7 @@ final class IssueQueue(
   }
 
   for (slot <- 0 until physicalSlotCount) {
-    when(enqueueFire && enqueueSlot === U(slot, entryIndexWidth bits)) {
+    when(enqueueFire && enqueueSlotMask(slot)) {
       payloadSlots(slot) := enqueued
     }.otherwise {
       when(slotOccupied(slot) && wakeupSlot1(slot)) {
