@@ -7,13 +7,11 @@ import spinal.core._
 import spinal.lib._
 
 final case class ReorderBufferPayload(config: OooCoreConfig) extends Bundle {
-  val pc = UInt(config.xlen bits)
   val instruction = Bits(32 bits)
   val rd = UInt(config.archRegIndexWidth bits)
   val pdst = UInt(config.physicalRegIndexWidth bits)
   val oldPdst = UInt(config.physicalRegIndexWidth bits)
   val writesGpr = Bool()
-  val systemOperation = UInt(SystemOperation.Width bits)
   val csrAddress = UInt(14 bits)
   val csrWrite = Bool()
   val csrMask = Bool()
@@ -21,23 +19,23 @@ final case class ReorderBufferPayload(config: OooCoreConfig) extends Bundle {
   val decodedException = ExceptionMetadata()
 }
 
-final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
-  val valid = Bool()
-  val complete = Bool()
-  val payloadReady = Bool()
-  val decodedExceptionValid = Bool()
+final case class ReorderBufferRetirementMetadata(config: OooCoreConfig) extends Bundle {
   val serializing = Bool()
   val systemOperation = UInt(SystemOperation.Width bits)
   val pc = UInt(config.xlen bits)
-  // Retirement and LSU ownership metadata is read every commit cycle.  Keeping it beside the
-  // validity/completion state avoids routing these narrow fields through the wide payload-bank
-  // read and commit crossbar.
   val isLoad = Bool()
   val isStore = Bool()
   val isBranch = Bool()
   val predictorType = UInt(PredictedBranchType.Width bits)
   val loadQueueIndex = UInt(config.loadQueueIndexWidth bits)
   val storeQueueIndex = UInt(config.storeQueueIndexWidth bits)
+}
+
+final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
+  val valid = Bool()
+  val complete = Bool()
+  val payloadReady = Bool()
+  val decodedExceptionValid = Bool()
   val pointer = UInt(config.robPointerWidth bits)
   val result = Bits(config.xlen bits)
   val sideEffectData = Bits(config.xlen bits)
@@ -108,18 +106,18 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     entry.complete.init(False)
     entry.payloadReady.init(False)
     entry.decodedExceptionValid.init(False)
-    entry.serializing.init(False)
-    entry.systemOperation.init(SystemOperation.none)
-    entry.pc.init(0)
   }
   private val payloadBankCount = 4
   private val payloadBankWidth = log2Up(payloadBankCount)
   private val payloadDepth = config.robEntries / payloadBankCount
   private val payloadWidth = ReorderBufferPayload(config).getBitsWidth
+  private val retirementMetadataWidth = ReorderBufferRetirementMetadata(config).getBitsWidth
   require(config.robEntries % payloadBankCount == 0)
   require(config.renameWidth < payloadBankCount)
   require(config.commitWidth < payloadBankCount)
   val payloadBanks = Array.fill(payloadBankCount)(Mem(Bits(payloadWidth bits), payloadDepth))
+  val retirementMetadataBanks =
+    Array.fill(payloadBankCount)(Mem(Bits(retirementMetadataWidth bits), payloadDepth))
 
   val allocatePrefix = Vec(UInt(log2Up(config.renameWidth + 1) bits), config.renameWidth + 1)
   val allocationDestination = Vec(UInt(config.robPointerWidth bits), config.renameWidth)
@@ -148,14 +146,14 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   }
 
   val allocationPayload = Vec(ReorderBufferPayload(config), config.renameWidth)
+  val allocationRetirementMetadata =
+    Vec(ReorderBufferRetirementMetadata(config), config.renameWidth)
   for (lane <- 0 until config.renameWidth) {
-    allocationPayload(lane).pc := io.allocate(lane).uop.decoded.pc
     allocationPayload(lane).instruction := io.allocate(lane).uop.decoded.instruction
     allocationPayload(lane).rd := io.allocate(lane).uop.decoded.rd
     allocationPayload(lane).pdst := io.allocate(lane).uop.pdst
     allocationPayload(lane).oldPdst := io.allocate(lane).uop.oldPdst
     allocationPayload(lane).writesGpr := io.allocate(lane).uop.decoded.writesGpr
-    allocationPayload(lane).systemOperation := io.allocate(lane).uop.decoded.systemOperation
     allocationPayload(lane).csrAddress := io.allocate(lane).uop.decoded.csrAddress
     allocationPayload(lane).csrWrite := io.allocate(lane).uop.decoded.csrWrite
     allocationPayload(lane).csrMask := io.allocate(lane).uop.decoded.csrMask
@@ -184,6 +182,18 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       io.allocate(lane).uop.decoded.predictorMetadata
     allocationPayload(lane).decodedException := io.allocate(lane).uop.decoded.exception
 
+    allocationRetirementMetadata(lane).serializing :=
+      io.allocate(lane).uop.decoded.serializing
+    allocationRetirementMetadata(lane).systemOperation :=
+      io.allocate(lane).uop.decoded.systemOperation
+    allocationRetirementMetadata(lane).pc := io.allocate(lane).uop.decoded.pc
+    allocationRetirementMetadata(lane).isLoad := io.allocate(lane).uop.decoded.isLoad
+    allocationRetirementMetadata(lane).isStore := io.allocate(lane).uop.decoded.isStore
+    allocationRetirementMetadata(lane).isBranch := io.allocate(lane).uop.decoded.isBranch
+    allocationRetirementMetadata(lane).predictorType := allocationPredictorType
+    allocationRetirementMetadata(lane).loadQueueIndex := io.allocate(lane).uop.loadQueueIndex
+    allocationRetirementMetadata(lane).storeQueueIndex := io.allocate(lane).uop.storeQueueIndex
+
     when(acceptedMask(lane)) {
       val destination = allocationDestination(lane)
       entries(destination(config.robIndexWidth - 1 downto 0)).valid := True
@@ -192,24 +202,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       entries(destination(config.robIndexWidth - 1 downto 0)).payloadReady := False
       entries(destination(config.robIndexWidth - 1 downto 0)).decodedExceptionValid :=
         io.allocate(lane).uop.decoded.exception.valid
-      entries(destination(config.robIndexWidth - 1 downto 0)).serializing :=
-        io.allocate(lane).uop.decoded.serializing
-      entries(destination(config.robIndexWidth - 1 downto 0)).systemOperation :=
-        io.allocate(lane).uop.decoded.systemOperation
-      entries(destination(config.robIndexWidth - 1 downto 0)).pc :=
-        io.allocate(lane).uop.decoded.pc
-      entries(destination(config.robIndexWidth - 1 downto 0)).isLoad :=
-        io.allocate(lane).uop.decoded.isLoad
-      entries(destination(config.robIndexWidth - 1 downto 0)).isStore :=
-        io.allocate(lane).uop.decoded.isStore
-      entries(destination(config.robIndexWidth - 1 downto 0)).isBranch :=
-        io.allocate(lane).uop.decoded.isBranch
-      entries(destination(config.robIndexWidth - 1 downto 0)).predictorType :=
-        allocationPredictorType
-      entries(destination(config.robIndexWidth - 1 downto 0)).loadQueueIndex :=
-        io.allocate(lane).uop.loadQueueIndex
-      entries(destination(config.robIndexWidth - 1 downto 0)).storeQueueIndex :=
-        io.allocate(lane).uop.storeQueueIndex
       entries(destination(config.robIndexWidth - 1 downto 0)).pointer := destination
       entries(destination(config.robIndexWidth - 1 downto 0)).result := B(0, config.xlen bits)
       entries(destination(config.robIndexWidth - 1 downto 0)).sideEffectData :=
@@ -261,6 +253,13 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       data = allocationPayload(writeLane).asBits,
       enable = writeMask.orR
     )
+    retirementMetadataBanks(bank).write(
+      address = allocationDestination(writeLane)(
+        config.robIndexWidth - 1 downto payloadBankWidth
+      ),
+      data = allocationRetirementMetadata(writeLane).asBits,
+      enable = writeMask.orR
+    )
   }
 
   // Prefetch the next commit group through synchronous payload-bank reads.  Feeding the
@@ -284,6 +283,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     candidatePointer(lane) := payloadReadPointer(lane)
   }
   val payloadBankRead = Vec(Bits(payloadWidth bits), payloadBankCount)
+  val retirementMetadataBankRead =
+    Vec(Bits(retirementMetadataWidth bits), payloadBankCount)
   for (bank <- 0 until payloadBankCount) {
     val readMask = Bits(config.commitWidth bits)
     for (lane <- 0 until config.commitWidth) {
@@ -297,14 +298,23 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       ),
       enable = True
     )
+    retirementMetadataBankRead(bank) := retirementMetadataBanks(bank).readSync(
+      address = payloadReadPointer(readLane)(
+        config.robIndexWidth - 1 downto payloadBankWidth
+      ),
+      enable = True
+    )
   }
 
   val candidates = Vec(ReorderBufferEntry(config), config.commitWidth)
+  val candidateRetirementMetadata =
+    Vec(ReorderBufferRetirementMetadata(config), config.commitWidth)
   for (lane <- 0 until config.commitWidth) {
     val pointer = candidatePointer(lane)
     val bank = pointer(payloadBankWidth - 1 downto 0)
     candidates(lane).state := entries(pointer(config.robIndexWidth - 1 downto 0))
     candidates(lane).payload.assignFromBits(payloadBankRead(bank))
+    candidateRetirementMetadata(lane).assignFromBits(retirementMetadataBankRead(bank))
     // Exception validity is retirement-control state.  Keeping that hot bit beside valid/complete
     // avoids routing a block-RAM payload output through the three-wide commit stop chain.  The
     // cold exception payload remains banked, preserving almost all of the storage reduction.
@@ -340,7 +350,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val stopAfter = Vec(Bool(), config.commitWidth)
   val branchPrefix = Vec(UInt(log2Up(config.commitWidth + 1) bits), config.commitWidth)
   for (lane <- 0 until config.commitWidth) {
-    val retiringBranch = candidates(lane).state.isBranch && !candidates(lane).exception.valid
+    val retiringBranch = candidateRetirementMetadata(lane).isBranch &&
+      !candidates(lane).exception.valid
     if (lane == 0) {
       effectiveBranchTaken(lane) := Mux(
         headBranchBypass,
@@ -370,7 +381,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val predictorHasCapacity = !retiringBranch ||
       branchPrefix(lane) <= io.predictorUpdateCapacity
     stopAfter(lane) := candidates(lane).exception.valid ||
-      candidates(lane).state.serializing || effectiveBranchMispredict(lane)
+      candidateRetirementMetadata(lane).serializing || effectiveBranchMispredict(lane)
     if (lane == 0) {
       canCommit(lane) := candidates(lane).state.valid &&
         (candidates(lane).state.complete || headCompletionBypass || headBranchBypass) &&
@@ -381,11 +392,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         predictorHasCapacity
     }
     io.commitValid(lane) := canCommit(lane)
-    io.commit(lane).pc := (if (config.enableRobPcState) {
-      candidates(lane).state.pc
-    } else {
-      candidates(lane).payload.pc
-    })
+    io.commit(lane).pc := candidateRetirementMetadata(lane).pc
     io.commit(lane).instruction := candidates(lane).payload.instruction
     io.commit(lane).robPointer := candidates(lane).state.pointer
     io.commit(lane).rd := candidates(lane).payload.rd
@@ -405,26 +412,22 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     } else {
       io.commit(lane).result := candidates(lane).state.result
     }
-    io.commit(lane).systemOperation := (if (config.enableRobSystemOperationState) {
-      candidates(lane).state.systemOperation
-    } else {
-      candidates(lane).payload.systemOperation
-    })
+    io.commit(lane).systemOperation := candidateRetirementMetadata(lane).systemOperation
     io.commit(lane).csrAddress := candidates(lane).payload.csrAddress
     io.commit(lane).csrWrite := candidates(lane).payload.csrWrite
     io.commit(lane).csrMask := candidates(lane).payload.csrMask
     io.commit(lane).sideEffectData := candidates(lane).state.sideEffectData
     io.commit(lane).retired := canCommit(lane) && !candidates(lane).exception.valid
-    io.commit(lane).serializing := candidates(lane).state.serializing
-    io.commit(lane).isLoad := candidates(lane).state.isLoad
-    io.commit(lane).isStore := candidates(lane).state.isStore
-    io.commit(lane).isBranch := candidates(lane).state.isBranch
-    io.commit(lane).predictorType := candidates(lane).state.predictorType
+    io.commit(lane).serializing := candidateRetirementMetadata(lane).serializing
+    io.commit(lane).isLoad := candidateRetirementMetadata(lane).isLoad
+    io.commit(lane).isStore := candidateRetirementMetadata(lane).isStore
+    io.commit(lane).isBranch := candidateRetirementMetadata(lane).isBranch
+    io.commit(lane).predictorType := candidateRetirementMetadata(lane).predictorType
     io.commit(lane).branchTaken := effectiveBranchTaken(lane)
     io.commit(lane).branchTarget := effectiveBranchTarget(lane)
     io.commit(lane).predictorMetadata := candidates(lane).payload.predictorMetadata
-    io.commit(lane).loadQueueIndex := candidates(lane).state.loadQueueIndex
-    io.commit(lane).storeQueueIndex := candidates(lane).state.storeQueueIndex
+    io.commit(lane).loadQueueIndex := candidateRetirementMetadata(lane).loadQueueIndex
+    io.commit(lane).storeQueueIndex := candidateRetirementMetadata(lane).storeQueueIndex
     io.commit(lane).exception := candidates(lane).exception
   }
 
@@ -450,11 +453,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   when(recoveryMask.orR) {
     val recoveryIndex = selectLowest(recoveryMask, log2Up(config.commitWidth))
     io.recovery.robPointer := candidates(recoveryIndex).state.pointer
-    io.recovery.pc := (if (config.enableRobPcState) {
-      candidates(recoveryIndex).state.pc
-    } else {
-      candidates(recoveryIndex).payload.pc
-    })
+    io.recovery.pc := candidateRetirementMetadata(recoveryIndex).pc
     io.recovery.taken := effectiveBranchTaken(recoveryIndex)
     io.recovery.target := effectiveBranchTarget(recoveryIndex)
     io.recovery.exception := candidates(recoveryIndex).exception
@@ -636,23 +635,20 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     // Ordinary current-epoch completions and, when enabled, fully resolved branches
     // may bypass the final entry.complete register. Serializing/system operations and
     // either decoded or completion exceptions retain the precise retirement boundary.
-    val candidateSystemOperation = if (config.enableRobSystemOperationState) {
-      candidates(0).state.systemOperation
-    } else {
-      candidates(0).payload.systemOperation
-    }
+    val candidateSystemOperation = candidateRetirementMetadata(0).systemOperation
     headCompletionBypass := !io.flush && candidates(0).state.payloadReady &&
       stagedHeadCompletionBypassValid &&
       candidates(0).state.valid && !candidates(0).state.complete &&
-      !candidates(0).exception.valid && !candidates(0).state.serializing &&
-      !candidates(0).state.isBranch &&
+      !candidates(0).exception.valid && !candidateRetirementMetadata(0).serializing &&
+      !candidateRetirementMetadata(0).isBranch &&
       candidateSystemOperation === SystemOperation.none
     headCompletionBypassResult := stagedHeadCompletionBypassResult
     if (config.enableBranchHeadCompletionBypass) {
       headBranchBypass := !io.flush && candidates(0).state.payloadReady &&
         stagedHeadBranchBypassValid && candidates(0).state.valid &&
         !candidates(0).state.complete && !candidates(0).exception.valid &&
-        !candidates(0).state.serializing && candidates(0).state.isBranch &&
+        !candidateRetirementMetadata(0).serializing &&
+        candidateRetirementMetadata(0).isBranch &&
         candidateSystemOperation === SystemOperation.none
     } else {
       headBranchBypass := False
@@ -673,7 +669,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       entry.complete := False
       entry.payloadReady := False
       entry.decodedExceptionValid := False
-      entry.serializing := False
     }
   }.otherwise {
     when(acceptedMask.orR) {
@@ -710,7 +705,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   perfObservationV1Word4(4 downto 0) := observationBranchResolved
   perfObservationV1Word4(9 downto 5) := observationBranchMispredict
   val observationHeadRetiringBranch =
-    candidates(0).state.isBranch && !candidates(0).exception.valid
+    candidateRetirementMetadata(0).isBranch && !candidates(0).exception.valid
   val observationHeadPredictorHasCapacity =
     !observationHeadRetiringBranch || io.predictorUpdateCapacity =/= 0
   // Bits 40..51 extend the reserved portion of the V1 ABI. Existing readers
@@ -721,17 +716,13 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   perfObservationV1Word4(42) := candidates(0).state.payloadReady
   perfObservationV1Word4(43) := observationHeadPredictorHasCapacity
   perfObservationV1Word4(44) := candidates(0).exception.valid
-  perfObservationV1Word4(45) := candidates(0).state.serializing
+  perfObservationV1Word4(45) := candidateRetirementMetadata(0).serializing
   perfObservationV1Word4(46) := candidates(0).state.branchMispredict
-  perfObservationV1Word4(47) := candidates(0).state.isLoad
-  perfObservationV1Word4(48) := candidates(0).state.isStore
-  perfObservationV1Word4(49) := candidates(0).state.isBranch
+  perfObservationV1Word4(47) := candidateRetirementMetadata(0).isLoad
+  perfObservationV1Word4(48) := candidateRetirementMetadata(0).isStore
+  perfObservationV1Word4(49) := candidateRetirementMetadata(0).isBranch
   perfObservationV1Word4(50) :=
-    (if (config.enableRobSystemOperationState) {
-      candidates(0).state.systemOperation =/= SystemOperation.none
-    } else {
-      candidates(0).payload.systemOperation =/= SystemOperation.none
-    })
+    candidateRetirementMetadata(0).systemOperation =/= SystemOperation.none
   perfObservationV1Word4(51) := headCompletionBypass
   val observationIncomingHeadBranchCompletion = Bits(config.writebackWidth bits)
   val observationIncomingHeadMispredictCompletion = Bits(config.writebackWidth bits)
@@ -741,7 +732,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       io.completion(lane).robPointer === payloadReadPointer(0) &&
       io.completion(lane).branchResolved && !io.completion(lane).exception.valid &&
       candidates(0).state.valid && !candidates(0).state.complete &&
-      candidates(0).state.payloadReady && candidates(0).state.isBranch
+      candidates(0).state.payloadReady && candidateRetirementMetadata(0).isBranch
     observationIncomingHeadMispredictCompletion(lane) :=
       observationIncomingHeadBranchCompletion(lane) && io.completion(lane).branchMispredict
   }

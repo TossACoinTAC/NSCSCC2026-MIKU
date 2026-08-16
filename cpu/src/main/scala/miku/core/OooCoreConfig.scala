@@ -112,12 +112,6 @@ final case class OooCoreConfig(
     enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,
     enableBranchHeadCompletionBypass: Boolean = true,
-    // Keep the retirement qualification field beside ROB state instead of reading it through
-    // the wide payload bank.  The legacy payload path remains available for timing A/B.
-    enableRobSystemOperationState: Boolean = true,
-    // Keep the retirement PC beside ROB state so commit/recovery do not read it through the
-    // wide payload bank.  The legacy payload path remains available for timing A/B.
-    enableRobPcState: Boolean = true,
     // Register speculative RAS operations before they drive the RAS array write enable.  The
     // direct input path remains available for predictor timing A/B and older configurations.
     enableRegisteredSpeculativeRasUpdate: Boolean = false,
