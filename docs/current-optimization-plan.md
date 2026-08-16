@@ -187,6 +187,12 @@ observation word，monitor 不再猜测微架构容量。matching instrumented p
 `L02` 受限 younger-ready Load bypass 和 `L03` LDQ-only 8-to-16 独立 A/B；L03 首次不扩大
 STQ/SDQ，避免在低得多的 Store full 暴露量下无依据地放大 forwarding/order cone。
 
+`L03+L15` 已用 post-route 物理优化版位流完成一次 matching perf20 板测：
+job `20260816-051403-a9377049`，source `9b761d5`，20/20 pass，CPU 总周期
+`38,229,428`，相对 R6 板测 `41,191,272` 下降 `-7.19%`。该板测包 WNS `-0.065 ns`
+（post-route phys_opt），所以板测通过与 100 MHz 时序闭合仍是两个独立结论。
+
+
 `L03` 的 LDQ-only 8-to-16 已在 `dev/L03-ldq16` 完成首轮实现与本地 A/B：R6
 baseline `4,423,675 -> 4,320,785`（总周期 `-2.326%`，几何平均 `0.986232`），
 完整 Scala 39 suites/233 tests 通过。`fireye_A0 -17.30%` 是最主要收益项；
