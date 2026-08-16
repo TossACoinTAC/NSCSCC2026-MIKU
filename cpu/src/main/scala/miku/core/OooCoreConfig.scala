@@ -98,6 +98,9 @@ final case class OooCoreConfig(
     enableDirectWakeupEchoSuppression: Boolean = true,
     enableDirectOnlyPortEchoSuppression: Boolean = true,
     enableMultiplyCompletionEchoSuppression: Boolean = false,
+    // Capture completion data beside the PRF while the ROB stages the same lane identity.
+    // ROB epoch/flush qualification remains the sole write-valid authority one cycle later.
+    enableLocalPrfCompletionDataCapture: Boolean = true,
     enableStoreDataDirectWakeup: Boolean = true,
     enableLsuRegisteredWakeSelectDecoupling: Boolean = true,
     // Registered wakeups still update resident source-ready state, but only direct/early
