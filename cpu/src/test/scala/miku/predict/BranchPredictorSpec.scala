@@ -351,7 +351,10 @@ class BranchPredictorSpec extends AnyFunSuite {
   }
 
   test("banked predictor preserves an ordered retirement batch across same-cycle flush") {
-    val config = OooCoreConfig.FourIssueThreeCommit.copy(enableLargeGshare = true)
+    val config = OooCoreConfig.FourIssueThreeCommit.copy(
+      enableLargeGshare = true,
+      largeGshareHistoryWidth = 16
+    )
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-banked-predictor")
       .compile(new BankedFetchPredictor(config))
