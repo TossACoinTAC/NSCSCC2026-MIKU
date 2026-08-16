@@ -232,6 +232,10 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val loadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val scheduledLoadOwner = Reg(ScheduledLoadOwner(config))
   val scheduledLoadPayload = Reg(ScheduledLoadPayload(config))
+  // Younger-retry selection only needs the age token. Keeping a local copy
+  // avoids feeding the full scheduled-load owner bundle into every load CAM
+  // comparator while preserving the same registered retry boundary.
+  val youngerRetryOwnerRobPointer = Reg(UInt(config.robPointerWidth bits)) init (0)
 
   // Completed loads remain allocated until commit.  The allocator therefore
   // advances the base only on commit, and a rotated priority select preserves
@@ -253,7 +257,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     val load = loads(entry)
     youngerReadyLoads(entry) := pendingLoads(entry) && load.addressReady &&
       load.translationDone && !load.uncached && !load.isLl && scheduledLoadValid &&
-      isOlder(scheduledLoadOwner.robPointer, load.robPointer)
+      isOlder(youngerRetryOwnerRobPointer, load.robPointer)
   }
   val youngerSearchBase = (loadHead + 1).resize(config.loadQueueIndexWidth)
   val rotatedYoungerReady = ((youngerReadyLoads ## youngerReadyLoads) |>> youngerSearchBase)
@@ -286,6 +290,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     when(selectedLoadValid) {
       loadHead := selectedLoadHead
       val selectedLoad = loads(selectedLoadHead)
+      youngerRetryOwnerRobPointer := selectedLoad.robPointer
       scheduledLoadOwner.robPointer := selectedLoad.robPointer
       scheduledLoadOwner.recoveryEpoch := selectedLoad.recoveryEpoch
       scheduledLoadOwner.memoryEpoch := selectedLoad.memoryEpoch
@@ -308,6 +313,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
           io.agu.uop.loadQueueIndex === selectedLoadHead &&
           selectedLoad.valid && selectedLoad.robPointer === io.agu.uop.robPointer
       ) {
+        youngerRetryOwnerRobPointer := io.agu.uop.robPointer
         scheduledLoadOwner.robPointer := io.agu.uop.robPointer
         scheduledLoadOwner.recoveryEpoch := io.agu.uop.recoveryEpoch
         scheduledLoadOwner.memoryEpoch := selectedLoad.memoryEpoch
