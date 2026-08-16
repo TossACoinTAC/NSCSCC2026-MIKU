@@ -10,12 +10,12 @@ import spinal.core.sim._
 class BranchPredictorSpec extends AnyFunSuite {
   private val WordMask = (BigInt(1) << 32) - 1
 
-  test("large gshare qualifies each history row independently without update backpressure") {
+  test("large gshare initializes in the background without update backpressure") {
     val config = OooCoreConfig.FourIssueThreeCommit.copy(enableLargeGshare = true)
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-banked-predictor")
       .compile(new BankedFetchPredictor(config))
-      .doSim("ooo-banked-predictor-row-valid", 0x47534852) { dut =>
+      .doSim("ooo-banked-predictor-background-init", 0x47534852) { dut =>
         dut.clockDomain.forkStimulus(period = 10)
         dut.io.lookupValid #= false
         dut.io.lookupPc #= 0
@@ -89,32 +89,38 @@ class BranchPredictorSpec extends AnyFunSuite {
           )
         }
 
+        // The BTB update is accepted while the PHT sweep continues.  Its simultaneous PHT update
+        // is deliberately discarded, fetch uses BTFNT, and update ready remains asserted.
+        assert(lookup() == ((false, 1, historyZeroIndex)))
+        for (_ <- 0 until 12) {
+          assert(dut.io.tableUpdateReady.toBoolean)
+          dut.clockDomain.waitSampling()
+        }
+
+        dut.clockDomain.waitSampling(4096)
+        assert(dut.io.tableUpdateReady.toBoolean)
+        assert(lookup() == ((true, 1, historyZeroIndex)))
+
+        dut.io.phtUpdateValid #= true
+        dut.io.phtUpdatePc #= branchPc
+        dut.io.phtUpdateIndex #= historyZeroIndex
+        dut.io.phtUpdateOldState #= 1
+        dut.io.phtUpdateOldValid #= true
+        dut.io.phtUpdateTaken #= true
+        dut.clockDomain.waitSampling()
+        dut.io.phtUpdateValid #= false
         assert(lookup() == ((true, 2, historyZeroIndex)))
 
         dut.io.speculativeHistoryValid #= true
         dut.io.speculativeHistoryTaken #= true
         dut.clockDomain.waitSampling()
         dut.io.speculativeHistoryValid #= false
-        assert(lookup() == ((false, 1, historyOneIndex)))
-
-        dut.io.phtUpdateValid #= true
-        dut.io.phtUpdatePc #= branchPc
-        dut.io.phtUpdateIndex #= historyOneIndex
-        dut.io.phtUpdateOldState #= 1
-        dut.io.phtUpdateOldValid #= false
-        dut.io.phtUpdateTaken #= false
-        dut.clockDomain.waitSampling()
-        dut.io.phtUpdateValid #= false
         assert(lookup() == ((true, 1, historyOneIndex)))
 
         dut.io.flush #= true
         dut.clockDomain.waitSampling()
         dut.io.flush #= false
         assert(lookup() == ((true, 2, historyZeroIndex)))
-        for (_ <- 0 until 12) {
-          assert(dut.io.tableUpdateReady.toBoolean)
-          dut.clockDomain.waitSampling()
-        }
       }
   }
 

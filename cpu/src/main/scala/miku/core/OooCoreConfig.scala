@@ -127,8 +127,8 @@ final case class OooCoreConfig(
     enableFrontendTranslationTurnover: Boolean = true,
     enableFrontendHistoryTurnover: Boolean = true,
     enableBalancedFrontendPredictionSelect: Boolean = true,
-    // B02-F: widen the gshare history/PHT and qualify training per history row.  Cold rows use
-    // BTFNT without a runtime reset sweep or predictor-update backpressure.
+    // B02-F: widen the gshare history/PHT.  Its deterministic background initialization keeps
+    // fetch active on BTFNT and does not propagate startup latency into predictor-update commit.
     enableLargeGshare: Boolean = true,
     enableFrontendCacheHitTurnover: Boolean = true,
     enableSpeculativeInstructionArrayRead: Boolean = true,

@@ -316,7 +316,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(132)
+        dut.clockDomain.waitSampling(historyTurnoverConfig.predictorPhtEntriesPerBank + 4)
         sleep(1)
 
         val branchPc = config.resetVector + 0x200
@@ -1855,8 +1855,8 @@ class OooFrontendSpec extends AnyFunSuite {
         val learnedTarget = learnedPc + 0x10
         // The BRAM-backed predictor clears the 128 BTB rows after reset.  Derive PHT metadata from
         // the public configuration so this fixture remains valid as the history and row widths
-        // evolve; each history row owns its own training state.
-        dut.clockDomain.waitSampling(134)
+        // evolve; the selected history row must be trained explicitly before the revisit.
+        dut.clockDomain.waitSampling(config.predictorPhtEntriesPerBank + 4)
         sleep(1)
         dut.io.predictorUpdatePc #= learnedPc
         dut.io.predictorUpdateTaken #= true
