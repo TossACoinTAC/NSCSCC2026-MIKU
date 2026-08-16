@@ -260,6 +260,14 @@ DecodeRenameBuffer、backend fallback 和 FreeList 回归覆盖了这两项语�
 受影响定向 suite、完整 `cpu-check`、完整 perf20，并在组合稳定后再运行 func58 和一次
 100 MHz direct full。
 
+### A02 结果
+
+`A02 @ c56626e` 将 A01 的单路救援扩展为可接受两路 rename prefix。完整 `cpu-check`
+为 40 suites/246 tests，perf20 相对 A01 为 `4,215,442 -> 4,217,187`，总周期增加
+`0.041395%`、几何平均 `1.000151543x`；9 项改善、11 项退化，其中 `fireye_I2` 增加
+`0.51301%`。这不足以换取额外 rename 控制复杂度，故 `157320b` 将配置恢复为默认关闭；
+保留 opt-in 定向回归和 A/B 证据，不为 A02 启动 matching implementation。
+
 ### H09 结果
 
 H09 根据 M04 的 multiple-ready waiter 机会，在同一 recovery epoch 内按 ROB 年龄选择
