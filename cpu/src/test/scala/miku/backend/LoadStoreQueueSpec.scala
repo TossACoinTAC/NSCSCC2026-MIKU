@@ -1555,6 +1555,124 @@ class LoadStoreQueueSpec extends AnyFunSuite {
       }
   }
 
+  test("a Store-blocked cached Load can yield to a younger independent Load") {
+    for {
+      (blocker, storeDataReady, storeMask, blockerSeed) <- Seq(
+        ("pending-data", false, 0xf, 0x4c7d),
+        ("partial-overlap", true, 0x1, 0x4c7f)
+      )
+      (enabled, mode, modeSeed) <- Seq(
+        (false, "oldest-only", 0),
+        (true, "iterative-bypass", 1)
+      )
+    } {
+      val name = s"$blocker-$mode"
+      val seed = blockerSeed + modeSeed
+      val testConfig = config.copy(enableStoreBlockedLoadBypass = enabled)
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-lsq-load-bypass-$name"
+        )
+        .compile(new LoadStoreQueueProbe(testConfig))
+        .doSim(s"ooo-lsq-load-bypass-$name", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearInputs(dut)
+          dut.io.translationBypassEligible #= true
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          sample(dut)
+
+          dut.io.allocateValid #= 7
+          dut.io.allocate(0).robPointer #= 1
+          dut.io.allocate(0).isStore #= true
+          dut.io.allocate(0).storeQueueIndex #= 0
+          dut.io.allocate(1).robPointer #= 2
+          dut.io.allocate(1).isLoad #= true
+          dut.io.allocate(1).loadQueueIndex #= 0
+          dut.io.allocate(2).robPointer #= 3
+          dut.io.allocate(2).isLoad #= true
+          dut.io.allocate(2).loadQueueIndex #= 1
+          sample(dut)
+          dut.io.allocateValid #= 0
+
+          dut.io.storeDataEnable #= storeDataReady
+          dut.io.translationBypassPhysicalAddress #= 0x100
+          setStoreAgu(dut, 1, 0x100, BigInt("a5a55a5a", 16))
+          dut.io.agu.byteMask #= storeMask
+          sample(dut)
+          dut.io.aguValid #= false
+          dut.io.translationBypassPhysicalAddress #= 0x100
+          setLoadAgu(dut, 2, 0x100, loadIndex = 0, pdst = 4)
+          sample(dut)
+          dut.io.aguValid #= false
+          dut.io.translationBypassPhysicalAddress #= 0x200
+          setLoadAgu(dut, 3, 0x200, loadIndex = 1, pdst = 5)
+          sample(dut)
+          dut.io.aguValid #= false
+
+          var sawRequest = false
+          for (_ <- 0 until 12) {
+            if (dut.io.dataRequestValid.toBoolean) {
+              sawRequest = true
+              assert(!dut.io.dataRequest.isWrite.toBoolean)
+              assert(dut.io.dataRequest.robPointer.toBigInt == 3)
+              assert(dut.io.dataRequest.loadQueueIndex.toBigInt == 1)
+              assert(dut.io.dataRequest.physicalAddress.toBigInt == 0x200)
+            }
+            sample(dut)
+          }
+          assert(sawRequest == enabled)
+        }
+    }
+  }
+
+  test("an unknown older Store still blocks every younger Load during bypass scanning") {
+    val testConfig = config.copy(enableStoreBlockedLoadBypass = true)
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-lsq-load-bypass-ordering"
+      )
+      .compile(new LoadStoreQueueProbe(testConfig))
+      .doSim("ooo-lsq-load-bypass-unknown-store", 0x4c81) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.io.translationBypassEligible #= true
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        dut.io.allocateValid #= 7
+        dut.io.allocate(0).robPointer #= 1
+        dut.io.allocate(0).isStore #= true
+        dut.io.allocate(0).storeQueueIndex #= 0
+        dut.io.allocate(1).robPointer #= 2
+        dut.io.allocate(1).isLoad #= true
+        dut.io.allocate(1).loadQueueIndex #= 0
+        dut.io.allocate(2).robPointer #= 3
+        dut.io.allocate(2).isLoad #= true
+        dut.io.allocate(2).loadQueueIndex #= 1
+        sample(dut)
+        dut.io.allocateValid #= 0
+
+        dut.io.translationBypassPhysicalAddress #= 0x100
+        setLoadAgu(dut, 2, 0x100, loadIndex = 0, pdst = 4)
+        sample(dut)
+        dut.io.aguValid #= false
+        dut.io.translationBypassPhysicalAddress #= 0x200
+        setLoadAgu(dut, 3, 0x200, loadIndex = 1, pdst = 5)
+        sample(dut)
+        dut.io.aguValid #= false
+        for (_ <- 0 until 12) {
+          assert(!dut.io.dataRequestValid.toBoolean)
+          sample(dut)
+        }
+      }
+  }
+
   test("a physical-synonym partial overlap waits until the older Store drains") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-lsq")

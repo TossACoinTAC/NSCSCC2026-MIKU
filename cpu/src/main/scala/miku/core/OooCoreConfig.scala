@@ -87,6 +87,9 @@ final case class OooCoreConfig(
     enableDivideFastPath: Boolean = false,
     enableFastStoreCompletion: Boolean = true,
     enableStoreTranslationLookahead: Boolean = true,
+    // When a translated cached Load waits only for overlapping Store data, scan younger
+    // Load entries one at a time instead of expanding Store disambiguation across the LDQ.
+    enableStoreBlockedLoadBypass: Boolean = true,
     // Keep first-time variable-latency completions while suppressing only the
     // registered echo of a tag that was already broadcast by a direct wake.
     enableDirectWakeupEchoSuppression: Boolean = true,

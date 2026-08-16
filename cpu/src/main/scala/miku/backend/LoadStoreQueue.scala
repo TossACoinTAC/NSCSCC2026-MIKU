@@ -236,16 +236,23 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // Completed loads remain allocated until commit.  The allocator therefore
   // advances the base only on commit, and a rotated priority select preserves
   // program order across physical slot wrap-around.
+  val loadBypassSkipMask = Reg(Bits(config.loadQueueEntries bits)) init (0)
   val pendingLoads = Bits(config.loadQueueEntries bits)
   for (entry <- 0 until config.loadQueueEntries) {
     pendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
       !loads(entry).completed
   }
-  val rotatedPending = ((pendingLoads ## pendingLoads) |>> loadBase)
+  val unskippedPendingLoads = pendingLoads & ~loadBypassSkipMask
+  val selectablePendingLoads = if (config.enableStoreBlockedLoadBypass) {
+    Mux(unskippedPendingLoads.orR, unskippedPendingLoads, pendingLoads)
+  } else {
+    pendingLoads
+  }
+  val rotatedPending = ((selectablePendingLoads ## selectablePendingLoads) |>> loadBase)
     .resize(config.loadQueueEntries)
   val loadHeadOffset = OHToUInt(OHMasking.first(rotatedPending))
   val selectedLoadHead = (loadBase + loadHeadOffset).resized
-  val selectedLoadValid = pendingLoads.orR
+  val selectedLoadValid = selectablePendingLoads.orR
   // Match the registered uop boundary used by the reference LoadQueue.  The
   // selected index and immutable payload are state: translation, forwarding,
   // and cache request ownership no longer re-read wide queue fields through a
@@ -385,6 +392,14 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val forwardingId = OHToUInt(OHMasking.first(forwardingStore))
   val loadOrderClear = !unknownOlderStore.orR && !olderUncachedStore.orR &&
     !olderLoadOrderBlock.orR && !partialOverlapStore.orR && !pendingDataStore.orR
+  val skippableStoreBlockedLoad = if (config.enableStoreBlockedLoadBypass) {
+    loadHeadReady && scheduledLoad.translationDone && !scheduledLoad.uncached &&
+      !scheduledLoad.isLl && !unknownOlderStore.orR && !olderUncachedStore.orR &&
+      !olderLoadOrderBlock.orR &&
+      (partialOverlapStore.orR || pendingDataStore.orR)
+  } else {
+    False
+  }
   val forwardCandidate = loadHeadReady && scheduledLoad.translationDone &&
     !scheduledLoad.uncached && !scheduledLoad.isLl && loadOrderClear &&
     forwardingCount === 1
@@ -585,6 +600,24 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val storeCompletionFire = storeCompletionCandidate && !io.dataResponseValid
   val forwardFire = forwardCandidate && !io.dataResponseValid &&
     !storeCompletionCandidate
+  val currentLoadMask = UIntToOh(loadHead, config.loadQueueEntries)
+  val alternatePendingLoads = pendingLoads & ~currentLoadMask
+  val bypassScanMustRestart = loadBypassSkipMask.orR && scheduledLoadValid &&
+    (!headLoadState.addressReady ||
+      (loadHeadReady &&
+        (!scheduledLoad.translationDone || scheduledLoad.uncached || scheduledLoad.isLl ||
+          unknownOlderStore.orR || olderUncachedStore.orR || olderLoadOrderBlock.orR)))
+  when(io.flush) {
+    loadBypassSkipMask := 0
+  }.elsewhen(
+    allocationLoads.orR || loadReleaseValid.orR ||
+      (requestCapture && !storeRequest) || forwardFire || bypassScanMustRestart ||
+      !pendingLoads.orR || !unskippedPendingLoads.orR
+  ) {
+    loadBypassSkipMask := 0
+  }.elsewhen(skippableStoreBlockedLoad && alternatePendingLoads.orR) {
+    loadBypassSkipMask(loadHead) := True
+  }
   val baseCompletionBusy = io.dataResponseValid || forwardCandidate ||
     storeCompletionCandidate
   io.translationResponse.ready := translationCancelPending ||
