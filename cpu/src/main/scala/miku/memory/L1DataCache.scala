@@ -463,7 +463,15 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   for (entry <- 0 until config.mshrEntries) {
     readRequestMask(entry) := misses(entry).valid && misses(entry).readRequestPending
   }
-  val writebackId = selectLowest(writebackMask, config.mshrEntries)
+  val writebackGrant = OHMasking.first(writebackMask)
+  val writebackId = OHToUInt(writebackGrant)
+  val writebackLineAddress = UInt(config.xlen bits)
+  writebackLineAddress := U(0, config.xlen bits)
+  for (entry <- 0 until config.mshrEntries) {
+    when(writebackGrant(entry)) {
+      writebackLineAddress := misses(entry).victimAddress
+    }
+  }
   val readRequestGrant = OHMasking.first(readRequestMask)
   val readRequestId = OHToUInt(readRequestGrant)
   val readRequestLineAddress = UInt(config.xlen bits)
@@ -485,7 +493,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   }
 
   io.lineWriteValid := False
-  io.lineWrite.lineAddress := misses(writebackId).victimAddress
+  io.lineWrite.lineAddress := writebackLineAddress
   io.lineWrite.data := missVictimData
   io.lineWrite.byteMask := B(
     (BigInt(1) << CacheContract.LineBytes) - 1,
@@ -502,8 +510,10 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     io.lineWrite.mshrId := 0
   }
   val lineWriteFire = io.lineWriteValid && io.lineWriteReady
-  when(state === L1DataCacheState.normal && lineWriteFire) {
-    misses(writebackId).state := L1DataMshrState.writebackWait
+  for (entry <- 0 until config.mshrEntries) {
+    when(state === L1DataCacheState.normal && lineWriteFire && writebackGrant(entry)) {
+      misses(entry).state := L1DataMshrState.writebackWait
+    }
   }
   when(
     state === L1DataCacheState.normal && io.lineWriteResponseValid &&
