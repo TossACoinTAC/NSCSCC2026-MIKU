@@ -434,6 +434,55 @@ completion one-hot decode，并把冷 completion payload 迁入按生产端口�
 `Post_Impl_Bundles/cpu_04d25fdef318_chiplab_c398d274812f_perf_100mhz_20260816-171551/manifest.json`，
 路径分类为 `build/reports/timing/R8-R02-RT04-RT05-RT06-direct-top50.json`。
 
+### R8 第二批结构降压：RT07/RT08/RT09/DT01/RF01
+
+第二批不再为每个周期透明候选重复完整 perf20；定向测试与 Yosys 配对保持逐提交，完整
+`cpu-check`、perf20、func58 和 direct full 只对最终组合执行。若组合出现明显周期退化，
+再按提交边界二分归因。当前五项均不增加架构拍数：
+
+- `RT07 @ f6d705d` 用物理 entry index 隐含 ROB index，resident state 只保存一位 wrap
+  generation。expanded-window 全核 Yosys cells `77,557 -> 77,365`，word-bits
+  `577,447 -> 573,568`；ROB wrap/epoch 定向测试通过。
+- `RT08 @ 82bbd93` 将五路 completion 与窄 Store completion 的 ROB index 各解码一次，
+  entry 侧只做 one-hot 资格化。全核 cells `77,365 -> 76,231`，word-bits
+  `573,568 -> 571,270`，ROB cells `20,038 -> 18,904`。
+- `RT09 @ 58fdd42` 把 `result/sideEffect/exception/branch` 冷 completion union 迁入按
+  producer lane 组织、按三路 commit 复制的同步存储；精确 applied-completion 旁路定义
+  RAM 同址读写。ROB 19/19，新增测试覆盖三 producer 同拍三退休和完整异常 payload。
+  全核 cells `76,231 -> 68,557`（`-10.067%`）、word-bits
+  `571,270 -> 473,298`（`-17.150%`）；ROB cells `18,904 -> 11,230`
+  （`-40.595%`）、word-bits `136,918 -> 38,946`（`-71.555%`），memory bits
+  `11,840 -> 91,520`。全核 raw LTP 保持 104，ROB 局部为 `38 -> 39`。
+- `DT01 @ 8943b2e` 将 8-entry DispatchQueue payload 按低两位拆成四个 bank，连续
+  三宽读写同拍不会 bank collision。ring-wrap 定向测试通过；DispatchQueue cells
+  `5,918 -> 4,027`、compare `1,121 -> 404`，全核 cells 再降 `2.758%`。
+- `RF01 @ ab68ee1` 对五个 PRF 写地址各做一次 one-hot decode，再局部更新 128 项寄存器。
+  RegisterStructures 12/12；PRF cells `2,819 -> 2,178`、mux `1,344 -> 703`，局部 raw
+  LTP `12 -> 8`，全核 cells 再降 `0.962%`、word-bits 降 `4.324%`。
+
+组合完整门禁已通过：`40 suites / 253 tests`、88 项 Python 合同、expanded-window
+strict-zero Verilator/Yosys gate。clean perf20 20/20，相对第一批 R02+RT04/05/06 为
+`4,167,970 -> 4,167,970`，20 项逐项精确相等；func58 random-AXI seeds
+`240/255/141` 均为 `58/58`。组合周期比较见
+`build/reports/comparisons/R8-RT07-RT08-RT09-DT01-RF01-vs-R02-RT04-RT05-RT06.json`，
+matching perf20/func58 matrix 分别位于
+`build/sim/runs/cpu_d67deb53cfbe_chiplab_c398d274812f/clean-perf20_model_1b1679e77d0f_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`
+和
+`build/sim/runs/cpu_d67deb53cfbe_chiplab_c398d274812f/clean-func58_model_6036030ffdff_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
+
+升级后的 Yosys v2 同时记录 hierarchy 与整核 flatten/`opt_clean` 后统计，并在局部 LTP
+前展开目标模块，避免子层级端口反馈产生假组合环；每个 LTP 原始文件有 8 MiB 硬上限。
+相对第一批，hierarchy cells `77,557 -> 66,025`（`-14.869%`）、word-bits
+`577,447 -> 443,205`（`-23.248%`）；post-flatten cells `70,744 -> 59,948`
+（`-15.261%`）、word-bits `545,122 -> 414,215`（`-24.014%`）。ROB、DispatchQueue、
+PRF 的 hierarchy cells 分别减少 `9,000/1,891/641`；全核 LTP 仍为 104，PRF 为
+`12 -> 8`，ROB 为 `38 -> 39`。报告见
+`build/reports/yosys/R8-R02-RT04-RT05-RT06-v2/`、
+`build/reports/yosys/R8-RT07-RT08-RT09-DT01-RF01-v2/` 和
+`build/reports/yosys/R8-second-timing-batch-v2.json`。这些数字仍是结构代理，不能替代
+matching Vivado；第二批必须由 100 MHz direct full 判断是否消除了首轮 ROB 拥塞并形成
+正 WNS 里程碑。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
