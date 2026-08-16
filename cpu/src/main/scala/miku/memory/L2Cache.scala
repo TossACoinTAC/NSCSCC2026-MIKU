@@ -339,7 +339,15 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     hitCaptureData := cacheArray.io.hitData
   }
 
-  val missWritebackId = selectLowest(missWritebackMask, config.mshrEntries)
+  val missWritebackGrant = OHMasking.first(missWritebackMask)
+  val missWritebackId = OHToUInt(missWritebackGrant)
+  val missWritebackLineAddress = UInt(config.xlen bits)
+  missWritebackLineAddress := U(0, config.xlen bits)
+  for (entry <- 0 until config.mshrEntries) {
+    when(missWritebackGrant(entry)) {
+      missWritebackLineAddress := misses(entry).victimAddress
+    }
+  }
   val missWritebackData = Bits(CacheContract.LineBits bits)
   for (beat <- 0 until CacheContract.BeatsPerLine) {
     missWritebackData(
@@ -348,7 +356,7 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     ) := missVictimMemories(beat).readAsync(missWritebackId)
   }
   io.memoryWriteValid := False
-  io.memoryWrite.lineAddress := misses(missWritebackId).victimAddress
+  io.memoryWrite.lineAddress := missWritebackLineAddress
   io.memoryWrite.data := missWritebackData
   io.memoryWrite.byteMask := B(
     (BigInt(1) << CacheContract.LineBytes) - 1,
@@ -383,7 +391,11 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     }.elsewhen(writeStateWriteThrough) {
       writeState := L2WriteState.writeThroughWait
     }.otherwise {
-      misses(missWritebackId).state := L2MshrState.writebackWait
+      for (entry <- 0 until config.mshrEntries) {
+        when(missWritebackGrant(entry)) {
+          misses(entry).state := L2MshrState.writebackWait
+        }
+      }
     }
   }
   when(stateNormal && io.memoryWriteResponseValid) {
