@@ -129,9 +129,6 @@ final case class OooCoreConfig(
     // L1D/L2 arbitration keeps lookup response and line installation mutually exclusive.  Keep
     // data-array reads qualified by lookup/maintenance acceptance independently of write enable.
     enableDataArrayDataReadDecoupling: Boolean = true,
-    // Let the data cache accept a new lookup while the previous synchronous lookup returns.
-    // Misses that cannot share the single victim-data register are replayed internally.
-    enableDataCacheLookupTurnover: Boolean = true,
     enableDeferredFrontendCorrectionCleanup: Boolean = true,
     enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,
