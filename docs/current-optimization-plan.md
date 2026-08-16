@@ -142,10 +142,11 @@ ROB/cache/multiplier 路径共同定义候选池。目标是在其中实际引�
 (`b0ac56c`)、RT12 (`3dbab9b`)、RT13 (`5f36353`)、RT14 (`9157f9e`)、DQ02
 (`33aca34`)、IQT01 (`3651e19`)、MT11 (`03f3bb1`) 和 CT06 (`3aa1c25`)。每项已完成
 对应定向 suite，批次提交后完整 `cpu-check` 通过。Yosys 对照见
-`build/reports/yosys/R10-CT06-vs-R9.json`：全核 cells 下降 `10.586%`、post-flatten
-cells 下降 `11.555%`、word bits 下降 `9.034%`，这是综合前结构筛选信息，不能替代
-Vivado WNS。R9 参考报告使用 `expanded-window`（ROB64/PRF128），而根 Makefile 默认
-生成 `default`（ROB32/PRF64），所以 perf20 必须按同一 `CPU_VARIANT` 形成 A/B，不能
+`build/reports/yosys/R10-expanded-vs-R9.json`：同为 expanded-window 的全核 cells
+下降 `1.358%`、post-flatten cells 下降 `1.496%`、word bits 下降 `0.483%`，这是
+综合前结构筛选信息，不能替代 Vivado WNS。R9 参考报告使用 `expanded-window`
+（ROB64/PRF128），而根 Makefile 默认生成 `default`（ROB32/PRF64）；不同配置曾产生约
+`-10.6%` 的伪结构差异，已排除。因此 perf20 和 Yosys 都必须按同一 `CPU_VARIANT` 形成 A/B，不能
 混写两种配置的总周期。expanded-window 的完整 perf20 已与 R9 B02-F 基线逐项精确相等：
 `3845728 -> 3845728`，几何平均 `1.000000000x`；比较为
 `build/reports/comparisons/R10-expanded-vs-R9-B02F.json`。同一配置的 func58 random-AXI
