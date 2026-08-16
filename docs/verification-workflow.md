@@ -179,7 +179,8 @@ RTL、generation manifest 和 Chiplab 身份还会再次与当前 implementation
 
 归档器同时从完整 Vivado log 生成 `route-health.json`，并把 `physical_health` 写入 manifest。
 至少记录 route 用时、拥塞警告次数、Global Iteration 的 overlap 轨迹、峰值与最终 overlap、
-方向最大拥塞和 post-route setup/hold。fully routed 只能证明最终可布通；高 overlap、反复
+方向最大拥塞、被 timing constraint 阻止自动复制的 very-high-fanout net 及 post-route
+setup/hold。fully routed 只能证明最终可布通；高 overlap、反复
 全局迭代或 85% 以上局部拥塞仍需作为下一轮 RTL 拓扑信息。不同 RTL 的物理健康比较必须与
 资源、top-N、WNS/TNS 和周期同时解释，不能仅以总 cell 数或最终 overlap 为零判断优化成功。
 

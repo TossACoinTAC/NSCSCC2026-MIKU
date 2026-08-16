@@ -445,6 +445,7 @@ def main() -> int:
             f"peak_route_overlaps={physical_health['peak_overlaps']}",
             f"route_congestion_warnings={physical_health['congestion_warning_count']}",
             f"max_route_congestion_percent={physical_health['congestion']['maximum_percent']}",
+            f"skipped_very_high_fanout_nets={physical_health['very_high_fanout']['skipped_count']}",
         ]
         for filename, record in sorted(manifest["artifacts"].items()):
             text_lines.append(f"{filename.replace('.', '_')}_sha256={record['sha256']}")

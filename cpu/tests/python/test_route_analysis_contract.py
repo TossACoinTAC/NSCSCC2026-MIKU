@@ -25,6 +25,7 @@ Phase 4.3 Global Iteration 2
  Number of Nodes with overlaps = 0
 Phase 4.3 Global Iteration 2 | Checksum: feedface
 Time (s): cpu = 01:22:33 ; elapsed = 00:35:51 . Memory (MB): peak = 4600
+INFO: [Physopt 32-1132] Very high fanout net 'u_cpu/backend/rob/allocatePointer[3]' is not considered as a candidate in VHFN optimzation. The fanout considered for this optimization is changed from 259 to 134 due to a timing constraint that prevent optimization on all of the loads.
  Number of Nodes with overlaps = 0
 South Dir 4x4 Area, Max Cong = 94.3131%, Congestion bounded by tiles:
 West Dir 32x32 Area, Max Cong = 85.9704%, Congestion bounded by tiles:
@@ -44,6 +45,16 @@ wait_on_runs: Time (s): cpu = 00:07:12 ; elapsed = 02:06:19 . Memory (MB): peak 
         self.assertEqual(result["implementation_seconds"], 7579)
         self.assertEqual(result["congestion_warning_count"], 1)
         self.assertEqual(result["congestion"]["maximum_percent"], 94.3131)
+        self.assertEqual(result["very_high_fanout"]["skipped_count"], 1)
+        self.assertEqual(result["very_high_fanout"]["maximum_original_fanout"], 259)
+        self.assertEqual(
+            result["very_high_fanout"]["skipped"][0],
+            {
+                "net": "u_cpu/backend/rob/allocatePointer[3]",
+                "original_fanout": 259,
+                "timing_eligible_fanout": 134,
+            },
+        )
         self.assertEqual(result["post_route_timing"]["setup_wns_ns"], -1.85)
         self.assertEqual(result["post_route_timing"]["hold_wns_ns"], 0.05)
         self.assertEqual(result["final_failed_nets"], 0)

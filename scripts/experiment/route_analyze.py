@@ -38,6 +38,7 @@ def parse_route_log(path: Path) -> dict[str, Any]:
     congestion_warning_count = 0
     failed_nets_samples: list[int] = []
     all_overlap_samples: list[int] = []
+    skipped_very_high_fanout: list[dict[str, Any]] = []
 
     iteration_header = re.compile(r"^Phase\s+([0-9.]+)\s+Global Iteration\s+(\d+)$")
     overlap_line = re.compile(r"Number of Nodes with overlaps\s*=\s*(\d+)")
@@ -52,6 +53,10 @@ def parse_route_log(path: Path) -> dict[str, Any]:
     elapsed_line = re.compile(r"elapsed\s*=\s*(\d+:\d{2}:\d{2})")
     congestion_line = re.compile(
         r"^(North|South|East|West) Dir\s+\S+\s+Area,\s+Max Cong\s*=\s*([0-9.]+)%"
+    )
+    skipped_fanout_line = re.compile(
+        r"Very high fanout net '([^']+)' is not considered.*?"
+        r"changed from (\d+) to (\d+) due to a timing constraint"
     )
 
     for line_number, line in enumerate(lines, start=1):
@@ -112,6 +117,16 @@ def parse_route_log(path: Path) -> dict[str, Any]:
             )
         if "[Route 35-447] Congestion is preventing the router" in stripped:
             congestion_warning_count += 1
+
+        skipped_fanout = skipped_fanout_line.search(stripped)
+        if skipped_fanout is not None:
+            skipped_very_high_fanout.append(
+                {
+                    "net": skipped_fanout.group(1),
+                    "original_fanout": int(skipped_fanout.group(2)),
+                    "timing_eligible_fanout": int(skipped_fanout.group(3)),
+                }
+            )
 
         post_timing = post_timing_line.search(stripped)
         if post_timing is not None:
@@ -174,6 +189,14 @@ def parse_route_log(path: Path) -> dict[str, Any]:
             "maximum_by_direction_percent": maximum_by_direction,
             "latest_by_direction_percent": latest_by_direction,
         },
+        "very_high_fanout": {
+            "skipped_count": len(skipped_very_high_fanout),
+            "maximum_original_fanout": max(
+                (item["original_fanout"] for item in skipped_very_high_fanout),
+                default=None,
+            ),
+            "skipped": skipped_very_high_fanout,
+        },
         "post_route_timing": {
             "setup_wns_ns": post_route_setup_wns_ns,
             "tns_ns": post_route_tns_ns,
@@ -201,7 +224,8 @@ def main() -> int:
         f"peak_overlaps={result['peak_overlaps']} "
         f"iterations={result['iterations_with_overlaps']} "
         f"route_seconds={result['route_design_seconds']} "
-        f"max_congestion={result['congestion']['maximum_percent']}%"
+        f"max_congestion={result['congestion']['maximum_percent']}% "
+        f"skipped_vhfn={result['very_high_fanout']['skipped_count']}"
     )
     print(args.out)
     return 0
