@@ -187,6 +187,35 @@ observation word，monitor 不再猜测微架构容量。matching instrumented p
 `L02` 受限 younger-ready Load bypass 和 `L03` LDQ-only 8-to-16 独立 A/B；L03 首次不扩大
 STQ/SDQ，避免在低得多的 Store full 暴露量下无依据地放大 forwarding/order cone。
 
+`L03+L15` 已用 post-route 物理优化版位流完成一次 matching perf20 板测：
+job `20260816-051403-a9377049`，source `9b761d5`，20/20 pass，CPU 总周期
+`38,229,428`，相对 R6 板测 `41,191,272` 下降 `-7.19%`。该板测包 WNS `-0.065 ns`
+（post-route phys_opt），所以板测通过与 100 MHz 时序闭合仍是两个独立结论。
+
+
+`L03` 的 LDQ-only 8-to-16 已在 `dev/L03-ldq16` 完成首轮实现与本地 A/B：R6
+baseline `4,423,675 -> 4,320,785`（总周期 `-2.326%`，几何平均 `0.986232`），
+完整 Scala 39 suites/233 tests 通过。`fireye_A0 -17.30%` 是最主要收益项；
+`fireye_B2 +0.35%` 是最大回退。该结果只是短路径 perf20，下一步必须补 matching
+func58 三 seed、Linux 固定窗口和 direct full 时序，通过后再决定是否进入组合板测。
+
+`L02` 的受限 younger-ready retry 形式也已在同一分支完成：当 scheduled Load 被本地
+alias/forwarding 条件阻塞且存在地址已就绪的更年轻 Load 时，选择下一个候选并在下一拍
+经过原有完整 Store/Load 顺序逻辑重新资格化。相对 L03+L15，完整短路径 perf20 为
+`4,316,663 -> 4,259,994`（`-1.313%`），几何平均 `0.991835`；主要收益
+`inner_product -7.59%`、`minmax_sequence -1.79%`、`loop_induction -1.54%`。
+完整 Scala 39 suites/233 tests 和本地 func58 seeds `240/255/141` 通过。
+L02 组合的 matching direct full 已完成：WNS `-0.230 ns`、TNS `-5.071 ns`，板测 job
+`20260816-055202-61bdbe02` 20/20 pass，CPU 总周期 `37,714,405`，相对 L03+L15 板测
+再降 `1.35%`，相对 R6 板测降 `8.44%`。
+该候选改变了 LSQ scheduler select 路径，matching direct full 的 LSQ/WNS 必须重点观察。
+
+`L15` 作为同一分支上的第二个独立候选已实现：L1D 在 victim writeback/writebackWait
+期间不再全局拒绝其他 set 的新 lookup，只保留 `setConflictMask` 的同 set 串行保护。
+本地短路径 A/B 相对 L03 为 `4,320,785 -> 4,316,663`（`-0.095%`），主要改善
+`inner_product/loop_induction/fireye_D1`，无明显回退；完整 Scala 39 suites/233 tests 通过；本地 func58 random-AXI seeds `240/255/141` 均达到 `3A00003A`。该候选理想仿真收益小，目标是板级写响应延迟下的行为，必须与 L03 一起做
+matching direct full，若时序或资源恶化则优先保留 L03 单项。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
@@ -479,3 +508,58 @@ MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其
 DRC/route/bitstream 完整且 Linux 门禁通过后，`main` 可将该阶段 squash 成一个里程碑提交，
 不要求保留候选级提交拓扑。R5 稳定 bitstream 已完成 matching perf20 板测；后续每个新的
 时序闭合里程碑仍须使用自己的 matching bitstream 重新板测，R6 当前不能继承该结果。
+
+## R7：2026-08-16 四项研究集成与 100 MHz direct full 候选
+
+### 组合过程
+
+- `50ca302` 将四项研究成果一次性落地：16-bit GHR + 4x4096x2b banked gshare、
+  L1D/L2 每 MSHR 独立 victim buffer、LSQ byte-lane multi-store forwarding。
+  39 suites/235 tests 通过。
+- 完整 ideal perf20 为 `4,259,994 -> 3,953,187`（`-7.202%`，几何平均
+  `0.96594`）。但 full direct 默认策略 setup `-0.750 ns`，即使
+  `Performance_ExplorePostRoutePhysOpt` 也只到 `-0.318 ns`；top 路径集中在新增
+  LSQ byte-lane forwarding 锥。
+- 单独移除 byte-lane forwarding（保留 predictor、cache MSHR、L02 LDQ/retry），
+  ideal perf20 为 `3,954,644`，相对完整研究集成仅多 `0.037%`，因此该转发
+  不在最终组合保留。
+- `4ee3909` 把 `systemOperation == none` 与 memory-barrier 判定在 ROB 分配时
+  预解码为状态位，从 head-bypass/commit-valid 锥中移除 5-bit 比较。perf20 逐项
+  透明，direct/PRPHYS 路由起点从 research 版的约 `-0.38 ns` 降到约 `-0.17 ns`。
+- 最终候选 `dev/L03-predictor-cache-flags` 使用
+  `Performance_ExplorePostRoutePhysOpt` 的 matching direct full：100 MHz
+  setup/hold `+0.004/+0.051 ns`、setup TNS `0.000 ns`、fully routed、DRC 0 error、
+  bitstream 成功。`scripts/vivado/implement_postroutephys.sh` 已入库，默认要求
+  setup/hold 非负，并从 post-route physopt DCP 生成报告。
+
+### 软件证据
+
+- Scala 39 suites/233 tests 通过。
+- ideal perf20 20/20 全部到达 `1c000218`，总周期 `3,954,644`。
+- func58 random-AXI seeds `240/255/141` 均 58/58，`3A00003A` + led 1/1。
+- Linux fixed 50 ms、seed `5570815` 跑满窗口，无 difftest/trace error；
+  `linux-time-window-complete`。
+
+### 板测证据
+
+- Job `20260816-104635-ac3c820a`（source `ab820dd`，matching bitstream）20/20 pass：
+  - `soc_count = 33,404,839`，`cpu_count = 33,393,790`；
+  - 相对 R6 板测 `41,203,093 / 41,191,272` 分别 `-18.93% / -18.93%`；
+  - 相对 L02 direct 板测 `37,726,040 / 37,714,405` 分别 `-11.45% / -11.46%`。
+- 同一 matching bitstream 以 PR head `b295c8e` 重新组包后为 job
+  `20260816-134457-28c2cca0`：`soc_count = 33,404,984`，
+  `cpu_count = 33,393,915`，20/20 pass。
+- 该 bitstream 的 timing summary 与 board package 中的 `timing_summary.rpt` 均为
+  `WNS +0.004 / TNS 0.000`，属于 matching direct full，而非 post-route 探索产物。
+
+### 下一步
+
+- 默认 `Performance_Explore` direct full 实测 setup `-0.223 ns`、TNS `-3.801 ns`
+  （50 个失败 endpoint）。`dev/L03-pc-bypass-match` 尝试把 staged head bypass
+  从 commit-count 预取锥改为对已注册 commit head 的当拍匹配；perf20 逐项透明，
+  但默认 direct 反而恶化到 `-0.692 ns`，已放弃，保留原注册边界设计。
+  `dev/L03-l02-flags` 是保留 L02 性能、只加 commit 预解码的保守候选。
+- 在时序预算允许时再评估 PHT candidate B（4x16384）；本地 ideal 总周期
+  `3,940,987`，比 candidate A 再少 `0.31%`，但 16k-cycle PHT reset sweep
+  需要更新 frontend 定向测试。
+

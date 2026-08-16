@@ -69,7 +69,7 @@ CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-l
 
 .PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
-  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
+  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-impl-timing soc-func soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
@@ -100,6 +100,7 @@ help:
 		'  make board-status BOARD_JOB=<id>  查询板测状态' \
 		'  make board-result BOARD_JOB=<id>  查询板测终态证据' \
 		'  make soc-impl           Vivado 宿主机完整 SoC 实现' \
+		'  make soc-impl-timing    100 MHz direct full（PostRoutePhysOpt，要求 setup/hold 闭合）' \
 		'  make soc-postroute-opt  复用 routed DCP 做时序探索（非竞赛产物）' \
 		'  make soc-archive        校验并归档当前完整 SoC 实现' \
 		'  make wave WAVE=...      用宿主机 Surfer 查看波形' \
@@ -267,6 +268,12 @@ soc-impl: cpu-generate
 	@VIVADO="$(VIVADO)" PERF_CPU_MHZ="$(PERF_CPU_MHZ)" \
 		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-perf"
 	@$(MAKE) soc-archive SOC_BUILD_KIND=perf SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
+
+soc-impl-timing: cpu-generate
+	@VIVADO="$(VIVADO)" PERF_CPU_MHZ="$(PERF_CPU_MHZ)" \
+		scripts/vivado/implement_postroutephys.sh \
+		"$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-perf-timing"
+
 
 soc-func: cpu-generate
 	@test -n "$(strip $(SOC_EXPERIMENT_MANIFEST))" || { printf 'SOC_EXPERIMENT_MANIFEST 不能为空；先运行 experiment-freeze\n' >&2; exit 2; }

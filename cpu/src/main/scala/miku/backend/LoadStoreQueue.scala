@@ -237,8 +237,17 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val rotatedPending = ((pendingLoads ## pendingLoads) |>> loadBase)
     .resize(config.loadQueueEntries)
   val loadHeadOffset = OHToUInt(OHMasking.first(rotatedPending))
-  val selectedLoadHead = (loadBase + loadHeadOffset).resized
-  val selectedLoadValid = pendingLoads.orR
+  val oldestLoadHead = (loadBase + loadHeadOffset).resized
+  // Restricted younger-ready Load bypass (L02 retry-token form).  When the
+  // currently scheduled oldest Load is held by a local alias/forwarding
+  // condition, select the next younger pending Load whose address is already
+  // known.  Its payload crosses the same registered scheduler boundary and is
+  // fully re-qualified by the normal Store/Load ordering logic next cycle.
+  val retryValid = RegInit(False)
+  val retryLoadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
+  val retryCandidatePending = retryValid && pendingLoads(retryLoadHead)
+  val selectedLoadHead = Mux(retryCandidatePending, retryLoadHead, oldestLoadHead)
+  val selectedLoadValid = retryCandidatePending || pendingLoads.orR
   // Match the registered uop boundary used by the reference LoadQueue.  The
   // selected index and immutable payload are state: translation, forwarding,
   // and cache request ownership no longer re-read wide queue fields through a
@@ -1275,6 +1284,21 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     !scheduledLoad.uncached && !scheduledLoad.isLl && !bufferedCommittedStore &&
     !unknownOlderStore.orR && !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
     (partialOverlapStore.orR || pendingDataStore.orR || forwardingCount > 1)
+  val retryRotated =
+    ((alternatePendingLoadAddressReady ## alternatePendingLoadAddressReady) |>> loadHead)
+      .resize(config.loadQueueEntries)
+  val retryAlternateHead =
+    (loadHead + OHToUInt(OHMasking.first(retryRotated))).resized
+  val retryTrigger = oldestLoadLocalAliasBlocked && retryRotated.orR &&
+    !retryCandidatePending
+  when(io.flush) {
+    retryValid := False
+  }.elsewhen(retryCandidatePending) {
+    retryValid := False
+  }.elsewhen(retryTrigger) {
+    retryValid := True
+    retryLoadHead := retryAlternateHead
+  }
   perfObservationV1Word5(49) := rawLoadCompletion
   perfObservationV1Word5(50) := rawOrdinaryLoadCompletion
   perfObservationV1Word5(51) := rawOrdinaryLoadCompletion &&
