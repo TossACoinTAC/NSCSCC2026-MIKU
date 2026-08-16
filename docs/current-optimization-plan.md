@@ -339,7 +339,9 @@ opt-in 变体只用于复现实验。周期比较见 `build/reports/comparisons/
 ### R8 Yosys 结构分析基线
 
 新增的 Yosys harness 直接读取显式冻结 RTL，不依赖 `cpu-generate`，约 43--50 秒完成一份
-层次实例加权 generic-cell 与关键模块/全核 raw LTP 报告。default、R02 和 L15 的真实
+层次实例加权 generic-cell、按操作位宽归一化的 word-bits 与关键模块/全核 raw LTP 报告。
+raw cell 对象数保留用于识别结构展开方式，word-bits 用于避免把一个 128-bit 向量寄存器
+误记成比 128 个 1-bit 寄存器小 128 倍；两者仍都不是 LUT/FF。default、R02 和 L15 的真实
 三点校准分别复现了 `72,059`、`89,083`、`76,637` cells；R02 的增量被拆到 ROB、
 RenameMap、PRF 和 FreeList，L15 的增量被拆到 LSQ/SDQ。三者全核 raw LTP 都为 104，
 说明结构规模、局部组合深度和器件实现时序必须分别判断。
@@ -365,6 +367,24 @@ strict-zero lint 和 87 项 Python 合同。发布 RTL SHA-256 为
 与 R02 及其他独立候选组合的 matching direct full 判断。周期与结构证据分别见
 `build/reports/comparisons/R8-RT04-vs-A01.json` 和
 `build/reports/yosys/R8-default-vs-RT04-default-v2.json`。
+
+### RT05：RenameMap physical-ready 掩码化
+
+RT05 将每个 physical-ready bit 上重复的三路 allocation compare 和五路 writeback compare
+改为每个输入端口一次 one-hot decode，再用平衡 OR 树形成两个宽 mask。状态更新保持
+`(ready | completed) & ~allocated`，因此 allocation 在同拍碰撞时仍优先，flush 仍恢复全部
+ready，p0 始终为 ready；该结构不增加 rename/source-ready 的架构拍数。
+
+`c9a2104` 的默认与 128-PRF 定向测试、完整 `cpu-check` 均通过，门禁为 40 suites / 249
+tests、Verilator strict-zero lint 和 88 项 Python 合同；发布 RTL SHA-256 为
+`a1359c2771276739c30b3aa9932bdb5fd1f594e927fe80c811dc9db41cf29626`。相对 RT04 的完整
+perf20 为 `4,215,442 -> 4,215,442`，20 项逐项精确相等。位宽归一化后，default 全核
+word-bits `479,449 -> 474,011`（`-1.134%`），RenameMap `13,723 -> 8,285`
+（`-39.627%`）；R02 配置下全核 `596,607 -> 583,088`（`-2.266%`），RenameMap
+`23,878 -> 11,094`（`-53.539%`）。RenameMap raw LTP `14 -> 13`，全核仍为 104。
+周期与结构证据分别见 `build/reports/comparisons/R8-RT05-vs-RT04.json`、
+`build/reports/yosys/R8-RT04-vs-RT05-default-word-v1.json` 和
+`build/reports/yosys/R8-RT04-vs-RT05-R02-expanded-word-v1.json`。
 
 ## R1：时序候选与周期验证
 

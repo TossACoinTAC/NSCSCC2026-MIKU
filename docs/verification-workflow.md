@@ -98,12 +98,14 @@ suite、memory mode、software key 与 workload/seed 集合一致。模型和 CP
 
 `yosys-analyze` 不依赖 `cpu-generate`，只读取调用方显式指定的冻结 RTL，并把输入快照、
 RTL hash、锁定 Yosys 身份、分析脚本、层次统计和 LTP 原始输出封装到不可覆盖的报告目录。
-它按真实实例数汇总 generic word-level cells，并对 frontend、predictor、IQ/dispatch、
-ROB/rename、LSQ、cache/L2 等关键模块输出最长组合拓扑节点数。`yosys-compare` 只接受
+它按真实实例数同时汇总 generic cell 对象数和 `stat -width` 的操作位宽归一化 word-bits，
+并对 frontend、predictor、IQ/dispatch、ROB/rename、LSQ、cache/L2 等关键模块输出最长
+组合拓扑节点数。cell 对象数用于观察结构展开，word-bits 用于避免向量打包造成虚假的面积
+下降；`yosys-compare` 只接受
 Yosys 工具身份和分析配置完全相同的两份报告，避免把工具变化误记为候选变化。
 
-这些指标用于综合前发现容量扩张、宽 mux、局部深链和压力集中的模块。generic cells 不是
-Vivado LUT/FF，raw LTP 不包含器件映射、布线和时钟约束，均不能替代 matching direct
+这些指标用于综合前发现容量扩张、宽 mux、局部深链和压力集中的模块。generic cells 和
+word-bits 都不是 Vivado LUT/FF，raw LTP 不包含器件映射、布线和时钟约束，均不能替代 matching direct
 full implementation 的 WNS/TNS、资源、DRC 和 fully-routed 门禁。完整 `synth_xilinx`
 包含昂贵的资源共享、memory/techmap 与器件映射，不进入日常 harness；只有明确的深度
 研究需要时才单独运行并限制日志与资源。
