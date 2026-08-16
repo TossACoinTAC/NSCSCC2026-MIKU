@@ -493,22 +493,33 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val stagedStoreCompletionValid = RegInit(False)
   val stagedStoreCompletionCurrent = RegInit(False)
   val stagedStoreCompletionRobPointer = Reg(UInt(config.robPointerWidth bits))
+  val stagedCompletionTargets = Vec(Bits(config.robEntries bits), config.writebackWidth)
+  for (lane <- 0 until config.writebackWidth) {
+    val stagedIndex = stagedRobPointer(lane)(config.robIndexWidth - 1 downto 0)
+    stagedCompletionTargets(lane) := Mux(
+      stagedCompletionValid(lane) && stagedCompletionCurrent(lane),
+      UIntToOh(stagedIndex, config.robEntries),
+      B(0, config.robEntries bits)
+    )
+  }
+  val stagedStoreCompletionTarget = Bits(config.robEntries bits)
+  stagedStoreCompletionTarget := Mux(
+    stagedStoreCompletionValid && stagedStoreCompletionCurrent,
+    UIntToOh(
+      stagedStoreCompletionRobPointer(config.robIndexWidth - 1 downto 0),
+      config.robEntries
+    ),
+    B(0, config.robEntries bits)
+  )
   val stagedCompletionMatches = Vec(Bits(config.writebackWidth bits), config.robEntries)
   val stagedStoreCompletionMatches = Bits(config.robEntries bits)
   for (entryIndex <- 0 until config.robEntries) {
     for (lane <- 0 until config.writebackWidth) {
-      val stagedIndex = stagedRobPointer(lane)(config.robIndexWidth - 1 downto 0)
-      stagedCompletionMatches(entryIndex)(lane) := stagedCompletionValid(lane) &&
-        stagedCompletionCurrent(lane) &&
-        stagedIndex === U(entryIndex, config.robIndexWidth bits) &&
+      stagedCompletionMatches(entryIndex)(lane) := stagedCompletionTargets(lane)(entryIndex) &&
         entries(entryIndex).valid && !entries(entryIndex).complete &&
         entries(entryIndex).generation === stagedRobPointer(lane).msb
     }
-    val stagedStoreIndex =
-      stagedStoreCompletionRobPointer(config.robIndexWidth - 1 downto 0)
-    stagedStoreCompletionMatches(entryIndex) := stagedStoreCompletionValid &&
-      stagedStoreCompletionCurrent &&
-      stagedStoreIndex === U(entryIndex, config.robIndexWidth bits) &&
+    stagedStoreCompletionMatches(entryIndex) := stagedStoreCompletionTarget(entryIndex) &&
       entries(entryIndex).valid && !entries(entryIndex).complete &&
       entries(entryIndex).generation === stagedStoreCompletionRobPointer.msb
   }
