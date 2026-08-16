@@ -205,6 +205,9 @@ alias/forwarding 条件阻塞且存在地址已就绪的更年轻 Load 时，选
 `4,316,663 -> 4,259,994`（`-1.313%`），几何平均 `0.991835`；主要收益
 `inner_product -7.59%`、`minmax_sequence -1.79%`、`loop_induction -1.54%`。
 完整 Scala 39 suites/233 tests 和本地 func58 seeds `240/255/141` 通过。
+L02 组合的 matching direct full 已完成：WNS `-0.230 ns`、TNS `-5.071 ns`，板测 job
+`20260816-055202-61bdbe02` 20/20 pass，CPU 总周期 `37,714,405`，相对 L03+L15 板测
+再降 `1.35%`，相对 R6 板测降 `8.44%`。
 该候选改变了 LSQ scheduler select 路径，matching direct full 的 LSQ/WNS 必须重点观察。
 
 `L15` 作为同一分支上的第二个独立候选已实现：L1D 在 victim writeback/writebackWait
