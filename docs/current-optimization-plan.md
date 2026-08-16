@@ -277,6 +277,18 @@ L1D refill waiter，并保留跨 epoch 的物理槽回退。完整门禁通过�
 上界，也不足以证明年龄比较值得引入 response 选择路径，因此 H09 默认关闭，仅保留
 配置开关和定向回归供后续新观测复核；本轮没有为 H09 启动 Vivado implementation。
 
+### M05 v12：A01 后资源归因
+
+当前默认组合（A01 启用、A02/H09 关闭）重新运行 instrumented perf20，clean 与
+instrumented 逐项周期一致，总计 `4,215,422` ROI cycles，退休 `3,608,034` 条，IPC
+`0.855913`。与 M05 v11 的 pre-A01 身份不同，v12 的资源计数不能与旧计数直接相减，
+但边界变化清晰：ROB 平均占用 `22.87/32`、full `16.36%`，LDQ full `6.59%`，SQ
+full `5.50%`；ROB 非退休头部仍以 Load/Store incomplete 为主（分别约 `17.89%`/
+`12.78%` 的观测周期）。rename 的整组 blocked 计数为 `52.37%`，说明 A01 将部分
+队头阻塞转化为更深的在途压力，而不是证明所有 blocked group 都可通过继续放宽 prefix
+获益。A02 已有独立 A/B 退化，因此下一项优先审计 R02 的 ROB/PRF/epoch 协同扩容，
+并保持默认组合不变。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
