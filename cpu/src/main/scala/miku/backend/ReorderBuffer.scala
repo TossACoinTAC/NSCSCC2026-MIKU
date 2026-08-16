@@ -36,7 +36,9 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   val complete = Bool()
   val payloadReady = Bool()
   val decodedExceptionValid = Bool()
-  val pointer = UInt(config.robPointerWidth bits)
+  // The Vec index already carries the physical ROB index.  Only the wrap
+  // generation is resident state needed to reject a stale completion.
+  val generation = Bool()
   val result = Bits(config.xlen bits)
   val sideEffectData = Bits(config.xlen bits)
   val completionExceptionValid = Bool()
@@ -202,7 +204,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       entries(destination(config.robIndexWidth - 1 downto 0)).payloadReady := False
       entries(destination(config.robIndexWidth - 1 downto 0)).decodedExceptionValid :=
         io.allocate(lane).uop.decoded.exception.valid
-      entries(destination(config.robIndexWidth - 1 downto 0)).pointer := destination
+      entries(destination(config.robIndexWidth - 1 downto 0)).generation := destination.msb
       entries(destination(config.robIndexWidth - 1 downto 0)).result := B(0, config.xlen bits)
       entries(destination(config.robIndexWidth - 1 downto 0)).sideEffectData :=
         B(0, config.xlen bits)
@@ -232,7 +234,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val state = entries(pointer(config.robIndexWidth - 1 downto 0))
     when(
       !io.flush && stagedAllocationValid(lane) && state.valid &&
-        state.pointer === pointer
+        state.generation === pointer.msb
     ) {
       state.payloadReady := True
     }
@@ -394,7 +396,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     io.commitValid(lane) := canCommit(lane)
     io.commit(lane).pc := candidateRetirementMetadata(lane).pc
     io.commit(lane).instruction := candidates(lane).payload.instruction
-    io.commit(lane).robPointer := candidates(lane).state.pointer
+    io.commit(lane).robPointer := candidatePointer(lane)
     io.commit(lane).rd := candidates(lane).payload.rd
     io.commit(lane).pdst := candidates(lane).payload.pdst
     io.commit(lane).oldPdst := candidates(lane).payload.oldPdst
@@ -452,7 +454,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   io.recovery.exception.tlbRefill := False
   when(recoveryMask.orR) {
     val recoveryIndex = selectLowest(recoveryMask, log2Up(config.commitWidth))
-    io.recovery.robPointer := candidates(recoveryIndex).state.pointer
+    io.recovery.robPointer := candidatePointer(recoveryIndex)
     io.recovery.pc := candidateRetirementMetadata(recoveryIndex).pc
     io.recovery.taken := effectiveBranchTaken(recoveryIndex)
     io.recovery.target := effectiveBranchTarget(recoveryIndex)
@@ -500,7 +502,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         stagedCompletionCurrent(lane) &&
         stagedIndex === U(entryIndex, config.robIndexWidth bits) &&
         entries(entryIndex).valid && !entries(entryIndex).complete &&
-        entries(entryIndex).pointer.msb === stagedRobPointer(lane).msb
+        entries(entryIndex).generation === stagedRobPointer(lane).msb
     }
     val stagedStoreIndex =
       stagedStoreCompletionRobPointer(config.robIndexWidth - 1 downto 0)
@@ -508,7 +510,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       stagedStoreCompletionCurrent &&
       stagedStoreIndex === U(entryIndex, config.robIndexWidth bits) &&
       entries(entryIndex).valid && !entries(entryIndex).complete &&
-      entries(entryIndex).pointer.msb === stagedStoreCompletionRobPointer.msb
+      entries(entryIndex).generation === stagedStoreCompletionRobPointer.msb
   }
   when(io.flush) {
     stagedStoreCompletionValid := False
