@@ -179,6 +179,10 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     val releaseStoreValid = out Bits (config.commitWidth bits)
     val commitObservation = out Vec (MemoryCommitObservation(config), config.commitWidth)
     val storeDrainBusy = out Bool ()
+    // Separate consumers keep recovery-drain gating out of one wide backend
+    // control cone. Both signals intentionally retain identical semantics.
+    val storeDrainRenameBlock = out Bool ()
+    val storeDrainReleaseBlock = out Bool ()
     val committedMemoryEpoch = in UInt (config.memoryEpochWidth bits)
     val robHeadPointer = in UInt (config.robPointerWidth bits)
     val orderingRobPointer = in UInt (config.robPointerWidth bits)
@@ -428,6 +432,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     .map(entry => entry.valid && (entry.committed || (entry.uncached && entry.requestSent)))
     .reduce(_ || _) || bufferedCommittedStore
   io.storeDrainBusy := drainAfterFlush
+  io.storeDrainRenameBlock := drainAfterFlush
+  io.storeDrainReleaseBlock := drainAfterFlush
   io.olderStorePending := stores
     .map(entry => entry.valid && isOlder(entry.robPointer, io.orderingRobPointer))
     .reduce(_ || _) ||

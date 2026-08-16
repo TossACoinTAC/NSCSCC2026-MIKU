@@ -82,9 +82,10 @@ final class OooBackendWithExecution(
   val loadStoreQueue = new LoadStoreQueue(config)
   val commitAdapter = new OooCommitAdapter(config)
 
-  val storeDrainBusy = loadStoreQueue.io.storeDrainBusy
+  val storeDrainRenameBlock = loadStoreQueue.io.storeDrainRenameBlock
+  val storeDrainReleaseBlock = loadStoreQueue.io.storeDrainReleaseBlock
   backend.io.renameValid := Mux(
-    storeDrainBusy,
+    storeDrainRenameBlock,
     B(0, config.renameWidth bits),
     io.renameValid
   )
@@ -92,12 +93,12 @@ final class OooBackendWithExecution(
   backend.io.predictorUpdateCapacity := io.predictorUpdateCapacity
   backend.io.releaseLoadValid := loadStoreQueue.io.releaseLoadValid
   backend.io.releaseStoreValid := Mux(
-    storeDrainBusy,
+    storeDrainReleaseBlock,
     B(0, config.commitWidth bits),
     loadStoreQueue.io.releaseStoreValid
   )
   io.renameReady := Mux(
-    storeDrainBusy,
+    storeDrainRenameBlock,
     B(0, config.renameWidth bits),
     backend.io.renameReady
   )
