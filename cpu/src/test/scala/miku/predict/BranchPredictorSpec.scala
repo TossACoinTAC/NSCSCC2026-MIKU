@@ -237,7 +237,7 @@ class BranchPredictorSpec extends AnyFunSuite {
   }
 
   test("banked predictor preserves an ordered retirement batch across same-cycle flush") {
-    val config = OooCoreConfig.FourIssueThreeCommit
+    val config = OooCoreConfig.FourIssueThreeCommit.copy(enableLargeGshare = true)
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-banked-predictor")
       .compile(new BankedFetchPredictor(config))
@@ -323,8 +323,25 @@ class BranchPredictorSpec extends AnyFunSuite {
         dut.clockDomain.waitSampling()
         dut.io.lookupValid #= false
         sleep(1)
-        val pcIndex = ((returnPc >> 4) & 0x1f).toInt
-        assert(dut.io.prediction(0).phtIndex.toInt == ((5 << 5) | pcIndex))
+        val pcIndex = ((returnPc >> 4) & 0xfff).toInt
+        assert(dut.io.prediction(0).phtIndex.toInt == (5 ^ pcIndex))
+
+        // Shift the committed 0b101 into the upper GHR nibble.  A later flush must restore all
+        // 16 bits, and the folded upper nibble must participate in the next table address.
+        dut.io.architecturalHistoryValid #= 1
+        dut.io.architecturalHistoryTaken #= 0
+        for (_ <- 0 until 13) {
+          dut.clockDomain.waitSampling()
+        }
+        dut.io.architecturalHistoryValid #= 0
+        dut.io.flush #= true
+        dut.clockDomain.waitSampling()
+        dut.io.flush #= false
+        dut.io.lookupValid #= true
+        dut.clockDomain.waitSampling()
+        dut.io.lookupValid #= false
+        sleep(1)
+        assert(dut.io.prediction(0).phtIndex.toInt == (0xa ^ pcIndex))
       }
   }
 }

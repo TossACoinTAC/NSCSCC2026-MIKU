@@ -303,7 +303,10 @@ class OooFrontendSpec extends AnyFunSuite {
   }
 
   test("a trained conditional branch turns over translation with its speculative history") {
-    val historyTurnoverConfig = turnoverConfig.copy(enableFrontendHistoryTurnover = true)
+    val historyTurnoverConfig = turnoverConfig.copy(
+      enableFrontendHistoryTurnover = true,
+      enableLargeGshare = true
+    )
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-frontend")
       .compile(new OooFrontend(historyTurnoverConfig))
@@ -318,12 +321,13 @@ class OooFrontendSpec extends AnyFunSuite {
 
         val branchPc = config.resetVector + 0x200
         val branchTarget = branchPc + 0x40
-        val phtIndex = ((branchPc >> 4) & 0x1f).toInt
+        val phtIndex = ((branchPc >> 4) & 0xfff).toInt
         dut.io.predictorUpdatePc #= branchPc
         dut.io.predictorUpdateTaken #= true
         dut.io.predictorUpdateTarget #= branchTarget
         dut.io.predictorUpdateType #= 0
-        dut.io.predictorUpdateMetadata #= (phtIndex | (2 << 10))
+        dut.io.predictorUpdateMetadata #=
+          (phtIndex | (2 << historyTurnoverConfig.predictorMetadataStateLsb))
         dut.io.predictorUpdateValid #= true
         sample(dut)
         dut.io.predictorUpdateValid #= false
@@ -383,9 +387,10 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.io.cacheRequestReady #= false
 
         returnGroup(dut, branchTarget, firstRd = 9)
-        val targetPhtIndex = (1 << 5) | ((branchTarget >> 4) & 0x1f).toInt
+        val targetPhtIndex = 1 ^ ((branchTarget >> 4) & 0xfff).toInt
         assert(dut.io.decoded(1).pc.toBigInt == branchTarget)
-        assert((dut.io.decoded(1).predictorMetadata.toBigInt & 0x3ff) == targetPhtIndex)
+        val phtIndexMask = (BigInt(1) << historyTurnoverConfig.predictorPhtIndexWidth) - 1
+        assert((dut.io.decoded(1).predictorMetadata.toBigInt & phtIndexMask) == targetPhtIndex)
       }
   }
 

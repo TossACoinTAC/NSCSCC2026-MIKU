@@ -652,12 +652,17 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       predecode.target
     )
     responsePredictorMetadata(lane) := 0
-    responsePredictorMetadata(lane)(9 downto 0) :=
+    responsePredictorMetadata(lane)(config.predictorPhtIndexWidth - 1 downto 0) :=
       responseContextPrediction(lane).phtIndex.asBits
-    responsePredictorMetadata(lane)(11 downto 10) :=
+    responsePredictorMetadata(lane)(
+      config.predictorMetadataStateLsb + 1 downto config.predictorMetadataStateLsb
+    ) :=
       responseContextPrediction(lane).phtState.asBits
-    responsePredictorMetadata(lane)(12) := responseContextPrediction(lane).phtValid
-    responsePredictorMetadata(lane)(15 downto 13) := predecode.branchType.asBits
+    responsePredictorMetadata(lane)(config.predictorMetadataValidBit) :=
+      responseContextPrediction(lane).phtValid
+    if (!config.enableLargeGshare) {
+      responsePredictorMetadata(lane)(15 downto 13) := predecode.branchType.asBits
+    }
     responsePrefix(lane + 1) :=
       responsePrefix(lane) + responseSlotCandidateValid(lane).asUInt
   }
@@ -750,9 +755,16 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   targetPredictor.io.phtUpdateValid := preciseUpdate &&
     io.predictorUpdateType === PredictedBranchType.conditional
   targetPredictor.io.phtUpdatePc := io.predictorUpdatePc
-  targetPredictor.io.phtUpdateIndex := io.predictorUpdateMetadata(9 downto 0).asUInt
-  targetPredictor.io.phtUpdateOldState := io.predictorUpdateMetadata(11 downto 10).asUInt
-  targetPredictor.io.phtUpdateOldValid := io.predictorUpdateMetadata(12)
+  targetPredictor.io.phtUpdateIndex := io
+    .predictorUpdateMetadata(config.predictorPhtIndexWidth - 1 downto 0)
+    .asUInt
+  targetPredictor.io.phtUpdateOldState := io
+    .predictorUpdateMetadata(
+      config.predictorMetadataStateLsb + 1 downto config.predictorMetadataStateLsb
+    )
+    .asUInt
+  targetPredictor.io.phtUpdateOldValid :=
+    io.predictorUpdateMetadata(config.predictorMetadataValidBit)
   targetPredictor.io.phtUpdateTaken := io.predictorUpdateTaken
   targetPredictor.io.commitRasPush := io.predictorUpdateValid && io.predictorUpdateIsCall
   targetPredictor.io.commitRasPop := io.predictorUpdateValid && io.predictorUpdateIsReturn

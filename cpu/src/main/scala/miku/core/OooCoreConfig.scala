@@ -124,6 +124,9 @@ final case class OooCoreConfig(
     enableFrontendTranslationTurnover: Boolean = true,
     enableFrontendHistoryTurnover: Boolean = true,
     enableBalancedFrontendPredictionSelect: Boolean = true,
+    // B02-E experiment: widen the gshare history and PHT while preserving the
+    // lazy-trained/BTFNT startup contract.  The base core remains the legacy A/B.
+    enableLargeGshare: Boolean = false,
     enableFrontendCacheHitTurnover: Boolean = true,
     enableSpeculativeInstructionArrayRead: Boolean = true,
     // L1I never performs a lookup and a refill install in the same controller state.  Keep the
@@ -214,6 +217,15 @@ final case class OooCoreConfig(
   val loadQueueIndexWidth: Int = log2Up(loadQueueEntries)
   val storeQueueIndexWidth: Int = log2Up(storeQueueEntries)
   val fetchSlotWidth: Int = log2Up(fetchWidth)
+  val predictorPhtEntriesPerBank: Int = if (enableLargeGshare) 4096 else 1024
+  val predictorHistoryWidth: Int = if (enableLargeGshare) 16 else 8
+  val predictorPhtIndexWidth: Int = log2Up(predictorPhtEntriesPerBank)
+  val predictorMetadataStateLsb: Int = predictorPhtIndexWidth
+  val predictorMetadataValidBit: Int = predictorPhtIndexWidth + 2
+  require(
+    predictorMetadataValidBit < 16,
+    "the predictor update metadata must fit the internal 16-bit contract"
+  )
 }
 
 object OooCoreConfig {
@@ -241,6 +253,7 @@ object OooCoreConfig {
   // R02 experiment only.  The public/default core remains FourIssueThreeCommit;
   // this variant is selected explicitly by the core-top generator.
   val ExpandedWindow: OooCoreConfig = ExpandedRob.copy(
-    physicalRegs = 128
+    physicalRegs = 128,
+    enableLargeGshare = true
   )
 }

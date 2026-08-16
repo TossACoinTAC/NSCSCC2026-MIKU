@@ -17,7 +17,7 @@ final case class BankedFetchPrediction(config: OooCoreConfig) extends Bundle {
   val phtValid = Bool()
   val branchType = UInt(PredictedBranchType.Width bits)
   val phtState = UInt(2 bits)
-  val phtIndex = UInt(10 bits)
+  val phtIndex = UInt(config.predictorPhtIndexWidth bits)
   val target = UInt(config.xlen bits)
 }
 
@@ -30,10 +30,10 @@ final case class BankedFetchPrediction(config: OooCoreConfig) extends Bundle {
 final class BankedFetchPredictor(
     config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit,
     btbEntriesPerBank: Int = 128,
-    phtEntriesPerBank: Int = 1024,
-    historyWidth: Int = 8,
     rasDepth: Int = 8
 ) extends Component {
+  private val phtEntriesPerBank = config.predictorPhtEntriesPerBank
+  private val historyWidth = config.predictorHistoryWidth
   private val fetchGroupOffsetWidth = log2Up(config.fetchWidth * 4)
   private val bankWidth = log2Up(config.fetchWidth)
   private val btbRowWidth = log2Up(btbEntriesPerBank)
@@ -52,8 +52,6 @@ final class BankedFetchPredictor(
 
   require(config.fetchWidth == 4)
   require(btbEntriesPerBank == 128)
-  require(phtEntriesPerBank == 1024)
-  require(historyWidth == 8)
   require(rasDepth == 8)
 
   val io = new Bundle {
@@ -227,15 +225,24 @@ final class BankedFetchPredictor(
     lookupGhr := speculativeGhr(historyWidth - 2 downto 0) ##
       io.speculativeHistoryTaken.asBits
   }
-  val lookupPhtIndex = lookupGhr(4 downto 0) ##
-    io.lookupPc(fetchGroupOffsetWidth + 4 downto fetchGroupOffsetWidth)
+  val lookupPhtIndex = UInt(phtRowWidth bits)
+  if (config.enableLargeGshare) {
+    val foldedUpper = lookupGhr(historyWidth - 1 downto phtRowWidth).asUInt
+      .resize(phtRowWidth)
+    lookupPhtIndex := lookupGhr(phtRowWidth - 1 downto 0).asUInt ^
+      foldedUpper ^
+      io.lookupPc(fetchGroupOffsetWidth + phtRowWidth - 1 downto fetchGroupOffsetWidth)
+  } else {
+    lookupPhtIndex := (lookupGhr(4 downto 0) ##
+      io.lookupPc(fetchGroupOffsetWidth + 4 downto fetchGroupOffsetWidth)).asUInt
+  }
   val capturedTag = Reg(Bits(btbTagWidth bits)) init (0)
   val capturedPhtIndex = Reg(UInt(phtRowWidth bits)) init (0)
   // The synchronous table ports read continuously after initialization.  lookupFire qualifies
   // the response separately, so speculative/invalid addresses remain architecturally invisible
   // without placing the full frontend acceptance cone on every BRAM enable and metadata CE.
   capturedTag := lookupTag
-  capturedPhtIndex := lookupPhtIndex.asUInt
+  capturedPhtIndex := lookupPhtIndex
   io.responseValid := RegNext(lookupFire) init (False)
 
   val btbUpdateBank = io.btbUpdatePc(fetchGroupOffsetWidth - 1 downto 2)
@@ -296,7 +303,7 @@ final class BankedFetchPredictor(
       enable = phtWrite
     )
     phtRead(bank) := phtBanks(bank).readSync(
-      address = lookupPhtIndex.asUInt,
+      address = lookupPhtIndex,
       enable = !invalidating
     )
 
