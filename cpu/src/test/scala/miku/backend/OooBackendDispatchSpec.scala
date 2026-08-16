@@ -623,7 +623,11 @@ class OooBackendDispatchSpec extends AnyFunSuite {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
         "/sim-workspace-ooo-backend-dispatch")
-      .compile(new OooBackendDispatchProbe(config.copy(enableRenameOldestFallback = true)))
+      .compile(
+        new OooBackendDispatchProbe(
+          config.copy(enableRenameOldestFallback = true, enableRenameTwoWideFallback = false)
+        )
+      )
       .doSim("ooo-backend-rename-oldest-fallback", 0x4cA1) { dut =>
         dut.clockDomain.forkStimulus(period = 10)
         clearControl(dut)
@@ -654,6 +658,44 @@ class OooBackendDispatchSpec extends AnyFunSuite {
           cycles += 1
         }
         assert(partialObserved, s"no oldest-lane fallback observed after $cycles cycles")
+        dut.io.inputValid #= 0
+      }
+  }
+
+  test("rename admits a two-uop prefix when only the youngest lane is resource-blocked") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+        "/sim-workspace-ooo-backend-dispatch")
+      .compile(
+        new OooBackendDispatchProbe(
+          config.copy(enableRenameOldestFallback = true, enableRenameTwoWideFallback = true)
+        )
+      )
+      .doSim("ooo-backend-rename-two-wide-fallback", 0x4cA2) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearControl(dut)
+        // Stop execution so the dispatch queue creates the resource boundary.
+        dut.io.issueReady #= 0
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        val basePc = BigInt("1c200000", 16)
+        var twoWideObserved = false
+        var cycles = 0
+        while (!twoWideObserved && cycles < 64) {
+          dut.io.inputValid #= 7
+          for (lane <- 0 until config.renameWidth) {
+            dut.io.pc(lane) #= basePc + (cycles * config.renameWidth + lane) * 4
+            dut.io.instruction(lane) #= (BigInt("02800000", 16) | (lane + 1))
+          }
+          sleep(1)
+          twoWideObserved = twoWideObserved || dut.io.renameReady.toBigInt == 3
+          dut.clockDomain.waitSampling()
+          cycles += 1
+        }
+        assert(twoWideObserved, s"no two-lane fallback observed after $cycles cycles")
         dut.io.inputValid #= 0
       }
   }

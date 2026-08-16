@@ -70,6 +70,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val allocateReady = out Bool ()
     val allocateCapacityReady = out Bool ()
     val allocateOldestReady = out Bool ()
+    val allocateTwoReady = out Bool ()
     val allocateAccept = in Bool ()
     val allocateAcceptMask = in Bits (config.renameWidth bits)
     val allocatedPointer = out Vec (UInt(config.robPointerWidth bits), config.renameWidth)
@@ -140,6 +141,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   io.allocateCapacityReady := freeSlots >= requested
   io.allocateReady := !io.flush && io.allocateCapacityReady
   io.allocateOldestReady := !io.flush && freeSlots =/= 0
+  if (config.renameWidth >= 2) {
+    io.allocateTwoReady := !io.flush && freeSlots >= U(2, occupancy.getWidth bits)
+  } else {
+    io.allocateTwoReady := False
+  }
 
   val allocationPayload = Vec(ReorderBufferPayload(config), config.renameWidth)
   for (lane <- 0 until config.renameWidth) {

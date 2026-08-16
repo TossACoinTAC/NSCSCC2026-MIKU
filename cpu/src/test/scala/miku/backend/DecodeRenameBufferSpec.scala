@@ -99,4 +99,41 @@ class DecodeRenameBufferSpec extends AnyFunSuite {
         assert(dut.io.outputTag.map(_.toBigInt).toSeq == Seq(21, 22, 23))
       }
   }
+
+  test("two-lane prefix acceptance retains the oldest survivor and refills two slots") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+        "/sim-workspace-ooo-decode-rename-buffer")
+      .compile(new DecodeRenameBufferProbe(config))
+      .doSim("ooo-decode-rename-two-lane-prefix", 0xD303) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        dut.io.inputValid #= 0
+        dut.io.outputReady #= 0
+        dut.io.flush #= false
+        for (lane <- 0 until config.decodeWidth) dut.io.inputTag(lane) #= 0
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        dut.io.inputValid #= 7
+        dut.io.inputTag(0) #= 30
+        dut.io.inputTag(1) #= 31
+        dut.io.inputTag(2) #= 32
+        sleep(1)
+        assert(dut.io.inputReady.toBigInt == 7)
+        dut.clockDomain.waitSampling()
+
+        dut.io.inputValid #= 3
+        dut.io.inputTag(0) #= 33
+        dut.io.inputTag(1) #= 34
+        dut.io.outputReady #= 3
+        sleep(1)
+        assert(dut.io.inputReady.toBigInt == 3)
+        dut.clockDomain.waitSampling()
+        sleep(1)
+        assert(dut.io.outputValid.toBigInt == 7)
+        assert(dut.io.outputTag.map(_.toBigInt).toSeq == Seq(32, 33, 34))
+      }
+  }
 }

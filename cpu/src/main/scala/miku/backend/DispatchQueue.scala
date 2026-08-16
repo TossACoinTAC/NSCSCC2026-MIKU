@@ -17,6 +17,7 @@ final class DispatchQueue(
     val enqueue = in Vec (RenamedMicroOp(config), config.renameWidth)
     val enqueueReady = out Bool ()
     val enqueueOldestReady = out Bool ()
+    val enqueueTwoReady = out Bool ()
     val enqueueAccept = in Bool ()
     val enqueueAcceptMask = in Bits (config.renameWidth bits)
 
@@ -42,6 +43,11 @@ final class DispatchQueue(
   val freeSlots = U(config.dispatchQueueEntries, countWidth bits) - count
   io.enqueueReady := freeSlots >= enqueueCount
   io.enqueueOldestReady := freeSlots =/= 0
+  if (config.renameWidth >= 2) {
+    io.enqueueTwoReady := freeSlots >= U(2, countWidth bits)
+  } else {
+    io.enqueueTwoReady := False
+  }
 
   for (lane <- 0 until config.dispatchWidth) {
     io.dequeueValid(lane) := count > U(lane, countWidth bits)

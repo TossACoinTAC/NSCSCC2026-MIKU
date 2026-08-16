@@ -80,6 +80,9 @@ final case class OooCoreConfig(
     // Admit the oldest rename uop when a complete group cannot fit, then compact
     // the remaining decode-buffer entries behind it.
     enableRenameOldestFallback: Boolean = true,
+    // If a complete group cannot fit, admit the longest two-lane prefix that the
+    // backend can accept before falling back to the oldest lane only.
+    enableRenameTwoWideFallback: Boolean = true,
     robEntries: Int = 32,
     instructionBufferEntries: Int = 16,
     dispatchQueueEntries: Int = 8,

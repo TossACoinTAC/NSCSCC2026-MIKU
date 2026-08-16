@@ -225,6 +225,7 @@ final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourI
     val allocateReady = out Bool ()
     val allocateCapacityReady = out Bool ()
     val allocateOldestReady = out Bool ()
+    val allocateTwoReady = out Bool ()
     val allocateAccept = in Bool ()
     val allocateAcceptMask = in Bits (config.renameWidth bits)
     val commitFreeValid = in Bits (config.commitWidth bits)
@@ -262,6 +263,11 @@ final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourI
   val requested = CountOne(io.allocateValid)
   io.allocateReady := !io.flush && freeCount >= requested
   io.allocateOldestReady := !io.flush && freeCount >= io.allocateValid(0).asUInt
+  if (config.renameWidth >= 2) {
+    io.allocateTwoReady := !io.flush && freeCount >= U(2, countWidth bits)
+  } else {
+    io.allocateTwoReady := False
+  }
   // The global rename decision must not depend on destination decode and its
   // CountOne cone. Reserve enough registers for a worst-case rename group;
   // the exact ready signal remains available for local contract checks.

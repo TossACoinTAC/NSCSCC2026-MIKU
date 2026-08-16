@@ -18,6 +18,7 @@ final class LoadStoreQueueAllocator(config: OooCoreConfig = OooCoreConfig.FourIs
     val allocateReady = out Bool ()
     val allocateCapacityReady = out Bool ()
     val allocateOldestReady = out Bool ()
+    val allocateTwoReady = out Bool ()
     val allocateAccept = in Bool ()
     val allocateAcceptMask = in Bits (config.renameWidth bits)
 
@@ -54,6 +55,13 @@ final class LoadStoreQueueAllocator(config: OooCoreConfig = OooCoreConfig.FourIs
   io.allocateReady := !io.flush && io.allocateCapacityReady
   io.allocateOldestReady := !io.flush &&
     loadFree >= io.allocateIsLoad(0).asUInt && storeFree >= io.allocateIsStore(0).asUInt
+  if (config.renameWidth >= 2) {
+    val loadTwoRequested = CountOne(loadRequests(1 downto 0))
+    val storeTwoRequested = CountOne(storeRequests(1 downto 0))
+    io.allocateTwoReady := !io.flush && loadFree >= loadTwoRequested && storeFree >= storeTwoRequested
+  } else {
+    io.allocateTwoReady := False
+  }
 
   val loadReleased = CountOne(io.releaseLoadValid)
   val storeReleased = CountOne(io.releaseStoreValid)

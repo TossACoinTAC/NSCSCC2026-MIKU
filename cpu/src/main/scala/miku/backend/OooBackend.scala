@@ -244,6 +244,9 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val oldestReady = dispatchQueue.io.enqueueOldestReady &&
     rob.io.allocateOldestReady && freeList.io.allocateOldestReady &&
     lsqAllocator.io.allocateOldestReady && !io.flush
+  val twoReady = dispatchQueue.io.enqueueTwoReady &&
+    rob.io.allocateTwoReady && freeList.io.allocateTwoReady &&
+    lsqAllocator.io.allocateTwoReady && !io.flush
   val observationRenamePresent = io.renameValid.orR && !io.flush
   rob.io.observationRenameAdmission(0) := observationRenamePresent
   rob.io.observationRenameAdmission(1) := observationRenamePresent && !resourcesReady
@@ -264,14 +267,21 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val accepted = Bits(config.renameWidth bits)
   val allLanes = B((BigInt(1) << config.renameWidth) - 1, config.renameWidth bits)
   val acceptAll = resourcesReady && io.renameValid.orR
+  val acceptTwo = if (config.enableRenameTwoWideFallback && config.renameWidth >= 2) {
+    !resourcesReady && io.renameValid(1 downto 0) === B"11" && twoReady
+  } else {
+    False
+  }
   val acceptOldest = if (config.enableRenameOldestFallback) {
-    !resourcesReady && io.renameValid(0) && oldestReady
+    !resourcesReady && !acceptTwo && io.renameValid(0) && oldestReady
   } else {
     False
   }
   accepted := B(0, config.renameWidth bits)
   when(acceptAll) {
     accepted := io.renameValid
+  }.elsewhen(acceptTwo) {
+    accepted(1 downto 0) := B"11"
   }.elsewhen(acceptOldest) {
     accepted(0) := True
   }
