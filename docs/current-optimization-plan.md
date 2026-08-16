@@ -289,6 +289,29 @@ full `5.50%`；ROB 非退休头部仍以 Load/Store incomplete 为主（分别�
 获益。A02 已有独立 A/B 退化，因此下一项优先审计 R02 的 ROB/PRF/epoch 协同扩容，
 并保持默认组合不变。
 
+### R02：expanded-window 可行性 A/B
+
+`R02` 在不改变默认配置的前提下放宽了配置边界：`ROB 32 -> 64`、`PRF 64 -> 128`，
+并把 ROB 指针从 6 bit 扩为 7 bit。epoch 资格化、年龄比较和回收逻辑继续使用原生指针
+宽度；`PerfObservationV1` 为保持正式 ABI 仍只导出低 6 bit 指针字段，因此本实验只把
+observer 用于周期和结果一致性，不将 expanded 结果用于指针级观测归因。
+
+expanded 配置通过 `ReorderBufferSpec` 默认/expanded 两种完整指针绕回测试（17/17）和
+`OooCoreSpec` 容量合同（15/15）。完整 clean perf20 20/20，A01 默认基线
+`4,215,442 -> 4,167,970`，总周期下降 `1.126145%`，几何平均加速 `1.015314274x`。
+改善 14 项、退化 6 项；最大退化为 `loop_induction +2.03898%`，最大改善为
+`lookup_table -8.39206%`。逐项证据见
+`build/reports/comparisons/R8-R02-expanded-window.json`。
+
+expanded 发布 RTL 为 `build/rtl/package-expanded-r02/rtl/mycpu_top.v`，SHA-256
+`712df1c5f6c177d2e45e1a48f5f2c53036883e3168dc28c9af1eff79364c2c3e`；Yosys
+`core-top-yosys-check` 通过。generic cell 数约 `89,083`，当前默认 RTL 同门禁约
+`72,059`，增加约 `23.6%`；该统计不等同 Vivado LUT/FF，也不能推断时序。expanded
+实验因此保留为性能候选但默认关闭，下一门禁是与至少一个独立候选合并后的 matching
+100 MHz direct implementation；在得到正 WNS 前不得进入稳定组合。
+根入口使用 `make cpu-generate CPU_VARIANT=expanded-window` 显式生成该变体；省略参数时
+始终生成 `default`，不依赖容器环境中的隐式开关。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
