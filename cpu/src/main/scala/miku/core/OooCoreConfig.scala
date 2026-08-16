@@ -82,7 +82,7 @@ final case class OooCoreConfig(
     enableRenameOldestFallback: Boolean = true,
     // If a complete group cannot fit, admit the longest two-lane prefix that the
     // backend can accept before falling back to the oldest lane only.
-    enableRenameTwoWideFallback: Boolean = true,
+    enableRenameTwoWideFallback: Boolean = false,
     robEntries: Int = 32,
     instructionBufferEntries: Int = 16,
     dispatchQueueEntries: Int = 8,
