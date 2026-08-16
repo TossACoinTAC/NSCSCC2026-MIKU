@@ -11,10 +11,13 @@
   `fbc9634`，已 squash 发布到 `main @ 6b559ec`。R6 `L11+L13` matching 源码身份为
   `6bbf9ed`；它已经完成新的 direct full implementation，但 setup 未闭合，因此仍是候选，
   不替代 R5 稳定里程碑。
-- 当前 IPC 实验基线为 `R8 A01 @ 363abd6`：clean perf20 `4,215,442` cycles，20/20
-  通过；相对 SD01 `4,246,698` 减少 `0.736007%`，几何平均加速 `1.004974278x`，
-  18 项改善、2 项退化。A01 尚未执行 matching direct full，因此没有可继承的 WNS、
-  资源或板测结论。
+- 当前默认组合为 `CT05 @ 56f792c` 加 `B02-F @ 080381a/5a11fe0/7324ccb`。CT05 的
+  isolated perf20 相对 R9-CT04-RF03 为 `4,167,970 -> 4,148,574`（`-0.465358%`），
+  几何平均 `1.003287491x`，无 workload 退化。最终组合的 func58 random-AXI seeds
+  `240/255/141` 均为 `58/58 pass`。
+  B02-F 相对 CT05 为 `4,148,574 -> 3,845,728`（`-7.300002%`），几何平均
+  `1.033887409x`；完整 cpu-check 为 40 suites/257 tests、93 项 Python contracts。两项均无
+  matching direct full，不能继承任何 WNS、资源或板测结论。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - 历史 R6 L13：clean RTL 为 `4,423,675` cycles，20/20 pass，相对 L11 `4,865,310`
   下降 `9.077222%`，几何平均加速 `1.085725368x`；20 项全部改善。L13 的 clean
@@ -74,6 +77,19 @@
 
 本阶段固定 100 MHz，不做升频探索。R5 direct full 已闭合，当前 `+0.028 ns` setup WNS
 作为下一轮 IPC 候选的初始时序预算；核心性能指标仍是固定 100 MHz 下的 perf20 周期。
+
+当前阶段在固定窗口 Linux 通过后，以 matching RTL 运行完整 direct implementation。B02-F
+的 16-bit GHR、4 x 4096 x 2-bit PHT 使用 deterministic nonblocking weak-NT background
+initialization，初始化期间 fallback BTFNT，且 `tableUpdateReady` 仅受 BTB sweep 约束；它不使用
+外部 `readmem` 或阻塞 sweep。select_sort `+30.7112%`、stringsearch `+10.46449%`、fireye_B2
+`+7.85938%`、bitcount `+6.30378%`、stream_copy `+4.81811%` 是 B02-F 的明显回退，主要改善为
+fireye_I2 `-46.95697%`、minmax_sequence `-22.87373%`、quick_sort `-11.20753%`。PR 组合收益、
+板测和任何 post-route physopt 结果均不能归因给 CT05 或 B02-F，亦不能替代 matching direct full。
+ExpandedWindow Yosys 相对 CT05 仅增加 `36` 个 predictor cells；全核 cells
+`65,853 -> 65,889`（`+0.055%`）、word bits `443,241 -> 443,689`（`+0.101%`），
+没有外部 `readmem` 初始化依赖或大规模可复位 PHT 阵列。
+固定窗口 Linux random-AXI seed `5570815` 完成 `24,999,995` cycles，结束原因是
+`linux-time-window-complete`，exit code 0，未发现 DiffTest 或 trace mismatch。
 
 ## R0：实验合同
 
