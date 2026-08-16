@@ -67,7 +67,7 @@ class OooCoreSpec extends AnyFunSuite {
     assert(expanded.robEntries == 64)
     assert(expanded.robPointerWidth == 7)
     assert(expanded.enableLargeGshare)
-    assert(expanded.predictorHistoryWidth == 16)
+    assert(expanded.predictorHistoryWidth == 10)
     assert(expanded.predictorPhtEntriesPerBank == 4096)
     val legacyGshare = default.copy(enableLargeGshare = false)
     assert(legacyGshare.predictorHistoryWidth == 8)
