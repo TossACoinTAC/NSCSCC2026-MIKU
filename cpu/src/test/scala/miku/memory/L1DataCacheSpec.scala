@@ -994,6 +994,139 @@ class L1DataCacheSpec extends AnyFunSuite {
       }
   }
 
+  test("L1D overlaps independent lookups and reserves distinct miss contexts") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1d-turnover")
+      .compile(new L1DataCacheProbe(config))
+      .doSim("ooo-l1d-independent-lookup-turnover", 0x4c3d) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling(config.dataCache.sets + 8)
+        sleep(1)
+
+        val first = BigInt(0x500)
+        val second = BigInt(0x900)
+        setRequest(dut, first, isWrite = false, 0, 0xf, robPointer = 1, pdst = 3)
+        assert(dut.io.requestReady.toBoolean)
+        sample(dut)
+
+        setRequest(dut, second, isWrite = false, 0, 0xf, robPointer = 2, pdst = 4)
+        sleep(1)
+        assert(dut.io.requestReady.toBoolean)
+        sample(dut)
+        dut.io.requestValid #= false
+
+        var lineReads = Vector.empty[(BigInt, BigInt)]
+        var cycles = 0
+        while (lineReads.map(_._1).distinct.size < 2 && cycles < 12) {
+          if (dut.io.lineReadValid.toBoolean) {
+            val lineAddress = dut.io.lineRead.lineAddress.toBigInt
+            val mshrId = dut.io.lineRead.mshrId.toBigInt
+            lineReads :+= (lineAddress, mshrId)
+            dut.io.lineReadReady #= true
+          } else {
+            dut.io.lineReadReady #= false
+          }
+          sample(dut)
+          dut.io.lineReadReady #= false
+          cycles += 1
+        }
+        assert(lineReads.map(_._1).distinct.toSet == Set(first & ~BigInt(0x3f), second & ~BigInt(0x3f)))
+        assert(lineReads.map(_._2).distinct.size == 2)
+      }
+  }
+
+  test("L1D retries a younger lookup while an older dirty victim writes back") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1d-turnover-writeback")
+      .compile(new L1DataCacheProbe(config))
+      .doSim("ooo-l1d-turnover-dirty-writeback", 0x4c3e) { dut =>
+        def loadMiss(address: BigInt, fill: BigInt, pointer: BigInt): Unit = {
+          setRequest(dut, address, isWrite = false, 0, 0xf, pointer, 3)
+          while (!dut.io.requestReady.toBoolean) sample(dut)
+          sample(dut)
+          dut.io.requestValid #= false
+          val response = refillLine(dut, address & ~BigInt(0x3f), beat => fill + beat)
+          assert(response._1 == pointer)
+          sample(dut)
+        }
+
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling(config.dataCache.sets + 8)
+        sleep(1)
+
+        val setSpan = BigInt(config.dataCache.sets * config.dataCache.lineBytes)
+        val line0 = BigInt(0x100)
+        val line1 = line0 + setSpan
+        val line2 = line0 + setSpan * 2
+        val dirtyEviction = line0 + setSpan * 3
+        val independent = dirtyEviction + config.dataCache.lineBytes
+        loadMiss(line0, BigInt("1000000000000000", 16), 1)
+        loadMiss(line1, BigInt("2000000000000000", 16), 2)
+
+        setRequest(dut, line0, isWrite = true, BigInt("deadbeef", 16), 0xf, 3, 0)
+        while (!dut.io.requestReady.toBoolean) sample(dut)
+        sample(dut)
+        dut.io.requestValid #= false
+        sample(dut)
+        loadMiss(line2, BigInt("3000000000000000", 16), 4)
+
+        setRequest(dut, dirtyEviction, isWrite = false, 0, 0xf, 5, 4)
+        assert(dut.io.requestReady.toBoolean)
+        sample(dut)
+        setRequest(dut, independent, isWrite = false, 0, 0xf, 6, 5)
+        sleep(1)
+        assert(dut.io.requestReady.toBoolean)
+        sample(dut)
+        dut.io.requestValid #= false
+
+        var waitCycles = 0
+        while (!dut.io.lineWriteValid.toBoolean && waitCycles < 6) {
+          assert(!dut.io.lineReadValid.toBoolean)
+          sample(dut)
+          waitCycles += 1
+        }
+        assert(dut.io.lineWriteValid.toBoolean)
+        assert(dut.io.lineWrite.lineAddress.toBigInt == line0)
+        assert((dut.io.lineWrite.data.toBigInt & BigInt("ffffffff", 16)) == BigInt("deadbeef", 16))
+        for (_ <- 0 until 2) {
+          sample(dut)
+          assert(dut.io.lineWriteValid.toBoolean)
+          assert(!dut.io.lineReadValid.toBoolean)
+        }
+
+        dut.io.lineWriteReady #= true
+        sample(dut)
+        dut.io.lineWriteReady #= false
+
+        var lineReads = Vector.empty[(BigInt, BigInt)]
+        waitCycles = 0
+        while (lineReads.map(_._1).distinct.size < 2 && waitCycles < 16) {
+          if (dut.io.lineReadValid.toBoolean) {
+            lineReads :+= (
+              dut.io.lineRead.lineAddress.toBigInt,
+              dut.io.lineRead.mshrId.toBigInt
+            )
+            dut.io.lineReadReady #= true
+          } else {
+            dut.io.lineReadReady #= false
+          }
+          sample(dut)
+          dut.io.lineReadReady #= false
+          waitCycles += 1
+        }
+        assert(lineReads.map(_._1).distinct.toSet == Set(dirtyEviction, independent))
+        assert(lineReads.map(_._2).distinct.size == 2)
+      }
+  }
+
   test("L1D CACOP preserves dirty data for Index and Hit operations") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1d-maintenance")

@@ -155,9 +155,11 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   for (waiter <- waiters) { waiter.valid.init(False) }
 
   val lookupPending = RegInit(False)
+  val lookupArrayPending = RegInit(False)
+  val lookupRetryPending = RegInit(False)
   val lookupRequest = Reg(L1DataLookupRequest(config))
-  val lookupMshrId = Reg(UInt(mshrIdWidth bits))
-  val lookupWaiterId = Reg(UInt(waiterIndexWidth bits))
+  val lookupMshrId = Reg(UInt(mshrIdWidth bits)) init (0)
+  val lookupWaiterId = Reg(UInt(waiterIndexWidth bits)) init (0)
 
   val responseValid = RegInit(False)
   val response = Reg(CacheResponse(config))
@@ -205,6 +207,24 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     activeWaiterMask(entry) := waiters(entry).valid
     freeWaiterMask(entry) := !waiters(entry).valid
   }
+  // A lookup reserves its eventual MSHR/waiter at fire time. This keeps a turnover
+  // request from reusing the slot whose tag response is being consumed this cycle.
+  val lookupReservedMissMask = Bits(config.mshrEntries bits)
+  lookupReservedMissMask := 0
+  when(lookupPending) {
+    lookupReservedMissMask(lookupMshrId) := True
+  }
+  val availableMissMask = freeMissMask & ~lookupReservedMissMask
+  val lookupReservedWaiterMask = Bits(config.loadQueueEntries bits)
+  lookupReservedWaiterMask := 0
+  when(lookupPending && !lookupRequest.isWrite) {
+    lookupReservedWaiterMask(lookupWaiterId) := True
+  }
+  val availableWaiterMask = freeWaiterMask & ~lookupReservedWaiterMask
+  val waiterReadyMask = Bits(config.loadQueueEntries bits)
+  for (entry <- 0 until config.loadQueueEntries) {
+    waiterReadyMask(entry) := waiters(entry).valid && waiterBeatReady(entry)
+  }
   val normalBusy = lookupPending || activeMissMask.orR || activeWaiterMask.orR ||
     pendingStoreValid
   val maintenanceRequest = invalidatePending || newInvalidate ||
@@ -237,16 +257,25 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   }
   val lineMatch = lineMatchMask.orR
   val lineMatchId = selectLowest(lineMatchMask, config.mshrEntries)
-  val freeMissId = selectLowest(freeMissMask, config.mshrEntries)
-  val freeWaiterId = selectLowest(freeWaiterMask, config.loadQueueEntries)
+  val freeMissId = selectLowest(availableMissMask, config.mshrEntries)
+  val freeWaiterId = selectLowest(availableWaiterMask, config.loadQueueEntries)
 
   val installMask = Bits(config.mshrEntries bits)
   for (entry <- 0 until config.mshrEntries) {
     installMask(entry) := misses(entry).valid &&
       misses(entry).state === L1DataMshrState.install
   }
-  val lookupResponse = lookupPending && cacheArray.io.responseValid
+  val lookupResponse = lookupPending && lookupArrayPending && cacheArray.io.responseValid
   val lookupHitLoad = lookupResponse && cacheArray.io.hit && !lookupRequest.isWrite
+  val lookupMissBlockedByWriteback = lookupResponse && !cacheArray.io.hit &&
+    (activeWritebackMask | activeWritebackWaitMask).orR
+  val lookupTurnoverReady = if (config.enableDataCacheLookupTurnover) {
+    lookupResponse && !lookupRequest.isWrite && !waiterReadyMask.orR
+  } else {
+    False
+  }
+  val pendingLookupSetConflict = lookupPending &&
+    indexOf(lookupRequest.physicalAddress) === indexOf(io.request.physicalAddress)
   val refillId = io.lineReadBeat.mshrId
   val refillBaseReady = state === L1DataCacheState.normal &&
     misses(refillId).valid && misses(refillId).state === L1DataMshrState.refill
@@ -257,16 +286,18 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val pendingStoreReady = !pendingStoreValid || pendingStoreApply
 
   val commonRequestReady = state === L1DataCacheState.normal && !maintenanceRequest &&
-    !cacheArray.io.invalidateBusy && !lookupPending && !installMask.orR && !io.request.uncached &&
+    !cacheArray.io.invalidateBusy && (!lookupPending || lookupTurnoverReady) &&
+    !installMask.orR && !io.request.uncached &&
     !io.maintenanceRequest.valid
-  val mergeLoadReady = lineMatch && !io.request.isWrite && freeWaiterMask.orR
+  val mergeLoadReady = lineMatch && !io.request.isWrite && availableWaiterMask.orR
   val mergeStoreReady = lineMatch && io.request.isWrite &&
     misses(lineMatchId).state =/= L1DataMshrState.install &&
     misses(lineMatchId).state =/= L1DataMshrState.respond &&
     pendingStoreReady
-  val newLookupReady = !lineMatch && !setConflictMask.orR && freeMissMask.orR &&
+  val newLookupReady = !lineMatch && !setConflictMask.orR && !pendingLookupSetConflict &&
+    availableMissMask.orR &&
     !(activeWritebackMask | activeWritebackWaitMask).orR &&
-    (io.request.isWrite || freeWaiterMask.orR) &&
+    (io.request.isWrite || availableWaiterMask.orR) &&
     (!io.request.isWrite || pendingStoreReady) && cacheArray.io.lookupReady
   io.requestReady := commonRequestReady &&
     (mergeLoadReady || mergeStoreReady || newLookupReady)
@@ -280,8 +311,16 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val exactMaintenanceFire = io.maintenanceRequest.valid &&
     io.maintenanceRequest.ready
 
-  cacheArray.io.lookupValid := newLookupFire
-  cacheArray.io.lookupAddress := io.request.physicalAddress
+  val lookupRetrySafe = lookupRetryPending && state === L1DataCacheState.normal &&
+    !maintenanceRequest && !cacheArray.io.invalidateBusy && !installMask.orR &&
+    !(activeWritebackMask | activeWritebackWaitMask).orR && cacheArray.io.lookupReady
+  val lookupRetryFire = lookupRetrySafe
+  cacheArray.io.lookupValid := newLookupFire || lookupRetryFire
+  cacheArray.io.lookupAddress := Mux(
+    lookupRetryFire,
+    lookupRequest.physicalAddress,
+    io.request.physicalAddress
+  )
   cacheArray.io.writeValid := False
   cacheArray.io.writeIndex := 0
   cacheArray.io.writeWay := 0
@@ -314,6 +353,8 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
 
   when(newLookupFire) {
     lookupPending := True
+    lookupArrayPending := True
+    lookupRetryPending := False
     lookupRequest.physicalAddress := io.request.physicalAddress
     lookupRequest.isWrite := io.request.isWrite
     lookupRequest.byteMask := io.request.byteMask
@@ -324,6 +365,10 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     lookupRequest.loadQueueIndex := io.request.loadQueueIndex
     lookupMshrId := freeMissId
     lookupWaiterId := freeWaiterId
+  }
+  when(lookupRetryFire) {
+    lookupArrayPending := True
+    lookupRetryPending := False
   }
   when(mergeLoadFire) {
     waiters(freeWaiterId).valid := True
@@ -360,61 +405,70 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   }
 
   when(lookupResponse) {
-    lookupPending := False
-    when(cacheArray.io.hit) {
-      when(lookupRequest.isWrite) {
-        cacheArray.io.writeValid := True
-        cacheArray.io.writeIndex := indexOf(lookupRequest.physicalAddress)
-        cacheArray.io.writeWay := cacheArray.io.hitWay
-        cacheArray.io.writeTag := tagOf(lookupRequest.physicalAddress)
-        cacheArray.io.writeData := mergeStore(
-          cacheArray.io.hitData,
-          lookupRequest.physicalAddress,
-          lookupRequest.byteMask,
-          lookupRequest.writeData
-        )
-        cacheArray.io.writeEntryValid := True
-        cacheArray.io.writeDirty := True
-      }
+    when(lookupMissBlockedByWriteback) {
+      // The single victim-data register is owned by the older writeback. The younger
+      // lookup was already accepted and is replayed after that writeback drains.
+      lookupArrayPending := False
+      lookupRetryPending := True
     }.otherwise {
-      val entry = misses(lookupMshrId)
-      entry.valid := True
-      entry.state := Mux(
-        cacheArray.io.victimValid && cacheArray.io.victimDirty,
-        L1DataMshrState.writeback,
-        L1DataMshrState.readRequest
-      )
-      entry.readRequestPending := !(cacheArray.io.victimValid && cacheArray.io.victimDirty)
-      entry.lineAddress := lineAddress(lookupRequest.physicalAddress)
-      entry.criticalBeat := refillBeatIndex(lookupRequest.physicalAddress)
-      entry.victimWay := cacheArray.io.victimWay
-      entry.victimAddress := cacheArray.io.victimAddress
-      entry.refillMask := B(0, CacheContract.BeatsPerLine bits)
-      entry.refillError := False
-      entry.storeByteMask := Mux(
-        lookupRequest.isWrite,
-        storeLineByteMask(lookupRequest.physicalAddress, lookupRequest.byteMask),
-        B(0, CacheContract.LineBytes bits)
-      )
-      when(cacheArray.io.victimValid && cacheArray.io.victimDirty) {
-        missVictimData := cacheArray.io.victimData
-      }
-      when(lookupRequest.isWrite) {
-        pendingStoreValid := True
-        pendingStoreMshrId := lookupMshrId
-        pendingStoreAddress := lookupRequest.physicalAddress(offsetWidth - 1 downto 0)
-        pendingStoreByteMask := lookupRequest.byteMask
-        pendingStoreData := lookupRequest.writeData
-      }
-      when(!lookupRequest.isWrite) {
-        waiters(lookupWaiterId).valid := True
-        waiters(lookupWaiterId).mshrId := lookupMshrId
-        waiters(lookupWaiterId).physicalAddress := lookupRequest.physicalAddress
-        waiters(lookupWaiterId).robPointer := lookupRequest.robPointer
-        waiters(lookupWaiterId).recoveryEpoch := lookupRequest.recoveryEpoch
-        waiters(lookupWaiterId).pdst := lookupRequest.pdst
-        waiters(lookupWaiterId).loadQueueIndex := lookupRequest.loadQueueIndex
-        waiterBeatReady(lookupWaiterId) := False
+      lookupPending := newLookupFire
+      lookupArrayPending := newLookupFire
+      lookupRetryPending := False
+      when(cacheArray.io.hit) {
+        when(lookupRequest.isWrite) {
+          cacheArray.io.writeValid := True
+          cacheArray.io.writeIndex := indexOf(lookupRequest.physicalAddress)
+          cacheArray.io.writeWay := cacheArray.io.hitWay
+          cacheArray.io.writeTag := tagOf(lookupRequest.physicalAddress)
+          cacheArray.io.writeData := mergeStore(
+            cacheArray.io.hitData,
+            lookupRequest.physicalAddress,
+            lookupRequest.byteMask,
+            lookupRequest.writeData
+          )
+          cacheArray.io.writeEntryValid := True
+          cacheArray.io.writeDirty := True
+        }
+      }.otherwise {
+        val entry = misses(lookupMshrId)
+        entry.valid := True
+        entry.state := Mux(
+          cacheArray.io.victimValid && cacheArray.io.victimDirty,
+          L1DataMshrState.writeback,
+          L1DataMshrState.readRequest
+        )
+        entry.readRequestPending := !(cacheArray.io.victimValid && cacheArray.io.victimDirty)
+        entry.lineAddress := lineAddress(lookupRequest.physicalAddress)
+        entry.criticalBeat := refillBeatIndex(lookupRequest.physicalAddress)
+        entry.victimWay := cacheArray.io.victimWay
+        entry.victimAddress := cacheArray.io.victimAddress
+        entry.refillMask := B(0, CacheContract.BeatsPerLine bits)
+        entry.refillError := False
+        entry.storeByteMask := Mux(
+          lookupRequest.isWrite,
+          storeLineByteMask(lookupRequest.physicalAddress, lookupRequest.byteMask),
+          B(0, CacheContract.LineBytes bits)
+        )
+        when(cacheArray.io.victimValid && cacheArray.io.victimDirty) {
+          missVictimData := cacheArray.io.victimData
+        }
+        when(lookupRequest.isWrite) {
+          pendingStoreValid := True
+          pendingStoreMshrId := lookupMshrId
+          pendingStoreAddress := lookupRequest.physicalAddress(offsetWidth - 1 downto 0)
+          pendingStoreByteMask := lookupRequest.byteMask
+          pendingStoreData := lookupRequest.writeData
+        }
+        when(!lookupRequest.isWrite) {
+          waiters(lookupWaiterId).valid := True
+          waiters(lookupWaiterId).mshrId := lookupMshrId
+          waiters(lookupWaiterId).physicalAddress := lookupRequest.physicalAddress
+          waiters(lookupWaiterId).robPointer := lookupRequest.robPointer
+          waiters(lookupWaiterId).recoveryEpoch := lookupRequest.recoveryEpoch
+          waiters(lookupWaiterId).pdst := lookupRequest.pdst
+          waiters(lookupWaiterId).loadQueueIndex := lookupRequest.loadQueueIndex
+          waiterBeatReady(lookupWaiterId) := False
+        }
       }
     }
   }
@@ -592,10 +646,6 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     misses(installId).state := L1DataMshrState.respond
   }
 
-  val waiterReadyMask = Bits(config.loadQueueEntries bits)
-  for (entry <- 0 until config.loadQueueEntries) {
-    waiterReadyMask(entry) := waiters(entry).valid && waiterBeatReady(entry)
-  }
   val responseWaiterId = selectLowest(waiterReadyMask, config.loadQueueEntries)
   val responseMshrId = waiters(responseWaiterId).mshrId
   val responseRefillBeats = Vec(Bits(CacheContract.BeatBits bits), CacheContract.BeatsPerLine)
