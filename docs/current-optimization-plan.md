@@ -322,6 +322,32 @@ expanded 发布 RTL 为 `build/rtl/package-expanded-r02/rtl/mycpu_top.v`，SHA-2
 根入口使用 `make cpu-generate CPU_VARIANT=expanded-window` 显式生成该变体；省略参数时
 始终生成 `default`，不依赖容器环境中的隐式开关。
 
+### L15：Store 容量独立 A/B
+
+M05 v12 中 `stream_copy`、`stringsearch`、`bubble_sort` 和 `dhrystone` 的 SQ-full 比例较高，
+因此用 opt-in `CPU_VARIANT=expanded-stores` 将 STQ/SDQ 从 8 项同时扩到 16 项；默认配置
+保持不变。定向容量合同、完整 `cpu-check`（40 suites/247 tests、82 项 Python 合同）与
+clean perf20 20/20 均通过。
+
+相对 A01，周期仅从 `4,215,442` 降到 `4,211,623`，总周期改善 `0.090595%`，几何平均
+加速 `1.002099817x`。Yosys generic cells 从 `72,059` 增至 `76,637`（`+6.353%`），
+新增部分精确集中在 `LoadStoreQueue +3,041` 和 `StoreDataQueue +1,537`；SDQ 的 raw LTP
+还从 23 增至 31。该收益/压力比明显不足，L15 被否决，不进入组合 perf20 或 Vivado；
+opt-in 变体只用于复现实验。周期比较见 `build/reports/comparisons/R8-L15-expanded-stores.json`，
+结构比较见 `build/reports/yosys/R8-default-vs-L15-expanded-stores-v1.json`。
+
+### R8 Yosys 结构分析基线
+
+新增的 Yosys harness 直接读取显式冻结 RTL，不依赖 `cpu-generate`，约 43--50 秒完成一份
+层次实例加权 generic-cell 与关键模块/全核 raw LTP 报告。default、R02 和 L15 的真实
+三点校准分别复现了 `72,059`、`89,083`、`76,637` cells；R02 的增量被拆到 ROB、
+RenameMap、PRF 和 FreeList，L15 的增量被拆到 LSQ/SDQ。三者全核 raw LTP 都为 104，
+说明结构规模、局部组合深度和器件实现时序必须分别判断。
+
+完整 `synth_xilinx` 校准在 5 分 39 秒时仍处于资源共享/techmap，峰值约 4.0 GiB，且日志
+超过 400 MiB，因此不进入常规门禁。日常 Yosys 报告用于候选实现前的压力定位和候选间
+配对比较；100 MHz 晋级仍只接受 matching Vivado direct full implementation。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
