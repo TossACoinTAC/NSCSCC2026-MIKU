@@ -339,30 +339,26 @@ final class IssueQueue(
   val selectWakeupSlot2 = Bits(physicalSlotCount bits)
   val readySlot = Bits(physicalSlotCount bits)
   for (slot <- 0 until physicalSlotCount) {
-    wakeupSlot1(slot) := False
-    wakeupSlot2(slot) := False
-    selectWakeupSlot1(slot) := False
-    selectWakeupSlot2(slot) := False
+    val wakeupSource1 = Bits(config.writebackWidth bits)
+    val wakeupSource2 = Bits(config.writebackWidth bits)
+    val selectWakeupSource1 = Bits(config.writebackWidth bits)
+    val selectWakeupSource2 = Bits(config.writebackWidth bits)
     for (write <- 0 until config.writebackWidth) {
-      when(io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc1) {
-        wakeupSlot1(slot) := True
-      }
-      when(io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc2) {
-        wakeupSlot2(slot) := True
-      }
-      when(
+      wakeupSource1(write) :=
+        io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc1
+      wakeupSource2(write) :=
+        io.wakeupValid(write) && io.wakeupPdst(write) === payloadSlots(slot).psrc2
+      selectWakeupSource1(write) :=
         io.selectWakeupValid(write) &&
           io.selectWakeupPdst(write) === payloadSlots(slot).psrc1
-      ) {
-        selectWakeupSlot1(slot) := True
-      }
-      when(
+      selectWakeupSource2(write) :=
         io.selectWakeupValid(write) &&
           io.selectWakeupPdst(write) === payloadSlots(slot).psrc2
-      ) {
-        selectWakeupSlot2(slot) := True
-      }
     }
+    wakeupSlot1(slot) := wakeupSource1.orR
+    wakeupSlot2(slot) := wakeupSource2.orR
+    selectWakeupSlot1(slot) := selectWakeupSource1.orR
+    selectWakeupSlot2(slot) := selectWakeupSource2.orR
     val storeDataIsDecoupled =
       if (config.executionPorts(portIndex).capabilities.contains(ExecutionUnitKind.LoadStore)) {
         payloadSlots(slot).memory.isStore
