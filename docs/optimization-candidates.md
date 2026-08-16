@@ -191,7 +191,33 @@ cache/L2 4 条（71.92%）和 LSQ 2 条（80.89%）；另有 15--16 层的 multi
 `lookupMshrId` 网络）。两项均要求不改变可见拍数、先跑定向/完整门禁、Yosys 同配置结构对照，
 再与完整 perf20 一同决定是否进入下一次 direct full。
 
-## 4. 当前优先级与下一步
+## 4. R10 时序候选批次
+
+R10 是在 R7--B02-F 历史路径审计基础上形成的批次，包含 6 个针对历史 LSQ/ROB
+路径的局部化候选（MT12/MT13/MT14、RT12/RT13/RT14）以及 4 个全局候选
+（DQ02、IQT01、MT11、CT06）。这些候选均保持原有寄存边界和可见周期语义，已分别
+通过受影响的 Scala 定向 suite；完整 `cpu-check` 已在批次提交后通过。当前批次的
+Yosys 结构报告为 `build/reports/yosys/R10-CT06-timing-batch/summary.json`，与
+R9 CT05+B02-F 参考的对比为 `build/reports/yosys/R10-CT06-vs-R9.json`。Yosys
+结果显示全核 cells `65889 -> 58914`（`-10.586%`）、post-flatten cells
+`59810 -> 52899`（`-11.555%`），word bits `443689 -> 403607`（`-9.034%`）；
+这些是综合前结构筛选数据，不能替代 Vivado 时序。LSQ 为 `7470 -> 7475`，因此
+MT11/MT12/MT13/MT14 的物理收益仍需由 matching implementation 交叉验证。
+
+| 候选 | 当前验证状态 | 当前效果 | 下一门禁 |
+| --- | --- | --- | --- |
+| MT12/MT13/MT14 | 定向 LSQ suite 通过；完整门禁通过 | perf20 正在运行，尚无周期结论 | 完整 perf20 逐项对比；LSQ top-N |
+| RT12/RT13/RT14 | ROB wrap/epoch/commit suite 通过；完整门禁通过 | perf20 正在运行，尚无周期结论 | 完整 perf20 逐项对比；ROB/CSR top-N |
+| DQ02/IQT01 | IssueQueue/dispatch 定向 suite 通过；完整门禁通过 | perf20 正在运行，尚无周期结论 | 完整 perf20 逐项对比；IQ top-N |
+| MT11 | L1D refill/partial-store suite 通过；完整门禁通过 | perf20 正在运行，Yosys L1D 结构近似持平 | 完整 perf20 逐项对比；L1D/cache top-N |
+| CT06 | L2 maintenance/write-state suite 通过；完整门禁通过 | perf20 正在运行，Yosys L2 `1150 -> 1138`（-12 cells） | 完整 perf20 逐项对比；L2 top-N |
+
+本批次尚未形成正式 WNS、资源、Linux 或板测证据。在 perf20 完成前不启动 Vivado；若
+完整 perf20 逐项透明且 Yosys 结构没有反常增长，再以 R10 组合执行一次 matching
+100 MHz direct full。后续 direct full 前仍至少保留 5 个完成定向验证、完整门禁、Yosys
+和 perf20 的时序候选；若任何候选被移除，必须补入新的候选并保留独立证据。
+
+## 5. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
@@ -213,11 +239,11 @@ cache/L2 4 条（71.92%）和 LSQ 2 条（80.89%）；另有 15--16 层的 multi
 7. 当前阶段以 CT05 的 isolated perf20、最终组合通过的 func58 三 seed 和 B02-F 的完整软件门禁为准。任何
    post-route physopt 仅用于路径探索，不是 matching direct full，不能作为正式时序、资源、组合收益或板测归因证据。
 
-## 5. 详细说明的维护边界
+## 6. 详细说明的维护边界
 
 上表保存每个候选的完整机制、风险、决策指标、当前状态和效果。涉及流水级行为、示例和理论推导的长篇说明继续保留在 [architecture.md](architecture.md) 对应的十二阶段章节，以免把教学主线拆碎；这些章节不再维护第二份状态列。候选状态发生变化时只更新本文，并把不可变的 cycles、RTL hash、工具版本、WNS/资源和报告路径写入对应实验 manifest。
 
-## 6. 证据入口
+## 7. 证据入口
 
 - 当前 RTL：`build/rtl/generation-manifest.json`。
 - R6 L11 perf20：`build/sim/runs/cpu_1548f170c573_chiplab_c398d274812f/clean-perf20_model_858465589681_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`；逐项比较为 `build/reports/comparisons/R6-L11.json`。
