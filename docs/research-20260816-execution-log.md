@@ -84,3 +84,31 @@
 - EPYC2 根分区曾 100% 满，已删除 6 个已停止 Docker 容器释放约 9.25 GB；
   当前仍只有约 8.4 GB 可用，后续大构建前需要继续清理旧 build 目录或 Docker
   volume（需与协作者确认）。
+
+## 2026-08-16 时序修复轮（dev/research-20260816-four-fix）
+
+首轮拼合 R6 L03/L02/cache/MSHR 与 LSQ 转发后，perf20 板测 `passed` 但
+Vivado setup WNS `-0.506 ns`、hold `+0.024 ns`。`cpu_setup_top50.rpt` 显示两条
+主导路径族：
+
+1. `rob/candidatePointer_0_reg[1]_rep__10`（fanout 120）经提交状态系统操作译码、
+   payload bank 地址、head-bypass 资格化，落到 `stagedHeadCompletionBypassValid`、
+   LSQ/registerMap/CSR 的 CE/D；route 占比约 82%。
+2. `loadStoreQueue/scheduledLoad_physicalAddress_reg[17]` 经 byte-lane 转发比较、
+   `bankedForwardCompletion`、storeHead 释放，落到 lsqAllocator occupancy 更新；
+   16 级逻辑、route 占比约 74%。
+
+修复组合：
+
+- 采纳协作者 `4ee3909`（`dev/L03-commit-timing`）：把
+  `systemOperationIsNone` / `systemOperationIsMemoryBarrier` 在 ROB allocation
+  时预解码进 state，从 commit/head-bypass 路径移除 5-bit 系统操作译码和 barrier
+  比较。
+- 采纳协作者 `ab820dd`（`dev/L03-predictor-cache-flags`）：移除 byte-lane 多 store
+  LSQ 转发，保留 16 位 GHR 4x4096 PHT 与 per-MSR victim buffer。
+
+本地状态：
+
+- macOS `sbt test`：39 suites / 233 tests pass（删除 2 个 byte-lane 特定测试）。
+- EPYC2 锁定容器 `cpu-generate cpu-locked-gates` 全部 pass。
+- 完整 SoC perf 100 MHz Vivado direct full 正在 /dev/shm 重新实现，结果待记录。
