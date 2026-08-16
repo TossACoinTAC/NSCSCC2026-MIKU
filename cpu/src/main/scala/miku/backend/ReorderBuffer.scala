@@ -694,7 +694,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   io.headPointer := commitPointer
 
   require(config.writebackWidth == 5)
-  require(config.robPointerWidth == 6)
   val perfObservationV1Word4 = Bits(PerfObservationV1.WordWidth bits)
   perfObservationV1Word4 := 0
   val observationBranchResolved = Bits(config.writebackWidth bits)
@@ -706,7 +705,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     observationBranchMispredict(lane) :=
       observationBranchResolved(lane) && stagedBranchMispredict(lane)
     perfObservationV1Word4(10 + lane * 6 + 5 downto 10 + lane * 6) :=
-      stagedRobPointer(lane).asBits
+      stagedRobPointer(lane).asBits.resize(6)
   }
   perfObservationV1Word4(4 downto 0) := observationBranchResolved
   perfObservationV1Word4(9 downto 5) := observationBranchMispredict

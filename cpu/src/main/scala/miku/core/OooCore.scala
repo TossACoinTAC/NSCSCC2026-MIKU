@@ -392,7 +392,6 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
   io.frontendOccupancy := frontend.io.occupancy
 
   require(config.commitWidth == 3)
-  require(config.robPointerWidth == 6)
   val perfObservationV1Word1 = Bits(PerfObservationV1.WordWidth bits)
   perfObservationV1Word1 := 0
   val observationRetired = Bits(config.commitWidth bits)
@@ -415,7 +414,10 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
   perfObservationV1Word1(27) := predictorUpdateQueue.io.popValid
   perfObservationV1Word1(28) :=
     predictorUpdateQueue.io.popValid && predictorUpdateQueue.io.popReady
-  perfObservationV1Word1(34 downto 29) := io.recovery.robPointer.asBits
+  // V1 reserves six bits for the default 32-entry pointer.  The expanded
+  // experiment keeps the observation ABI stable and uses the low bits only;
+  // functional ROB identity remains carried at its native width internally.
+  perfObservationV1Word1(34 downto 29) := io.recovery.robPointer.asBits.resize(6)
   perfObservationV1Word1(37 downto 35) := committedBranch
   PerfObservationV1.expose(perfObservationV1Word1, 1)
 }

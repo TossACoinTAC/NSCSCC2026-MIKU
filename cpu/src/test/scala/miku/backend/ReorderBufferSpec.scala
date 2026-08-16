@@ -1191,13 +1191,19 @@ class ReorderBufferSpec extends AnyFunSuite {
   }
 
   test("ROB rejects an old-epoch completion after the full pointer identity wraps") {
-    val config = OooCoreConfig.FourIssueThreeCommit.copy(
-      enableHeadCompletionCommitBypass = true
+    val variants = Seq(
+      ("default", OooCoreConfig.FourIssueThreeCommit, 0x4f4f4c),
+      ("expanded-window", OooCoreConfig.ExpandedWindow, 0x4f4f5c)
     )
-    SimConfig.withVerilator
-      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-rob")
-      .compile(new ReorderBufferProbe(config))
-      .doSim("ooo-rob-full-pointer-wrap-epoch-qualification", 0x4f4f4c) { dut =>
+    for ((variant, baseConfig, seed) <- variants) {
+      val config = baseConfig.copy(enableHeadCompletionCommitBypass = true)
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-rob-full-pointer-$variant"
+        )
+        .compile(new ReorderBufferProbe(config))
+        .doSim(s"ooo-rob-full-pointer-wrap-epoch-qualification-$variant", seed) { dut =>
         def sample(): Unit = {
           dut.clockDomain.waitSampling()
           sleep(1)
@@ -1242,7 +1248,8 @@ class ReorderBufferSpec extends AnyFunSuite {
         dut.io.flush #= false
         assert(dut.io.empty.toBoolean)
 
-        // Retire pointers 1..63 so both index and generation return to pointer 0.
+        // Retire every remaining pointer identity so index and generation both
+        // return to pointer 0.  The expanded variant exercises the new seventh bit.
         dut.io.currentEpoch #= 1
         for (pointer <- 1 until (1 << config.robPointerWidth)) {
           allocateOne(expectedPointer = pointer, pc = pointer)
@@ -1277,5 +1284,6 @@ class ReorderBufferSpec extends AnyFunSuite {
         sample()
         assert(dut.io.occupancy.toBigInt == 0)
       }
+    }
   }
 }

@@ -51,6 +51,19 @@ class OooCoreSpec extends AnyFunSuite {
     assert(config.level2Cache.lineBytes == 64)
   }
 
+  test("the expanded-window experiment changes capacity without changing the default core") {
+    val default = OooCoreConfig.FourIssueThreeCommit
+    val expanded = OooCoreConfig.ExpandedWindow
+
+    assert(default.physicalRegs == 64)
+    assert(default.robEntries == 32)
+    assert(default.robPointerWidth == 6)
+    assert(expanded.physicalRegs == 128)
+    assert(expanded.robEntries == 64)
+    assert(expanded.robPointerWidth == 7)
+    assert(expanded.copy(physicalRegs = default.physicalRegs, robEntries = default.robEntries) == default)
+  }
+
   test("invalid width and cache configurations fail closed") {
     val invalid = Seq[() => Any](
       () => OooCoreConfig(fetchWidth = 3),

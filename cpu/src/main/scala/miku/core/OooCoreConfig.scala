@@ -210,7 +210,9 @@ final case class OooCoreConfig(
   val recoveryEpochWidth: Int = 8
   val memoryEpochWidth: Int = 8
   val reservationAddressWidth: Int = xlen - dataCache.offsetWidth
-  require(robEntries <= 32, "the memory epoch proof assumes at most 32 live ROB entries")
+  // Pointer age uses the high bit of a full circular distance.  The memory
+  // epoch proof must have at least twice as many representable states as the
+  // maximum live ROB window; this also permits the 64-entry R02 experiment.
   require(
     robEntries < (1 << (memoryEpochWidth - 1)),
     "the memory epoch must distinguish every live ROB entry across wraparound"
@@ -231,4 +233,11 @@ object OooCoreConfig {
   )
 
   val FourIssueThreeCommit: OooCoreConfig = OooCoreConfig()
+
+  // R02 experiment only.  The public/default core remains FourIssueThreeCommit;
+  // this variant is selected explicitly by the core-top generator.
+  val ExpandedWindow: OooCoreConfig = FourIssueThreeCommit.copy(
+    physicalRegs = 128,
+    robEntries = 64
+  )
 }
