@@ -87,7 +87,9 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
   val lineMemories = Array.fill(CacheContract.BeatsPerLine)(
     Mem(Bits(CacheContract.BeatBits bits), config.mshrEntries)
   )
-  val missVictimData = Vec.fill(config.mshrEntries)(Reg(Bits(CacheContract.LineBits bits)))
+  val missVictimMemories = Array.fill(CacheContract.BeatsPerLine)(
+    Mem(Bits(CacheContract.BeatBits bits), config.mshrEntries)
+  )
   for (entry <- misses) {
     entry.valid.init(False)
     entry.state.init(L2MshrState.readRequest)
@@ -289,7 +291,15 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
           L2MshrState.readRequest
         )
         when(cacheArray.io.victimValid && cacheArray.io.victimDirty) {
-          missVictimData(lookupMshrId) := cacheArray.io.victimData
+          for (beat <- 0 until CacheContract.BeatsPerLine) {
+            missVictimMemories(beat).write(
+              address = lookupMshrId,
+              data = cacheArray.io.victimData(
+                beat * CacheContract.BeatBits + CacheContract.BeatBits - 1 downto
+                  beat * CacheContract.BeatBits
+              )
+            )
+          }
         }
       }
     }
@@ -320,9 +330,16 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
   }
 
   val missWritebackId = selectLowest(missWritebackMask, config.mshrEntries)
+  val missWritebackData = Bits(CacheContract.LineBits bits)
+  for (beat <- 0 until CacheContract.BeatsPerLine) {
+    missWritebackData(
+      beat * CacheContract.BeatBits + CacheContract.BeatBits - 1 downto
+        beat * CacheContract.BeatBits
+    ) := missVictimMemories(beat).readAsync(missWritebackId)
+  }
   io.memoryWriteValid := False
   io.memoryWrite.lineAddress := misses(missWritebackId).victimAddress
-  io.memoryWrite.data := missVictimData(missWritebackId)
+  io.memoryWrite.data := missWritebackData
   io.memoryWrite.byteMask := B(
     (BigInt(1) << CacheContract.LineBytes) - 1,
     CacheContract.LineBytes bits
