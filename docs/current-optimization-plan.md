@@ -16,8 +16,9 @@
   几何平均 `1.003287491x`，无 workload 退化。最终组合的 func58 random-AXI seeds
   `240/255/141` 均为 `58/58 pass`。
   B02-F 相对 CT05 为 `4,148,574 -> 3,845,728`（`-7.300002%`），几何平均
-  `1.033887409x`；完整 cpu-check 为 40 suites/257 tests、93 项 Python contracts。两项均无
-  matching direct full，不能继承任何 WNS、资源或板测结论。
+  `1.033887409x`；完整 cpu-check 为 40 suites/257 tests、93 项 Python contracts。R9 的
+  matching direct full 在 route 中止，未形成完成的 implementation，不能继承任何 WNS、资源或
+  板测结论。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 - 历史 R6 L13：clean RTL 为 `4,423,675` cycles，20/20 pass，相对 L11 `4,865,310`
   下降 `9.077222%`，几何平均加速 `1.085725368x`；20 项全部改善。L13 的 clean
@@ -90,6 +91,26 @@ ExpandedWindow Yosys 相对 CT05 仅增加 `36` 个 predictor cells；全核 cel
 没有外部 `readmem` 初始化依赖或大规模可复位 PHT 阵列。
 固定窗口 Linux random-AXI seed `5570815` 完成 `24,999,995` cycles，结束原因是
 `linux-time-window-complete`，exit code 0，未发现 DiffTest 或 trace mismatch。
+
+R9 `CT05+B02-F` 的 direct full 从 matching RTL 开始，但在 route Global Iteration 1 后主动
+中止：route 记录的中间 WNS/TNS 为 `-2.602/-7,764.275 ns`、峰值 overlap `115,866`、最终
+样本 overlap `4,986`，`complete=false`，没有 routed DCP、正式 WNS、DRC 或 bitstream。placed
+DCP 的 CPU top-50 最差为 `-1.131 ns`，分布为 IQ 14 条（平均 route 82.29%）、ROB/CSR 16 条
+（79.62%）、cache/L2 4 条（71.92%）、LSQ 2 条（80.89%）、predictor 1 条和 other CPU 13 条；
+其中 multiplier 结果路径具有 15--16 层逻辑，不属于 B02-F 的预测器锥。synth 的资源为
+`96,466 LUT/45,234 FF/92 BRAM tile/8 DSP`，placed 为 `100,574 LUT/54,801 FF/94.5 BRAM tile/8 DSP`。
+这些均是同一组合的探索信息，不能拆分归因给 CT05 或 B02-F，也不能归档为正式产物。报告位于
+`build/reports/timing/R9-CT05-B02F-placed-dcp/` 与
+`build/reports/timing/R9-CT05-B02F-partial-route-health.json`。
+
+下一轮先将 B02-F 的显著分项回退转为独立实验：以 baseline/B02-F 的稳定 `PerfObservationV1`
+分支 resolved/mispredict 计数和 20 项 cycles 对照，比较 8/10/12/14/16-bit history 与同为
+4 x 4096 的 index/fold 方案。metadata 目前恰好容纳 12-bit index、2-bit state 和 row-valid，
+不先引入需要扩宽 metadata 的 tournament 预测器。物理候选只选择不改变可见拍数的局部结构：
+`IQT01` 将 IQ 到执行端的 source-tag 选择本地化，目标是 placed top-50 的 `psrc -> multiplier/
+issueOperandSource` 高 route 路径；`MT11` 将 L1D refill 的 byte-mask/write-owner 控制按 bank
+局部化，目标是 partial route 中 256--729 fanout 的 refill/`lookupMshrId` 网络。每项先做
+定向测试、完整门禁、Yosys 同配置对照和合并 perf20；出现严重回退时再按提交边界分解。
 
 ## R0：实验合同
 

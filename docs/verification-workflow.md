@@ -113,6 +113,12 @@ Yosys 工具身份和分析配置完全相同的两份报告，避免把工具�
 每个 LTP 原始文件还有默认 8 MiB 的硬上限；若 Yosys 因新层级反馈产生异常规模的假环诊断，
 harness 会终止分析并删除超限文件，不能生成可用于候选决策的半成品报告。
 
+Yosys 结果属于结构证据，不是功能仿真，也不是物理实现证据。它适合验证同一冻结 RTL、
+同一工具版本和同一分析配置下的存储推断意图、寄存器/宽 mux 迁移、层次归属及相对逻辑
+规模；不能预测 Vivado 的 LUT/slice/control-set 映射、高扇出复制、拥塞或 WNS。候选只能
+把 Yosys 当作快速筛选门槛，仍须以 matching Vivado top-N、primitive inference、route health
+和 direct full implementation 判定物理收益。
+
 这些指标用于综合前发现容量扩张、宽 mux、局部深链和压力集中的模块。hierarchy 统计可能包含
 后续会被剪枝的逻辑，post-flatten 统计也仍未做 FPGA 器件映射；generic cells 和 word-bits 都
 不是 Vivado LUT/FF，LTP 不包含器件映射、布线和时钟约束，均不能替代 matching direct
@@ -196,6 +202,12 @@ setup/hold。fully routed 只能证明最终可布通；高 overlap、反复
 `Post_Impl_Bundles/`；即使 slack 非负，也不能进入 `Stable_Backup/` 或作为竞赛 sign-off。
 post-route 结果只用于识别物理随机性、路径簇和下一轮 RTL/实现策略；正式竞赛 bitstream
 必须由对应 RTL 从头执行一次 full implementation，且该次 full run 自身满足全部门禁。
+
+实现中止或失败时，不得运行 `soc-archive`，也不得把 partial DCP、报告或 bitstream 标记为
+正式实现/里程碑证据。若已完成 placement 或产生可读取的 DCP，可用
+`make soc-report-dcp SOC_REPORT_DCP=<placed-or-routed.dcp>` 只读导出 top-N、route status 和
+层级资源；配合 `ROUTE_ALLOW_PARTIAL=1` 的 route health，它们只服务于下一轮 RTL 取舍，
+不会启动 implementation、physical optimization 或归档。
 
 ## 四、候选选择规则
 

@@ -69,6 +69,8 @@ YOSYS_LTP_MAX_MB ?= 8
 BOARD_JOB ?=
 POST_ROUTE_INPUT_DCP ?= $(BUILD_ROOT)/chiplab-perf/fpga/nscscc-team/run_vivado/project/loongson.runs/impl_1/soc_top_routed.dcp
 POST_ROUTE_OUTPUT ?= $(BUILD_ROOT)/vivado/postroute-$(shell date +%Y%m%d-%H%M%S)
+SOC_REPORT_DCP ?= $(POST_ROUTE_INPUT_DCP)
+SOC_REPORT_OUT ?= $(BUILD_ROOT)/reports/vivado/dcp-$(shell date +%Y%m%d-%H%M%S)
 CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
 PERF20_TIME_LIMIT ?= 600000000
 FUNC58_TIME_LIMIT ?= 30000000
@@ -81,7 +83,7 @@ CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-l
 
 .PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze route-analyze yosys-analyze yosys-compare test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
-  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
+  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-report-dcp soc-archive soc-timing \
   board-queue board-status board-result \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
@@ -116,6 +118,7 @@ help:
 		'  make board-result BOARD_JOB=<id>  查询板测终态证据' \
 		'  make soc-impl           Vivado 宿主机完整 SoC 实现' \
 		'  make soc-postroute-opt  复用 routed DCP 做时序探索（非竞赛产物）' \
+		'  make soc-report-dcp     只读提取 placed/routed DCP 的时序、路由和层级资源' \
 		'  make soc-archive        校验并归档当前完整 SoC 实现' \
 		'  make wave WAVE=...      用宿主机 Surfer 查看波形' \
 		'  make clean              清理可再生构建输出，保留 IDE 状态' \
@@ -317,6 +320,13 @@ soc-postroute-opt:
 		SOC_BUILD_DIR="$(BUILD_ROOT)/chiplab-$(SOC_BUILD_KIND)" \
 		SOC_IMPL_DIR="$(POST_ROUTE_OUTPUT)" SOC_IMPL_STAGE=postroute \
 		SOC_ARCHIVE_CLASS=candidate PERF_CPU_MHZ="$(PERF_CPU_MHZ)"
+
+soc-report-dcp:
+	@test -f "$(SOC_REPORT_DCP)" || { printf 'DCP 不存在: %s\n' "$(SOC_REPORT_DCP)" >&2; exit 2; }
+	@mkdir -p "$(SOC_REPORT_OUT)"
+	@"$(VIVADO)" -mode batch -source "$(ROOT_DIR)/scripts/vivado/report_impl.tcl" \
+		-tclargs "$(SOC_REPORT_DCP)" "$(SOC_REPORT_OUT)"
+	@printf 'DCP 只读报告：%s\n' "$(SOC_REPORT_OUT)"
 
 soc-archive:
 	@test -n "$(strip $(SOC_EXPERIMENT_MANIFEST))" || { printf 'SOC_EXPERIMENT_MANIFEST 不能为空\n' >&2; exit 2; }

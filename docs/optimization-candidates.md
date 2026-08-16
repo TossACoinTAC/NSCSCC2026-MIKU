@@ -1,6 +1,6 @@
 # MIKU 优化候选账本与实验状态
 
-最后同步：2026-08-16。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)。本轮 top-50 之外的静态时序审计见 [timing-static-audit-r5.md](timing-static-audit-r5.md)。
+最后同步：2026-08-17。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)。本轮 top-50 之外的静态时序审计见 [timing-static-audit-r5.md](timing-static-audit-r5.md)。
 
 ## 1. 状态与编号合同
 
@@ -37,8 +37,7 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 matching direct full、Linux 和板测证据尚未产生，因此只继承本次软件门禁结果，不继承任何旧 RTL 的 WNS 或实现结果。
 
 当前默认组合包含 `CT05 @ 56f792c` 与 `B02-F @ 080381a/5a11fe0/7324ccb`；B02-E 的实现和定向回归仅保留为 opt-in 历史实验。
-CT05 的 isolated perf20 已完成；最终组合的 func58 三个 random-AXI seed 均通过。B02-F 已完成完整软件门禁。`RT10+RF02+MT10` 的一次 direct route 已停止在中间阶段，未完成实现，
-不得标为运行中任务或用作正式 WNS/实现证据。
+CT05 的 isolated perf20 已完成；最终组合的 func58 三个 random-AXI seed 均通过。B02-F 已完成完整软件门禁。R9 的 matching direct full 已在 route 中止，`complete=false`，不得标为运行中任务或用作正式 WNS/实现证据；其 placed top-50 与 partial route health 仅用于候选排序。
 
 本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。L07 窄 Store completion 将其降至 `5,104,911`（增量 `-3.663820%`，几何平均 `1.038957091x`），BR01 再降至 `5,057,854`（增量 `-0.921799%`，几何平均 `1.009753745x`；相对原始 baseline 累计 `-8.768094%`），W01/FT06/MT05/WT04/PT01/AT01/RT01 节点为 `5,014,520`，逐项周期透明。R3 matching direct full 为 `-0.440/+0.009 ns`，相对 WT04 的 setup WNS 改善 `0.149 ns`、TNS 改善 `28.035 ns`，但仍未闭合。各增量的逐项变化均单独记录，不能把累计收益拆分给其他候选。MT03+BT03 matching 100 MHz direct full 的 setup/hold 为 `-0.694/+0.053 ns`；L07+BR01+BT04 matching direct full 为 `-1.442/+0.050 ns`，因此 BT04 已否决。恢复 BT03 并加入 WT01 后，matching direct full 为 `-0.824/+0.056 ns`；WT01 将 recovery 驱动的 IQ 路径从 top-50 的 47 条降为 0 条，但 frontend、predictor、L1I 和 ATU 路径转为主导，R1 仍未闭合。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
 
@@ -172,6 +171,25 @@ CT05 的 isolated perf20 已完成；最终组合的 func58 三个 random-AXI se
 | CT04 | L2 dirty victim payload 浅存储化 | C10 要求每个 MSHR 独占 512-bit dirty victim；直接使用四组宽寄存器会展开为大规模 FF 与 4:1 line mux。按 8 个 64-bit beat bank、每 bank 深度 4 保存相同所有权，writeback ID 异步读取并拼回 cache line | 必须保持两个 dirty miss 并发、任意 `BRESP` error retry、MSHR 回收和写后读语义；浅 memory primitive 数增加，最终物理收益仍需 direct route 证明 | C10 双 dirty miss/error retry、L2 完整 suite、Yosys memory/sequential/mux/LTP、cache/L2 top-N、route overlap | 已实现并默认使用；定向与 Yosys 通过，待组合软件和 direct route | L2 suite 9/9；相对 C10 宽寄存器实现，L2 word-bits `30,303 -> 18,629`。相对修复前单一 victim baseline，L2 word-bits `20,053 -> 18,629`、sequential bits `3,222 -> 2,710`、mux bits `16,066 -> 15,138`，memory bits `2,048 -> 4,096`、cells `1,035 -> 1,150`；LTP 保持 35。 |
 | CT05 | L1D dirty victim payload 浅存储化与 lookup 解阻 | 移除全局 dirty writeback 对其他 set lookup 的阻塞；每个 MSHR 以 8 x 64-bit 浅存储保存 victim data，使并发 dirty miss、writeback 与 `BRESP` error retry 均保持各自的 victim identity。PR #1 将其称为 L15；本账本使用 CT05，避免与既有 STQ/SDQ L15 冲突 | 每 MSHR 的 beat bank、MSHR 身份、writeback/retry 与回收必须一致；浅存储的 memory primitive 增加，不能仅以静态 bit 数推断 route 收益 | 双 set dirty miss、writeback backpressure/`BRESP` error retry、L1D suite、完整 perf20、func58、Yosys memory/sequential/mux/LTP、matching direct route | 已实现、默认启用；isolated perf20 与组合 func58 通过 | `56f792c`；L1D suite 15/15，完整门禁 40 suites/256 tests 与 93 项 Python contracts 通过。独立 perf20 `4,167,970 -> 4,148,574`（`-0.465358%`），几何平均 `1.003287491x`，无 workload 退化；最终组合 func58 random-AXI seeds `240/255/141` 均为 `58/58 pass`。ExpandedWindow Yosys 相对 R9-CT04-RF03：全核 cells `65,781 -> 65,853`（`+0.109%`）、word-bits `444,211 -> 443,241`（`-0.218%`）；L1D cells `2,891 -> 2,963`、memory bits `2,048 -> 4,096`、sequential bits `2,859 -> 2,347`、mux bits `20,601 -> 20,153`，LTP 保持 37。PR combined `-7.17%` 与板测数据不能归因给 CT05；PR 自述 short perf 约 `-0.095%` 仅作历史参考。matching direct implementation 待完成。 |
 | PT02 | speculative RAS 更新 token 化 | 在 RAS 数组 CE 前寄存 push/pop/return address，尝试切断 BTB/PHT 到 RAS CE 的组合锥 | 简单寄存会把 RAS 更新延后一拍，可能改变下一次 lookup 的 return target；需要 pending top/return bypass 才可能保持语义 | 逐周期 call/return trace、四 lane turnover、redirect/flush、完整门禁和 perf20；禁止只凭 BranchPredictor 单测 | 默认关闭，暂停修复 | 工作树 A/B 曾使 `OooFrontendSpec` 25 项失败 2 项；恢复默认关闭后 25/25 通过。该候选不能进入当前组合。 |
+
+### R9 CT05+B02-F 实现边界
+
+R9 从 matching RTL 启动 100 MHz direct full，但在 route Global Iteration 1 后主动中止。partial
+route health 为 `complete=false`、中间 WNS/TNS `-2.602/-7,764.275 ns`、peak overlap `115,866`
+（最终采样 `4,986`）；没有 routed DCP、正式 WNS/hold、DRC 或 bitstream。只读 placed DCP 的
+CPU top-50 最差 `-1.131 ns`，其中 IQ 14 条（平均 route 82.29%）、ROB/CSR 16 条（79.62%）、
+cache/L2 4 条（71.92%）和 LSQ 2 条（80.89%）；另有 15--16 层的 multiplier 逻辑路径。该结果
+只否决此组合继续 route 的时间价值，不可归因给 CT05/B02-F 任一项，更不构成实现或板测证据。
+证据为 `build/reports/timing/R9-CT05-B02F-partial-route-health.json` 与
+`build/reports/timing/R9-CT05-B02F-placed-dcp/timing-analysis.json`。
+
+下一轮把 B02-F 的分项回退作为独立实验：在不扩宽现有 16-bit predictor metadata 的前提下，按
+8/10/12/14/16-bit history 和等容量 `4 x 4096` index/fold 进行 A/B，并以
+`PerfObservationV1` 的 resolved/mispredict 计数和完整 perf20 共同判定。物理方向新增
+`IQT01`（IQ source-tag 到执行端局部化，针对 `psrc -> multiplier/issueOperandSource`）和
+`MT11`（L1D refill byte-mask/write-owner 按 bank 局部化，针对 256--729 fanout 的 refill/
+`lookupMshrId` 网络）。两项均要求不改变可见拍数、先跑定向/完整门禁、Yosys 同配置结构对照，
+再与完整 perf20 一同决定是否进入下一次 direct full。
 
 ## 4. 当前优先级与下一步
 
