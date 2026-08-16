@@ -2,6 +2,7 @@ package miku.predict
 
 import miku.core._
 import spinal.core._
+import spinal.lib._
 
 object PredictedBranchType {
   val Width = 3
@@ -35,7 +36,6 @@ final class BankedFetchPredictor(
   private val phtEntriesPerBank = config.predictorPhtEntriesPerBank
   private val historyWidth = config.predictorHistoryWidth
   private val fetchGroupOffsetWidth = log2Up(config.fetchWidth * 4)
-  private val bankWidth = log2Up(config.fetchWidth)
   private val btbRowWidth = log2Up(btbEntriesPerBank)
   private val phtRowWidth = log2Up(phtEntriesPerBank)
   private val btbTagWidth = config.xlen - fetchGroupOffsetWidth - btbRowWidth
@@ -274,6 +274,7 @@ final class BankedFetchPredictor(
   io.responseValid := RegNext(lookupFire) init (False)
 
   val btbUpdateBank = io.btbUpdatePc(fetchGroupOffsetWidth - 1 downto 2)
+  val btbUpdateBankMask = UIntToOh(btbUpdateBank, config.fetchWidth)
   val btbUpdateRow = io.btbUpdatePc(
     fetchGroupOffsetWidth + btbRowWidth - 1 downto fetchGroupOffsetWidth
   )
@@ -296,6 +297,7 @@ final class BankedFetchPredictor(
   btbUpdateEntry(btbStaticTakenBit) := io.btbUpdateTarget < io.btbUpdatePc
 
   val phtUpdateBank = io.phtUpdatePc(fetchGroupOffsetWidth - 1 downto 2)
+  val phtUpdateBankMask = UIntToOh(phtUpdateBank, config.fetchWidth)
   val phtNextState = UInt(2 bits)
   // An untrained BTB entry uses BTFNT, so stale power-up PHT data is never observed. Its first
   // precise update installs a weak state directly and removes the 1024-cycle PHT reset sweep.
@@ -311,8 +313,7 @@ final class BankedFetchPredictor(
   val btbRead = Vec(Bits(btbEntryWidth bits), config.fetchWidth)
   val phtRead = Vec(Bits(2 bits), config.fetchWidth)
   for (bank <- 0 until config.fetchWidth) {
-    val btbWrite = io.btbUpdateValid &&
-      btbUpdateBank === U(bank, bankWidth bits) && !invalidating
+    val btbWrite = io.btbUpdateValid && btbUpdateBankMask(bank) && !invalidating
     btbBanks(bank).write(
       address = Mux(invalidating, invalidateRow, btbUpdateRow),
       data = Mux(invalidating, B(0, btbEntryWidth bits), btbUpdateEntry),
@@ -323,8 +324,7 @@ final class BankedFetchPredictor(
       enable = !invalidating
     )
 
-    val phtWrite = io.phtUpdateValid &&
-      phtUpdateBank === U(bank, bankWidth bits) && !phtInvalidating
+    val phtWrite = io.phtUpdateValid && phtUpdateBankMask(bank) && !phtInvalidating
     phtBanks(bank).write(
       address = Mux(phtInvalidating, phtInvalidateRow, io.phtUpdateIndex),
       data = Mux(phtInvalidating, B"01", phtNextState.asBits),
