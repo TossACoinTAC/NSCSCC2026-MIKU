@@ -151,12 +151,14 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val refillMemories = Array.fill(CacheContract.BeatsPerLine)(
     Mem(Bits(CacheContract.BeatBits bits), config.mshrEntries)
   )
+  val missVictimMemories = Array.fill(CacheContract.BeatsPerLine)(
+    Mem(Bits(CacheContract.BeatBits bits), config.mshrEntries)
+  )
   val pendingStoreValid = RegInit(False)
   val pendingStoreMshrId = Reg(UInt(mshrIdWidth bits))
   val pendingStoreAddress = Reg(UInt(offsetWidth bits))
   val pendingStoreByteMask = Reg(Bits(4 bits))
   val pendingStoreData = Reg(Bits(config.xlen bits))
-  val missVictimData = Reg(Bits(CacheContract.LineBits bits))
   for (entry <- misses) {
     entry.valid.init(False)
     entry.state.init(L1DataMshrState.readRequest)
@@ -275,7 +277,6 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     misses(lineMatchId).state =/= L1DataMshrState.respond &&
     pendingStoreReady
   val newLookupReady = !lineMatch && !setConflictMask.orR && freeMissMask.orR &&
-    !(activeWritebackMask | activeWritebackWaitMask).orR &&
     (io.request.isWrite || freeWaiterMask.orR) &&
     (!io.request.isWrite || pendingStoreReady) && cacheArray.io.lookupReady
   io.requestReady := commonRequestReady &&
@@ -407,7 +408,15 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         B(0, CacheContract.LineBytes bits)
       )
       when(cacheArray.io.victimValid && cacheArray.io.victimDirty) {
-        missVictimData := cacheArray.io.victimData
+        for (beat <- 0 until CacheContract.BeatsPerLine) {
+          missVictimMemories(beat).write(
+            address = lookupMshrId,
+            data = cacheArray.io.victimData(
+              beat * CacheContract.BeatBits + CacheContract.BeatBits - 1 downto
+                beat * CacheContract.BeatBits
+            )
+          )
+        }
       }
       when(lookupRequest.isWrite) {
         pendingStoreValid := True
@@ -449,6 +458,13 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   }
   val writebackId = selectLowest(writebackMask, config.mshrEntries)
   val readRequestId = selectLowest(readRequestMask, config.mshrEntries)
+  val missVictimData = Bits(CacheContract.LineBits bits)
+  for (beat <- 0 until CacheContract.BeatsPerLine) {
+    missVictimData(
+      beat * CacheContract.BeatBits + CacheContract.BeatBits - 1 downto
+        beat * CacheContract.BeatBits
+    ) := missVictimMemories(beat).readAsync(writebackId)
+  }
 
   io.lineWriteValid := False
   io.lineWrite.lineAddress := misses(writebackId).victimAddress

@@ -1030,6 +1030,128 @@ class L1DataCacheSpec extends AnyFunSuite {
       }
   }
 
+  test("L1D retains independent dirty victims while another writeback is blocked") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1d")
+      .compile(new L1DataCacheProbe(config))
+      .doSim("ooo-l1d-independent-dirty-victims", 0x4c42) { dut =>
+        def loadMiss(address: BigInt, fill: BigInt, pointer: BigInt): Unit = {
+          setRequest(
+            dut,
+            address,
+            isWrite = false,
+            data = 0,
+            mask = 0xf,
+            robPointer = pointer,
+            pdst = 3
+          )
+          while (!dut.io.requestReady.toBoolean) sample(dut)
+          sample(dut)
+          dut.io.requestValid #= false
+          val refillResponse = refillLine(dut, address & ~BigInt(0x3f), beat => fill + beat)
+          assert(refillResponse._1 == pointer)
+          sample(dut)
+        }
+
+        def dirtyLine(address: BigInt, data: BigInt, pointer: BigInt): Unit = {
+          setRequest(
+            dut,
+            address,
+            isWrite = true,
+            data = data,
+            mask = 0xf,
+            robPointer = pointer,
+            pdst = 0
+          )
+          while (!dut.io.requestReady.toBoolean) sample(dut)
+          sample(dut)
+          dut.io.requestValid #= false
+          sample(dut)
+        }
+
+        def startMiss(address: BigInt, pointer: BigInt): Unit = {
+          setRequest(
+            dut,
+            address,
+            isWrite = false,
+            data = 0,
+            mask = 0xf,
+            robPointer = pointer,
+            pdst = 4
+          )
+          var wait = 0
+          while (!dut.io.requestReady.toBoolean && wait < 8) {
+            sample(dut)
+            wait += 1
+          }
+          assert(dut.io.requestReady.toBoolean)
+          sample(dut)
+          dut.io.requestValid #= false
+        }
+
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling(config.dataCache.sets + 8)
+        sleep(1)
+
+        val setSpan = BigInt(config.dataCache.sets * config.dataCache.lineBytes)
+        val setA0 = BigInt(0x100)
+        val setA1 = setA0 + setSpan
+        val setA2 = setA0 + setSpan * 2
+        val setB0 = setA0 + config.dataCache.lineBytes
+        val setB1 = setB0 + setSpan
+        val setB2 = setB0 + setSpan * 2
+        val dirtyA = BigInt("a1a2a3a4", 16)
+        val dirtyB = BigInt("b1b2b3b4", 16)
+
+        loadMiss(setA0, BigInt("1100000000000000", 16), 1)
+        loadMiss(setA1, BigInt("1200000000000000", 16), 2)
+        loadMiss(setB0, BigInt("2100000000000000", 16), 3)
+        loadMiss(setB1, BigInt("2200000000000000", 16), 4)
+        dirtyLine(setA1, dirtyA, 5)
+        dirtyLine(setB1, dirtyB, 6)
+        dirtyLine(setA0, BigInt("a5a6a7a8", 16), 7)
+        dirtyLine(setB0, BigInt("b5b6b7b8", 16), 8)
+
+        startMiss(setA2, 9)
+        var wait = 0
+        while (!dut.io.lineWriteValid.toBoolean && wait < 8) {
+          sample(dut)
+          wait += 1
+        }
+        assert(dut.io.lineWriteValid.toBoolean)
+        assert(dut.io.lineWrite.lineAddress.toBigInt == setA1)
+        assert((dut.io.lineWrite.data.toBigInt & BigInt("ffffffff", 16)) == dirtyA)
+        val firstWritebackId = dut.io.lineWrite.mshrId.toBigInt
+        val firstWritebackData = dut.io.lineWrite.data.toBigInt
+
+        startMiss(setB2, 10)
+        for (_ <- 0 until 3) {
+          sample(dut)
+          assert(dut.io.lineWriteValid.toBoolean)
+          assert(dut.io.lineWrite.mshrId.toBigInt == firstWritebackId)
+          assert(dut.io.lineWrite.lineAddress.toBigInt == setA1)
+          assert(dut.io.lineWrite.data.toBigInt == firstWritebackData)
+        }
+
+        dut.io.lineWriteReady #= true
+        sample(dut)
+        dut.io.lineWriteReady #= false
+        wait = 0
+        while ((!dut.io.lineWriteValid.toBoolean ||
+          dut.io.lineWrite.mshrId.toBigInt == firstWritebackId) && wait < 8) {
+          sample(dut)
+          wait += 1
+        }
+        assert(dut.io.lineWriteValid.toBoolean)
+        assert(dut.io.lineWrite.lineAddress.toBigInt == setB1)
+        assert((dut.io.lineWrite.data.toBigInt & BigInt("ffffffff", 16)) == dirtyB)
+      }
+  }
+
   test("L1D does not install a line when any refill beat reports an error") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1d-refill-error")
