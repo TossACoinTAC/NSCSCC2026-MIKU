@@ -146,8 +146,10 @@ ROB/cache/multiplier 路径共同定义候选池。目标是在其中实际引�
 cells 下降 `11.555%`、word bits 下降 `9.034%`，这是综合前结构筛选信息，不能替代
 Vivado WNS。R9 参考报告使用 `expanded-window`（ROB64/PRF128），而根 Makefile 默认
 生成 `default`（ROB32/PRF64），所以 perf20 必须按同一 `CPU_VARIANT` 形成 A/B，不能
-混写两种配置的总周期；当前两种配置的矩阵均已启动，长尾 `stringsearch` 完成前不写
-最终逐项结论。
+混写两种配置的总周期。expanded-window 的完整 perf20 已与 R9 B02-F 基线逐项精确相等：
+`3845728 -> 3845728`，几何平均 `1.000000000x`；比较为
+`build/reports/comparisons/R10-expanded-vs-R9-B02F.json`。同一配置的 func58 random-AXI
+seeds `240/255/141` 也均通过。default 矩阵仅作补充验证，不参与 expanded-window 的晋级归因。
 
 ## R0：实验合同
 

@@ -198,7 +198,7 @@ R10 是在 R7--B02-F 历史路径审计基础上形成的批次，包含 6 个�
 （DQ02、IQT01、MT11、CT06）。这些候选均保持原有寄存边界和可见周期语义，已分别
 通过受影响的 Scala 定向 suite；完整 `cpu-check` 已在批次提交后通过。当前批次的
 Yosys 结构报告为 `build/reports/yosys/R10-CT06-timing-batch/summary.json`，与
-R9 CT05+B02-F 参考的对比为 `build/reports/yosys/R10-CT06-vs-R9.json`。Yosys
+R9 CT05+B02-F 参考的结构对比为 `build/reports/yosys/R10-CT06-vs-R9.json`。Yosys
 结果显示全核 cells `65889 -> 58914`（`-10.586%`）、post-flatten cells
 `59810 -> 52899`（`-11.555%`），word bits `443689 -> 403607`（`-9.034%`）；
 这些是综合前结构筛选数据，不能替代 Vivado 时序。LSQ 为 `7470 -> 7475`，因此
@@ -206,15 +206,18 @@ MT11/MT12/MT13/MT14 的物理收益仍需由 matching implementation 交叉验�
 
 | 候选 | 当前验证状态 | 当前效果 | 下一门禁 |
 | --- | --- | --- | --- |
-| MT12/MT13/MT14 | 定向 LSQ suite 通过；完整门禁通过 | perf20 正在运行，尚无周期结论 | 完整 perf20 逐项对比；LSQ top-N |
-| RT12/RT13/RT14 | ROB wrap/epoch/commit suite 通过；完整门禁通过 | perf20 正在运行，尚无周期结论 | 完整 perf20 逐项对比；ROB/CSR top-N |
-| DQ02/IQT01 | IssueQueue/dispatch 定向 suite 通过；完整门禁通过 | perf20 正在运行，尚无周期结论 | 完整 perf20 逐项对比；IQ top-N |
-| MT11 | L1D refill/partial-store suite 通过；完整门禁通过 | perf20 正在运行，Yosys L1D 结构近似持平 | 完整 perf20 逐项对比；L1D/cache top-N |
-| CT06 | L2 maintenance/write-state suite 通过；完整门禁通过 | perf20 正在运行，Yosys L2 `1150 -> 1138`（-12 cells） | 完整 perf20 逐项对比；L2 top-N |
+| MT12/MT13/MT14 | 定向 LSQ suite、完整门禁、expanded-window perf20 通过 | 20 项逐项精确相等；LSQ Yosys cells `7470 -> 7475`、word bits `35770 -> 35299` | matching LSQ top-N |
+| RT12/RT13/RT14 | ROB wrap/epoch/commit suite、完整门禁、expanded-window perf20 通过 | 20 项逐项精确相等；ROB Yosys cells `11400 -> 6393` | matching ROB/CSR top-N |
+| DQ02/IQT01 | IssueQueue/dispatch 定向 suite、完整门禁、expanded-window perf20 通过 | 20 项逐项精确相等；四个 IQ 的 cells 分别下降 `154--171` | matching IQ top-N |
+| MT11 | L1D refill/partial-store suite、完整门禁、expanded-window perf20 通过 | 20 项逐项精确相等；Yosys L1D cells `2963 -> 2949` | matching L1D/cache top-N |
+| CT06 | L2 maintenance/write-state suite、完整门禁、expanded-window perf20 通过 | 20 项逐项精确相等；Yosys L2 cells `1150 -> 1138` | matching L2 top-N |
 
-本批次尚未形成正式 WNS、资源、Linux 或板测证据。在 perf20 完成前不启动 Vivado；若
-完整 perf20 逐项透明且 Yosys 结构没有反常增长，再以 R10 组合执行一次 matching
-100 MHz direct full。后续 direct full 前仍至少保留 5 个完成定向验证、完整门禁、Yosys
+expanded-window 的完整 perf20 为 `3845728 -> 3845728`，20 项逐项精确相等，几何平均
+`1.000000000x`；比较证据为 `build/reports/comparisons/R10-expanded-vs-R9-B02F.json`。
+同一配置的 func58 random-AXI seeds `240/255/141` 均通过。default 配置另行运行，不能与
+expanded-window 基线混写。本批次尚未形成正式 WNS、资源、Linux 或板测证据；下一步以
+expanded-window R10 组合执行一次 matching 100 MHz direct full。后续 direct full 前仍至少
+保留 5 个完成定向验证、完整门禁、Yosys
 和 perf20 的时序候选；若任何候选被移除，必须补入新的候选并保留独立证据。
 
 ## 5. 当前优先级与下一步
