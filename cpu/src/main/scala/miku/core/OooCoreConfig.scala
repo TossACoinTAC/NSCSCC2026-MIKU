@@ -99,6 +99,11 @@ final case class OooCoreConfig(
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableBalancedIssueSelection: Boolean = true,
     enableBankedLoadForwardCompletion: Boolean = true,
+    // Keep multi/store forwarded load results on the registered ROB wakeup path
+    // instead of the LSU fast-select network. The forwarded result still
+    // completes architecturally; dependants wake one cycle later. This removes
+    // the wide banked-forward wake broadcast from the IQ age-order CE cone.
+    enableBankedForwardLoadFastWakeup: Boolean = false,
     enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,
     enableBranchHeadCompletionBypass: Boolean = true,

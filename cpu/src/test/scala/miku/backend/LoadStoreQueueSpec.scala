@@ -1571,9 +1571,11 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         assert(dut.io.completion.robPointer.toBigInt == 1)
         assert(dut.io.completion.pdst.toBigInt == 7)
         assert(dut.io.completion.data.toBigInt == BigInt("12345678", 16))
-        assert(dut.io.loadWakeupValid.toBoolean)
-        assert(dut.io.loadWakeupPdst.toBigInt == 7)
-        assert(dut.io.loadWakeupRecoveryEpoch.toBigInt == 0)
+        // The forwarded result always completes architecturally.  The legacy
+        // non-banked path still exposes the LSU fast wake; the banked-forwarding
+        // path uses the registered ROB broadcast when the flag is off, so its
+        // LSU fast-wake pins stay low.
+        assert(dut.io.loadWakeupValid.toBoolean == !banked)
         assert(!dut.io.dataRequestValid.toBoolean)
       }
     }

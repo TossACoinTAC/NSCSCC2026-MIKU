@@ -926,7 +926,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   io.storeCompletionBypass.robPointer := fastStoreCompletionRobPointer
   io.storeCompletionBypass.recoveryEpoch := fastStoreCompletionRecoveryEpoch
   io.loadWakeupValid := (completionValid && completionLoadWakeup) ||
-    (bankedForwardCompletionValid && bankedForwardCompletion.writesPdst &&
+    (Bool(config.enableBankedForwardLoadFastWakeup) &&
+      bankedForwardCompletionValid && bankedForwardCompletion.writesPdst &&
       bankedForwardCompletion.pdst =/= 0)
   io.loadWakeupPdst := completion.pdst
   io.loadWakeupRecoveryEpoch := completion.recoveryEpoch
