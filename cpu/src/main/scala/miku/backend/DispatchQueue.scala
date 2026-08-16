@@ -11,6 +11,13 @@ final class DispatchQueue(
   private val pointerWidth = log2Up(config.dispatchQueueEntries)
   private val countWidth = log2Up(config.dispatchQueueEntries + 1)
   private val prefixWidth = log2Up(config.renameWidth + 1)
+  private val bankCount = 4
+  private val bankWidth = log2Up(bankCount)
+  private val bankDepth = config.dispatchQueueEntries / bankCount
+  private val bankRowWidth = log2Up(bankDepth)
+  require(config.dispatchQueueEntries % bankCount == 0)
+  require(config.renameWidth < bankCount)
+  require(config.dispatchWidth < bankCount)
 
   val io = new Bundle {
     val enqueueValid = in Bits (config.renameWidth bits)
@@ -29,7 +36,9 @@ final class DispatchQueue(
     val occupancy = out UInt (countWidth bits)
   }
 
-  val entries = Vec.fill(config.dispatchQueueEntries)(Reg(RenamedMicroOp(config)))
+  val entryBanks = Vec((0 until bankCount).map { _ =>
+    Vec.fill(bankDepth)(Reg(RenamedMicroOp(config)))
+  })
   val head = Reg(UInt(pointerWidth bits)) init (0)
   val tail = Reg(UInt(pointerWidth bits)) init (0)
   val count = Reg(UInt(countWidth bits)) init (0)
@@ -49,10 +58,28 @@ final class DispatchQueue(
     io.enqueueTwoReady := False
   }
 
+  val dequeueAddress = Vec(UInt(pointerWidth bits), config.dispatchWidth)
+  val dequeueBank = Vec(UInt(bankWidth bits), config.dispatchWidth)
+  val dequeueRow = Vec(UInt(bankRowWidth bits), config.dispatchWidth)
   for (lane <- 0 until config.dispatchWidth) {
     io.dequeueValid(lane) := count > U(lane, countWidth bits)
-    val source = (head + U(lane, pointerWidth bits)).resized
-    io.dequeue(lane) := entries(source)
+    dequeueAddress(lane) := (head + U(lane, pointerWidth bits)).resized
+    dequeueBank(lane) := dequeueAddress(lane)(bankWidth - 1 downto 0)
+    dequeueRow(lane) := dequeueAddress(lane)(pointerWidth - 1 downto bankWidth)
+  }
+  val bankReadData = Vec(RenamedMicroOp(config), bankCount)
+  for (bank <- 0 until bankCount) {
+    val selectedRow = UInt(bankRowWidth bits)
+    selectedRow := dequeueRow(0)
+    for (lane <- 0 until config.dispatchWidth) {
+      when(dequeueBank(lane) === U(bank, bankWidth bits)) {
+        selectedRow := dequeueRow(lane)
+      }
+    }
+    bankReadData(bank) := entryBanks(bank)(selectedRow)
+  }
+  for (lane <- 0 until config.dispatchWidth) {
+    io.dequeue(lane) := bankReadData(dequeueBank(lane))
   }
   val dequeueFire = io.dequeueValid & io.dequeueReady
   val dequeueCount = CountOne(dequeueFire)
@@ -62,16 +89,36 @@ final class DispatchQueue(
     io.enqueueAcceptMask,
     Mux(io.enqueueAccept, io.enqueueValid, B(0, config.renameWidth bits))
   )
+  val enqueueDestination = Vec(UInt(pointerWidth bits), config.renameWidth)
+  val enqueueBank = Vec(UInt(bankWidth bits), config.renameWidth)
+  val enqueueRow = Vec(UInt(bankRowWidth bits), config.renameWidth)
+  for (lane <- 0 until config.renameWidth) {
+    enqueueDestination(lane) := (tail + enqueuePrefix(lane)).resized
+    enqueueBank(lane) := enqueueDestination(lane)(bankWidth - 1 downto 0)
+    enqueueRow(lane) := enqueueDestination(lane)(pointerWidth - 1 downto bankWidth)
+  }
 
   when(io.flush) {
     head := tail
     count := U(0, countWidth bits)
   }.otherwise {
     when(acceptedMask.orR) {
-      for (lane <- 0 until config.renameWidth) {
-        when(acceptedMask(lane)) {
-          val destination = (tail + enqueuePrefix(lane)).resized
-          entries(destination) := io.enqueue(lane)
+      for (bank <- 0 until bankCount) {
+        val writeValid = Bool()
+        val writeRow = UInt(bankRowWidth bits)
+        val writePayload = RenamedMicroOp(config)
+        writeValid := False
+        writeRow := enqueueRow(0)
+        writePayload := io.enqueue(0)
+        for (lane <- 0 until config.renameWidth) {
+          when(acceptedMask(lane) && enqueueBank(lane) === U(bank, bankWidth bits)) {
+            writeValid := True
+            writeRow := enqueueRow(lane)
+            writePayload := io.enqueue(lane)
+          }
+        }
+        when(writeValid) {
+          entryBanks(bank)(writeRow) := writePayload
         }
       }
       tail := tail + CountOne(acceptedMask)
