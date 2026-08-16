@@ -66,16 +66,18 @@ class OooCoreSpec extends AnyFunSuite {
     assert(expanded.physicalRegs == 128)
     assert(expanded.robEntries == 64)
     assert(expanded.robPointerWidth == 7)
-    assert(expanded.enableLargeGshare)
-    assert(expanded.predictorHistoryWidth == 16)
-    assert(expanded.predictorPhtEntriesPerBank == 4096)
+    assert(!expanded.enableLargeGshare)
+    assert(expanded.predictorHistoryWidth == 8)
+    assert(expanded.predictorPhtEntriesPerBank == 1024)
+    val largeGshare = default.copy(enableLargeGshare = true)
+    assert(largeGshare.predictorHistoryWidth == 16)
+    assert(largeGshare.predictorPhtEntriesPerBank == 4096)
     assert(expandedStores.storeQueueEntries == 16)
     assert(expandedStores.robEntries == default.robEntries)
     assert(
       expanded.copy(
         physicalRegs = default.physicalRegs,
-        robEntries = default.robEntries,
-        enableLargeGshare = default.enableLargeGshare
+        robEntries = default.robEntries
       ) == default
     )
   }

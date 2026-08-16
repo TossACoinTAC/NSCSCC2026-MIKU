@@ -253,7 +253,6 @@ object OooCoreConfig {
   // R02 experiment only.  The public/default core remains FourIssueThreeCommit;
   // this variant is selected explicitly by the core-top generator.
   val ExpandedWindow: OooCoreConfig = ExpandedRob.copy(
-    physicalRegs = 128,
-    enableLargeGshare = true
+    physicalRegs = 128
   )
 }
