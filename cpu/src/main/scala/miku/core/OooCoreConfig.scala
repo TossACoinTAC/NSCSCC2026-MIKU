@@ -130,7 +130,7 @@ final case class OooCoreConfig(
     // B02-F: widen the gshare history/PHT.  Its deterministic background initialization keeps
     // fetch active on BTFNT and does not propagate startup latency into predictor-update commit.
     enableLargeGshare: Boolean = true,
-    largeGshareHistoryWidth: Int = 16,
+    largeGshareHistoryWidth: Int = 10,
     enableFrontendCacheHitTurnover: Boolean = true,
     enableSpeculativeInstructionArrayRead: Boolean = true,
     // L1I never performs a lookup and a refill install in the same controller state.  Keep the
