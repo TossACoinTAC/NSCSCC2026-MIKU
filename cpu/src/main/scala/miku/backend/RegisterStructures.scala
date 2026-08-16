@@ -23,6 +23,14 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
 
   val registers = Vec.fill(config.physicalRegs)(Reg(Bits(config.xlen bits)))
   registers(0) := B(0, config.xlen bits)
+  val writeTargets = Vec(Bits(config.physicalRegs bits), config.writebackWidth)
+  for (writePort <- 0 until config.writebackWidth) {
+    writeTargets(writePort) := Mux(
+      io.writeValid(writePort) && io.write(writePort).pdst =/= 0,
+      UIntToOh(io.write(writePort).pdst, config.physicalRegs),
+      B(0, config.physicalRegs bits)
+    )
+  }
 
   for (readPort <- 0 until config.executionWidth * 2) {
     val selected = Bits(config.xlen bits)
@@ -56,9 +64,13 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
     }
   }
 
-  for (writePort <- 0 until config.writebackWidth) {
-    when(io.writeValid(writePort) && io.write(writePort).pdst =/= 0) {
-      registers(io.write(writePort).pdst) := io.write(writePort).data
+  // Decode each producer address once.  A dynamic Vec write otherwise repeats
+  // the same address comparison across every bit of every physical register.
+  for (registerIndex <- 1 until config.physicalRegs) {
+    for (writePort <- 0 until config.writebackWidth) {
+      when(writeTargets(writePort)(registerIndex)) {
+        registers(registerIndex) := io.write(writePort).data
+      }
     }
   }
   when(io.flush) { registers(0) := B(0, config.xlen bits) }
