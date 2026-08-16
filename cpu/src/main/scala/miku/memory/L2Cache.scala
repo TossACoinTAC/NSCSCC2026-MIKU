@@ -87,7 +87,7 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
   val lineMemories = Array.fill(CacheContract.BeatsPerLine)(
     Mem(Bits(CacheContract.BeatBits bits), config.mshrEntries)
   )
-  val missVictimData = Reg(Bits(CacheContract.LineBits bits))
+  val missVictimData = Vec.fill(config.mshrEntries)(Reg(Bits(CacheContract.LineBits bits)))
   for (entry <- misses) {
     entry.valid.init(False)
     entry.state.init(L2MshrState.readRequest)
@@ -289,7 +289,7 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
           L2MshrState.readRequest
         )
         when(cacheArray.io.victimValid && cacheArray.io.victimDirty) {
-          missVictimData := cacheArray.io.victimData
+          missVictimData(lookupMshrId) := cacheArray.io.victimData
         }
       }
     }
@@ -322,7 +322,7 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
   val missWritebackId = selectLowest(missWritebackMask, config.mshrEntries)
   io.memoryWriteValid := False
   io.memoryWrite.lineAddress := misses(missWritebackId).victimAddress
-  io.memoryWrite.data := missVictimData
+  io.memoryWrite.data := missVictimData(missWritebackId)
   io.memoryWrite.byteMask := B(
     (BigInt(1) << CacheContract.LineBytes) - 1,
     CacheContract.LineBytes bits

@@ -265,6 +265,106 @@ class L2CacheSpec extends AnyFunSuite {
       }
   }
 
+  test("each dirty read miss retains its victim data across another miss and error retry") {
+    val writeBackConfig = config.copy(enableL2WriteBack = true)
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l2-victim-owner")
+      .compile(new L2Cache(writeBackConfig))
+      .doSim("ooo-l2-victim-owner-error-retry", 0x4c71) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        SimTimeout(30000)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling(writeBackConfig.level2Cache.sets + 4)
+
+        def waitUntil(condition: => Boolean, clue: String, maxCycles: Int = 64): Unit = {
+          var cycles = 0
+          while (!condition && cycles < maxCycles) {
+            sample(dut)
+            cycles += 1
+          }
+          assert(condition, clue)
+        }
+
+        def writeLine(address: BigInt, data: BigInt, mshrId: Int): Unit = {
+          dut.io.writeValid #= true
+          dut.io.write.lineAddress #= address
+          dut.io.write.data #= data
+          dut.io.write.byteMask #= (BigInt(1) << CacheContract.LineBytes) - 1
+          dut.io.write.mshrId #= mshrId
+          waitUntil(dut.io.writeReady.toBoolean, s"write 0x${address.toString(16)} was not accepted")
+          sample(dut)
+          dut.io.writeValid #= false
+          waitUntil(dut.io.writeResponseValid.toBoolean, "write-back L2 did not complete locally")
+          assert(!dut.io.writeResponse.error.toBoolean)
+          sample(dut)
+        }
+
+        def readMiss(address: BigInt, mshrId: Int): Unit = {
+          dut.io.readValid #= true
+          dut.io.read.lineAddress #= address
+          dut.io.read.mshrId #= mshrId
+          dut.io.read.criticalBeat #= 0
+          sleep(1)
+          waitUntil(dut.io.readReady.toBoolean, s"read 0x${address.toString(16)} was not accepted")
+          sample(dut)
+          dut.io.readValid #= false
+        }
+
+        val setStride = BigInt(writeBackConfig.level2Cache.sets) * CacheContract.LineBytes
+        val set0A = BigInt("d0600000", 16)
+        val set0B = set0A + setStride
+        val set0C = set0B + setStride
+        val set1A = set0A + CacheContract.LineBytes
+        val set1B = set1A + setStride
+        val set1C = set1B + setStride
+        val victim0 = BigInt("1111222233334444", 16)
+        val victim1 = BigInt("aaaabbbbccccdddd", 16)
+
+        writeLine(set0A, victim0, 0)
+        writeLine(set0B, BigInt(0x20), 1)
+        writeLine(set1A, victim1, 2)
+        writeLine(set1B, BigInt(0x40), 3)
+
+        readMiss(set0C, 0)
+        waitUntil(
+          dut.io.memoryWriteValid.toBoolean && dut.io.memoryWrite.mshrId.toBigInt == 0,
+          "first dirty victim did not reach memory"
+        )
+        assert(dut.io.memoryWrite.lineAddress.toBigInt == set0A)
+        assert(dut.io.memoryWrite.data.toBigInt == victim0)
+        dut.io.memoryWriteReady #= true
+        sample(dut)
+        dut.io.memoryWriteReady #= false
+
+        readMiss(set1C, 1)
+        waitUntil(
+          dut.io.memoryWriteValid.toBoolean && dut.io.memoryWrite.mshrId.toBigInt == 1,
+          "second dirty victim did not reach memory"
+        )
+        assert(dut.io.memoryWrite.lineAddress.toBigInt == set1A)
+        assert(dut.io.memoryWrite.data.toBigInt == victim1)
+
+        dut.io.memoryWriteResponseValid #= true
+        dut.io.memoryWriteResponse.mshrId #= 0
+        dut.io.memoryWriteResponse.error #= true
+        sample(dut)
+        dut.io.memoryWriteResponseValid #= false
+        dut.io.memoryWriteResponse.error #= false
+        sleep(1)
+
+        assert(dut.io.memoryWriteValid.toBoolean)
+        assert(dut.io.memoryWrite.mshrId.toBigInt == 0)
+        assert(dut.io.memoryWrite.lineAddress.toBigInt == set0A)
+        assert(
+          dut.io.memoryWrite.data.toBigInt == victim0,
+          "retry used victim data captured by another MSHR"
+        )
+      }
+  }
+
   test("an L2 hit returns while an unrelated memory miss is outstanding") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l2-cache")
