@@ -130,6 +130,7 @@ final case class OooCoreConfig(
     // B02-F: widen the gshare history/PHT.  Its deterministic background initialization keeps
     // fetch active on BTFNT and does not propagate startup latency into predictor-update commit.
     enableLargeGshare: Boolean = true,
+    largeGshareHistoryWidth: Int = 16,
     enableFrontendCacheHitTurnover: Boolean = true,
     enableSpeculativeInstructionArrayRead: Boolean = true,
     // L1I never performs a lookup and a refill install in the same controller state.  Keep the
@@ -190,6 +191,12 @@ final case class OooCoreConfig(
   require(isPowerOfTwo(loadQueueEntries), "load queue size must be a power of two")
   require(isPowerOfTwo(storeQueueEntries), "store queue size must be a power of two")
   require(isPowerOfTwo(mshrEntries), "MSHR count must be a power of two")
+  require(
+    !enableLargeGshare || OooCoreConfig.SupportedLargeGshareHistoryWidths.contains(
+      largeGshareHistoryWidth
+    ),
+    s"large gshare history must be one of ${OooCoreConfig.SupportedLargeGshareHistoryWidths.mkString(", ")}"
+  )
   require(instructionCache.lineBytes == 64, "the OoO instruction cache uses 64-byte lines")
   require(dataCache.lineBytes == 64, "the OoO data cache uses 64-byte lines")
   require(level2Cache.lineBytes == 64, "the OoO L2 cache uses 64-byte lines")
@@ -221,7 +228,7 @@ final case class OooCoreConfig(
   val storeQueueIndexWidth: Int = log2Up(storeQueueEntries)
   val fetchSlotWidth: Int = log2Up(fetchWidth)
   val predictorPhtEntriesPerBank: Int = if (enableLargeGshare) 4096 else 1024
-  val predictorHistoryWidth: Int = if (enableLargeGshare) 16 else 8
+  val predictorHistoryWidth: Int = if (enableLargeGshare) largeGshareHistoryWidth else 8
   val predictorPhtIndexWidth: Int = log2Up(predictorPhtEntriesPerBank)
   val predictorMetadataStateLsb: Int = predictorPhtIndexWidth
   val predictorMetadataValidBit: Int = predictorPhtIndexWidth + 2
@@ -233,6 +240,8 @@ final case class OooCoreConfig(
 
 object OooCoreConfig {
   import ExecutionUnitKind._
+
+  val SupportedLargeGshareHistoryWidths: Set[Int] = Set(8, 10, 12, 14, 16)
 
   val DefaultExecutionPorts: Vector[ExecutionPortConfig] = Vector(
     ExecutionPortConfig("alu-csr", Set(Alu, Csr, Serial)),

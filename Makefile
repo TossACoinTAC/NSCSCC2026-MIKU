@@ -22,6 +22,7 @@ SURFER ?= /mnt/d/Surfer/surfer.exe
 JOBS ?= 8
 CPU_TEST ?=
 CPU_VARIANT ?= default
+CPU_GSHARE_HISTORY_BITS ?= 16
 RUN_SOFTWARE ?= func/func_lab19
 TIME_LIMIT ?= 1300000
 AXI_SEED ?= 5570815
@@ -124,6 +125,7 @@ help:
 		'  make clean              清理可再生构建输出，保留 IDE 状态' \
 		'  make clean-all          额外清理显式 IDE 状态' '' \
 		'路径覆盖：VIVADO_HOME VIVADO SURFER LABAGENT_HOST LABAGENT_SSH_KEY DOCKER_IMAGE JOBS SIM_LANES' \
+		'生成配置：CPU_VARIANT=... CPU_GSHARE_HISTORY_BITS=8|10|12|14|16' \
 		'实现归档：SOC_EXPERIMENT_MANIFEST=... SOC_ARCHIVE_CLASS=auto|candidate|stable' \
 		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项'
 
@@ -225,7 +227,7 @@ cpu-generate:
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@rm -rf "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
-	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw --core-variant $(CPU_VARIANT)"'
+	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw --core-variant $(CPU_VARIANT) --gshare-history-bits $(CPU_GSHARE_HISTORY_BITS)"'
 	@test -f "$(BUILD_ROOT)/rtl/raw/core_top.v"
 	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" package \
 		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
@@ -234,7 +236,8 @@ cpu-generate:
 	@install -m 0644 "$(BUILD_ROOT)/rtl/package/rtl/mycpu_top.v" "$(BUILD_ROOT)/rtl/mycpu_top.v"
 	@$(CONTAINER_RUN) python3 scripts/cpu/write_generation_manifest.py --root "$(ROOT_DIR)" \
 		--raw "$(BUILD_ROOT)/rtl/raw/core_top.v" --published "$(BUILD_ROOT)/rtl/mycpu_top.v" \
-		--core-variant "$(CPU_VARIANT)" --out "$(BUILD_ROOT)/rtl/generation-manifest.json"
+		--core-variant "$(CPU_VARIANT)" --gshare-history-bits "$(CPU_GSHARE_HISTORY_BITS)" \
+		--out "$(BUILD_ROOT)/rtl/generation-manifest.json"
 
 cpu-locked-gates: cpu-generate
 	@rm -rf "$(BUILD_ROOT)/gates/port" "$(BUILD_ROOT)/gates/lint" "$(BUILD_ROOT)/gates/yosys"

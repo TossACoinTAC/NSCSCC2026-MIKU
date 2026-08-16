@@ -38,6 +38,12 @@ def main() -> int:
         ),
         default="default",
     )
+    parser.add_argument(
+        "--gshare-history-bits",
+        choices=(8, 10, 12, 14, 16),
+        type=int,
+        default=16,
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     root = args.root.resolve()
@@ -52,6 +58,7 @@ def main() -> int:
         "source_tree_sha256": cpu_source_hash(cpu),
         "source_commit": source_commit,
         "core_variant": args.core_variant,
+        "gshare_history_bits": args.gshare_history_bits,
         "raw_rtl": str(args.raw.resolve()),
         "raw_rtl_sha256": file_hash(args.raw),
         "published_rtl": str(args.published.resolve()),

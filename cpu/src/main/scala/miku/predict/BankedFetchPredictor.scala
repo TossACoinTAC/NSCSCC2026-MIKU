@@ -241,10 +241,24 @@ final class BankedFetchPredictor(
   }
   val lookupPhtIndex = UInt(phtRowWidth bits)
   if (config.enableLargeGshare) {
-    val foldedUpper = lookupGhr(historyWidth - 1 downto phtRowWidth).asUInt
-      .resize(phtRowWidth)
-    lookupPhtIndex := lookupGhr(phtRowWidth - 1 downto 0).asUInt ^
-      foldedUpper ^
+    val historyFoldCount = (historyWidth + phtRowWidth - 1) / phtRowWidth
+    val historyFoldParts = Vec(Bits(phtRowWidth bits), historyFoldCount)
+    for (fold <- 0 until historyFoldCount) {
+      historyFoldParts(fold) := 0
+      for (offset <- 0 until phtRowWidth) {
+        val historyBit = fold * phtRowWidth + offset
+        if (historyBit < historyWidth) {
+          historyFoldParts(fold)(offset) := lookupGhr(historyBit)
+        }
+      }
+    }
+    val foldedHistory = Bits(phtRowWidth bits)
+    var foldedHistoryValue = historyFoldParts(0)
+    for (fold <- 1 until historyFoldCount) {
+      foldedHistoryValue = foldedHistoryValue ^ historyFoldParts(fold)
+    }
+    foldedHistory := foldedHistoryValue
+    lookupPhtIndex := foldedHistory.asUInt ^
       io.lookupPc(fetchGroupOffsetWidth + phtRowWidth - 1 downto fetchGroupOffsetWidth)
   } else {
     lookupPhtIndex := (lookupGhr(4 downto 0) ##

@@ -117,6 +117,8 @@ def validate_generation_manifest(document: dict[str, Any]) -> None:
         "expanded-window",
     }:
         raise ContractError("生成清单 core_variant 非法")
+    if document.get("gshare_history_bits", 16) not in {8, 10, 12, 14, 16}:
+        raise ContractError("生成清单 gshare_history_bits 非法")
 
 
 def validate_sim_result(document: dict[str, Any]) -> None:

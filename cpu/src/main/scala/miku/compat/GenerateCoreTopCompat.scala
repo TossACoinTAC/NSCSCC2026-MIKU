@@ -5,16 +5,37 @@ import miku.core.OooCoreConfig
 import spinal.core._
 
 private object CoreTopCompatGeneratorSupport {
-  private final case class GeneratorArguments(outputDirectory: String, coreVariant: String)
+  private final case class GeneratorArguments(
+      outputDirectory: String,
+      coreVariant: String,
+      gshareHistoryBits: Int
+  )
+
+  private def gshareHistoryBits(value: String): Int = {
+    val parsed = value.toIntOption.getOrElse(
+      throw new IllegalArgumentException(s"invalid gshare history width: $value")
+    )
+    require(
+      OooCoreConfig.SupportedLargeGshareHistoryWidths.contains(parsed),
+      s"gshare history width must be one of ${OooCoreConfig.SupportedLargeGshareHistoryWidths.mkString(", ")}"
+    )
+    parsed
+  }
 
   private def generatorArguments(args: Array[String]): GeneratorArguments =
     args match {
-      case Array(path) if path.nonEmpty => GeneratorArguments(path, "default")
+      case Array(path) if path.nonEmpty => GeneratorArguments(path, "default", 16)
       case Array("--out-dir", path) if path.nonEmpty =>
-        GeneratorArguments(path, "default")
+        GeneratorArguments(path, "default", 16)
       case Array("--out-dir", path, "--core-variant", variant)
           if path.nonEmpty && variant.nonEmpty =>
-        GeneratorArguments(path, variant)
+        GeneratorArguments(path, variant, 16)
+      case Array("--out-dir", path, "--core-variant", variant, "--gshare-history-bits", bits)
+          if path.nonEmpty && variant.nonEmpty =>
+        GeneratorArguments(path, variant, gshareHistoryBits(bits))
+      case Array("--out-dir", path, "--gshare-history-bits", bits, "--core-variant", variant)
+          if path.nonEmpty && variant.nonEmpty =>
+        GeneratorArguments(path, variant, gshareHistoryBits(bits))
       case Array() =>
         GeneratorArguments(
           sys.env
@@ -25,12 +46,14 @@ private object CoreTopCompatGeneratorSupport {
               "output directory is required as an argument or OUT_DIR"
             )
             ),
-          "default"
+          "default",
+          16
         )
       case _ =>
         throw new IllegalArgumentException(
           "usage: GenerateCoreTopCompat [--out-dir] <output-directory> " +
-            "[--core-variant default|expanded-rob|expanded-stores|expanded-window]"
+            "[--core-variant default|expanded-rob|expanded-stores|expanded-window] " +
+            "[--gshare-history-bits 8|10|12|14|16]"
         )
     }
 
@@ -92,7 +115,10 @@ private object CoreTopCompatGeneratorSupport {
     )
     spinalConfig.withTimescale = false
     spinalConfig.generateVerilog {
-      val dut = new CoreTopCompat(CoreTopCompatConfig(), coreConfig(arguments.coreVariant))
+      val config = coreConfig(arguments.coreVariant).copy(
+        largeGshareHistoryWidth = arguments.gshareHistoryBits
+      )
+      val dut = new CoreTopCompat(CoreTopCompatConfig(), config)
       dut.setDefinitionName("core_top")
       dut
     }

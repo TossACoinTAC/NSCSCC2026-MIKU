@@ -16,6 +16,7 @@ class GenerationContractTest(unittest.TestCase):
             "raw_rtl_sha256": "1" * 64,
             "published_rtl_sha256": "2" * 64,
             "core_variant": "expanded-window",
+            "gshare_history_bits": 16,
             "toolchain": {"sbt": "1.10.11"},
         })
 
@@ -31,6 +32,18 @@ class GenerationContractTest(unittest.TestCase):
                 "raw_rtl_sha256": "1" * 64,
                 "published_rtl_sha256": "2" * 64,
                 "core_variant": "typo",
+                "toolchain": {"sbt": "1.10.11"},
+            })
+
+    def test_unsupported_gshare_history_is_rejected(self) -> None:
+        with self.assertRaises(ContractError):
+            validate_generation_manifest({
+                "schema_version": 1,
+                "source_tree_sha256": "0" * 64,
+                "raw_rtl_sha256": "1" * 64,
+                "published_rtl_sha256": "2" * 64,
+                "core_variant": "expanded-window",
+                "gshare_history_bits": 11,
                 "toolchain": {"sbt": "1.10.11"},
             })
 
