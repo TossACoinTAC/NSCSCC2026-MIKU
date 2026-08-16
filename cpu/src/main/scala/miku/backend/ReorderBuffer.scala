@@ -31,6 +31,19 @@ final case class ReorderBufferRetirementMetadata(config: OooCoreConfig) extends 
   val storeQueueIndex = UInt(config.storeQueueIndexWidth bits)
 }
 
+final case class ReorderBufferCompletionPayload(config: OooCoreConfig) extends Bundle {
+  val result = Bits(config.xlen bits)
+  // Completion exceptions use this word as badVAddr; resolved branches use it
+  // as their target; all other completions use it as sideEffectData.
+  val auxiliary = Bits(config.xlen bits)
+  val exceptionEcode = UInt(6 bits)
+  val exceptionEsubcode = UInt(9 bits)
+  val exceptionBadVAddrValid = Bool()
+  val exceptionTlbRefill = Bool()
+  val branchTaken = Bool()
+  val branchMispredict = Bool()
+}
+
 final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   val valid = Bool()
   val complete = Bool()
@@ -39,13 +52,8 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   // The Vec index already carries the physical ROB index.  Only the wrap
   // generation is resident state needed to reject a stale completion.
   val generation = Bool()
-  val result = Bits(config.xlen bits)
-  val sideEffectData = Bits(config.xlen bits)
   val completionExceptionValid = Bool()
-  val completionException = ExceptionMetadata()
-  val branchMispredict = Bool()
-  val branchTaken = Bool()
-  val branchTarget = UInt(config.xlen bits)
+  val completionSource = UInt(log2Up(config.writebackWidth + 2) bits)
 }
 
 final case class ReorderBufferEntry(config: OooCoreConfig) extends Bundle {
@@ -114,12 +122,28 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   private val payloadDepth = config.robEntries / payloadBankCount
   private val payloadWidth = ReorderBufferPayload(config).getBitsWidth
   private val retirementMetadataWidth = ReorderBufferRetirementMetadata(config).getBitsWidth
+  private val completionPayloadWidth = ReorderBufferCompletionPayload(config).getBitsWidth
+  private val storeCompletionSource = config.writebackWidth
+  private val decodedCompletionSource = config.writebackWidth + 1
   require(config.robEntries % payloadBankCount == 0)
   require(config.renameWidth < payloadBankCount)
   require(config.commitWidth < payloadBankCount)
   val payloadBanks = Array.fill(payloadBankCount)(Mem(Bits(payloadWidth bits), payloadDepth))
   val retirementMetadataBanks =
     Array.fill(payloadBankCount)(Mem(Bits(retirementMetadataWidth bits), payloadDepth))
+  // A producer owns the only write port of each memory.  Replicating once per
+  // commit lane gives three independent synchronous reads without a wide
+  // multi-write register file in the ROB entries.
+  val completionPayloadMemories = Array.fill(config.writebackWidth, config.commitWidth)(
+    Mem(Bits(completionPayloadWidth bits), config.robEntries)
+  )
+  val appliedCompletionValid = Reg(Bits(config.writebackWidth bits)) init (0)
+  val appliedCompletionPointer = Vec.fill(config.writebackWidth)(
+    Reg(UInt(config.robPointerWidth bits)) init (0)
+  )
+  val appliedCompletionPayload = Vec.fill(config.writebackWidth)(
+    Reg(Bits(completionPayloadWidth bits)) init (0)
+  )
 
   val allocatePrefix = Vec(UInt(log2Up(config.renameWidth + 1) bits), config.renameWidth + 1)
   val allocationDestination = Vec(UInt(config.robPointerWidth bits), config.renameWidth)
@@ -205,12 +229,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       entries(destination(config.robIndexWidth - 1 downto 0)).decodedExceptionValid :=
         io.allocate(lane).uop.decoded.exception.valid
       entries(destination(config.robIndexWidth - 1 downto 0)).generation := destination.msb
-      entries(destination(config.robIndexWidth - 1 downto 0)).result := B(0, config.xlen bits)
-      entries(destination(config.robIndexWidth - 1 downto 0)).sideEffectData :=
-        B(0, config.xlen bits)
       entries(destination(config.robIndexWidth - 1 downto 0)).completionExceptionValid := False
-      entries(destination(config.robIndexWidth - 1 downto 0)).branchMispredict := False
-      entries(destination(config.robIndexWidth - 1 downto 0)).branchTaken := False
+      entries(destination(config.robIndexWidth - 1 downto 0)).completionSource :=
+        U(decodedCompletionSource, log2Up(config.writebackWidth + 2) bits)
     }
   }
 
@@ -308,7 +329,19 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     )
   }
 
+  val completionPayloadRead = Array.tabulate(config.writebackWidth, config.commitWidth) {
+    (producerLane, commitLane) =>
+      completionPayloadMemories(producerLane)(commitLane).readSync(
+        address = payloadReadPointer(commitLane)(config.robIndexWidth - 1 downto 0),
+        enable = True
+      )
+  }
+
   val candidates = Vec(ReorderBufferEntry(config), config.commitWidth)
+  val candidateCompletionPayload = Vec(
+    ReorderBufferCompletionPayload(config),
+    config.commitWidth
+  )
   val candidateRetirementMetadata =
     Vec(ReorderBufferRetirementMetadata(config), config.commitWidth)
   for (lane <- 0 until config.commitWidth) {
@@ -317,6 +350,24 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     candidates(lane).state := entries(pointer(config.robIndexWidth - 1 downto 0))
     candidates(lane).payload.assignFromBits(payloadBankRead(bank))
     candidateRetirementMetadata(lane).assignFromBits(retirementMetadataBankRead(bank))
+    val selectedCompletionPayload = Bits(completionPayloadWidth bits)
+    selectedCompletionPayload := 0
+    for (producerLane <- 0 until config.writebackWidth) {
+      when(candidates(lane).state.completionSource === producerLane) {
+        selectedCompletionPayload := completionPayloadRead(producerLane)(lane)
+      }
+      // A completion can make lane 1 or 2 eligible on the same edge that its
+      // synchronous memory is written.  Define that case explicitly instead
+      // of relying on the RAM primitive's read-during-write mode.
+      when(
+        candidates(lane).state.completionSource === producerLane &&
+          appliedCompletionValid(producerLane) &&
+          appliedCompletionPointer(producerLane) === pointer
+      ) {
+        selectedCompletionPayload := appliedCompletionPayload(producerLane)
+      }
+    }
+    candidateCompletionPayload(lane).assignFromBits(selectedCompletionPayload)
     // Exception validity is retirement-control state.  Keeping that hot bit beside valid/complete
     // avoids routing a block-RAM payload output through the three-wide commit stop chain.  The
     // cold exception payload remains banked, preserving almost all of the storage reduction.
@@ -328,7 +379,14 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     candidates(lane).exception.badVAddr := candidates(lane).payload.decodedException.badVAddr
     candidates(lane).exception.tlbRefill := candidates(lane).payload.decodedException.tlbRefill
     when(candidates(lane).state.completionExceptionValid) {
-      candidates(lane).exception := candidates(lane).state.completionException
+      candidates(lane).exception.valid := True
+      candidates(lane).exception.ecode := candidateCompletionPayload(lane).exceptionEcode
+      candidates(lane).exception.esubcode := candidateCompletionPayload(lane).exceptionEsubcode
+      candidates(lane).exception.badVAddrValid :=
+        candidateCompletionPayload(lane).exceptionBadVAddrValid
+      candidates(lane).exception.badVAddr := candidateCompletionPayload(lane).auxiliary.asUInt
+      candidates(lane).exception.tlbRefill :=
+        candidateCompletionPayload(lane).exceptionTlbRefill
     }
   }
 
@@ -358,22 +416,22 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       effectiveBranchTaken(lane) := Mux(
         headBranchBypass,
         stagedHeadBranchBypassTaken,
-        candidates(lane).state.branchTaken
+        candidateCompletionPayload(lane).branchTaken
       )
       effectiveBranchTarget(lane) := Mux(
         headBranchBypass,
         stagedHeadBranchBypassTarget,
-        candidates(lane).state.branchTarget
+        candidateCompletionPayload(lane).auxiliary.asUInt
       )
       effectiveBranchMispredict(lane) := Mux(
         headBranchBypass,
         stagedHeadBranchBypassMispredict,
-        candidates(lane).state.branchMispredict
+        candidateCompletionPayload(lane).branchMispredict
       )
     } else {
-      effectiveBranchTaken(lane) := candidates(lane).state.branchTaken
-      effectiveBranchTarget(lane) := candidates(lane).state.branchTarget
-      effectiveBranchMispredict(lane) := candidates(lane).state.branchMispredict
+      effectiveBranchTaken(lane) := candidateCompletionPayload(lane).branchTaken
+      effectiveBranchTarget(lane) := candidateCompletionPayload(lane).auxiliary.asUInt
+      effectiveBranchMispredict(lane) := candidateCompletionPayload(lane).branchMispredict
     }
     if (lane == 0) {
       branchPrefix(lane) := retiringBranch.asUInt.resized
@@ -408,17 +466,17 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         Mux(
           headCompletionBypass,
           headCompletionBypassResult,
-          candidates(lane).state.result
+          candidateCompletionPayload(lane).result
         )
       )
     } else {
-      io.commit(lane).result := candidates(lane).state.result
+      io.commit(lane).result := candidateCompletionPayload(lane).result
     }
     io.commit(lane).systemOperation := candidateRetirementMetadata(lane).systemOperation
     io.commit(lane).csrAddress := candidates(lane).payload.csrAddress
     io.commit(lane).csrWrite := candidates(lane).payload.csrWrite
     io.commit(lane).csrMask := candidates(lane).payload.csrMask
-    io.commit(lane).sideEffectData := candidates(lane).state.sideEffectData
+    io.commit(lane).sideEffectData := candidateCompletionPayload(lane).auxiliary
     io.commit(lane).retired := canCommit(lane) && !candidates(lane).exception.valid
     io.commit(lane).serializing := candidateRetirementMetadata(lane).serializing
     io.commit(lane).isLoad := candidateRetirementMetadata(lane).isLoad
@@ -523,6 +581,53 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       entries(entryIndex).valid && !entries(entryIndex).complete &&
       entries(entryIndex).generation === stagedStoreCompletionRobPointer.msb
   }
+  val stagedCompletionPayload = Vec(
+    ReorderBufferCompletionPayload(config),
+    config.writebackWidth
+  )
+  for (lane <- 0 until config.writebackWidth) {
+    stagedCompletionPayload(lane).result := stagedResult(lane)
+    stagedCompletionPayload(lane).auxiliary := stagedSideEffectData(lane)
+    when(stagedBranchResolved(lane)) {
+      stagedCompletionPayload(lane).auxiliary := stagedBranchTarget(lane).asBits
+    }
+    when(stagedException(lane).valid) {
+      stagedCompletionPayload(lane).auxiliary := stagedException(lane).badVAddr.asBits
+    }
+    stagedCompletionPayload(lane).exceptionEcode := stagedException(lane).ecode
+    stagedCompletionPayload(lane).exceptionEsubcode := stagedException(lane).esubcode
+    stagedCompletionPayload(lane).exceptionBadVAddrValid :=
+      stagedException(lane).badVAddrValid
+    stagedCompletionPayload(lane).exceptionTlbRefill := stagedException(lane).tlbRefill
+    stagedCompletionPayload(lane).branchTaken := stagedBranchTaken(lane)
+    stagedCompletionPayload(lane).branchMispredict := stagedBranchMispredict(lane)
+  }
+  val completionWriteValid = Bits(config.writebackWidth bits)
+  for (lane <- 0 until config.writebackWidth) {
+    val laneMatches = Bits(config.robEntries bits)
+    for (entryIndex <- 0 until config.robEntries) {
+      laneMatches(entryIndex) := stagedCompletionMatches(entryIndex)(lane)
+    }
+    completionWriteValid(lane) := !io.flush && laneMatches.orR
+    for (commitLane <- 0 until config.commitWidth) {
+      completionPayloadMemories(lane)(commitLane).write(
+        address = stagedRobPointer(lane)(config.robIndexWidth - 1 downto 0),
+        data = stagedCompletionPayload(lane).asBits,
+        enable = completionWriteValid(lane)
+      )
+    }
+  }
+  when(io.flush) {
+    appliedCompletionValid := 0
+  }.otherwise {
+    for (lane <- 0 until config.writebackWidth) {
+      appliedCompletionValid(lane) := completionWriteValid(lane)
+      when(completionWriteValid(lane)) {
+        appliedCompletionPointer(lane) := stagedRobPointer(lane)
+        appliedCompletionPayload(lane) := stagedCompletionPayload(lane).asBits
+      }
+    }
+  }
   when(io.flush) {
     stagedStoreCompletionValid := False
     stagedStoreCompletionCurrent := False
@@ -625,22 +730,14 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     for (lane <- 0 until config.writebackWidth) {
       when(!io.flush && stagedCompletionMatches(entryIndex)(lane)) {
         entries(entryIndex).complete := True
-        entries(entryIndex).result := stagedResult(lane)
-        entries(entryIndex).sideEffectData := stagedSideEffectData(lane)
         entries(entryIndex).completionExceptionValid := stagedException(lane).valid
-        entries(entryIndex).completionException := stagedException(lane)
-        when(stagedBranchResolved(lane)) {
-          entries(entryIndex).branchTaken := stagedBranchTaken(lane)
-          entries(entryIndex).branchMispredict := stagedBranchMispredict(lane)
-          entries(entryIndex).branchTarget := stagedBranchTarget(lane)
-        }
+        entries(entryIndex).completionSource := lane
       }
     }
     when(!io.flush && stagedStoreCompletionMatches(entryIndex)) {
       entries(entryIndex).complete := True
-      entries(entryIndex).result := B(0, config.xlen bits)
-      entries(entryIndex).sideEffectData := B(0, config.xlen bits)
       entries(entryIndex).completionExceptionValid := False
+      entries(entryIndex).completionSource := storeCompletionSource
     }
   }
 
@@ -730,7 +827,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   perfObservationV1Word4(43) := observationHeadPredictorHasCapacity
   perfObservationV1Word4(44) := candidates(0).exception.valid
   perfObservationV1Word4(45) := candidateRetirementMetadata(0).serializing
-  perfObservationV1Word4(46) := candidates(0).state.branchMispredict
+  perfObservationV1Word4(46) := effectiveBranchMispredict(0)
   perfObservationV1Word4(47) := candidateRetirementMetadata(0).isLoad
   perfObservationV1Word4(48) := candidateRetirementMetadata(0).isStore
   perfObservationV1Word4(49) := candidateRetirementMetadata(0).isBranch

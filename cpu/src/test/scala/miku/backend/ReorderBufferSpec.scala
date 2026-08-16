@@ -26,7 +26,14 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     val completionRobPointer = in Vec (UInt(config.robPointerWidth bits), config.writebackWidth)
     val completionRecoveryEpoch =
       in Vec (UInt(config.recoveryEpochWidth bits), config.writebackWidth)
+    val completionData = in Vec (Bits(config.xlen bits), config.writebackWidth)
+    val completionSideEffectData = in Vec (Bits(config.xlen bits), config.writebackWidth)
     val completionExceptionValid = in Bits (config.writebackWidth bits)
+    val completionExceptionEcode = in Vec (UInt(6 bits), config.writebackWidth)
+    val completionExceptionEsubcode = in Vec (UInt(9 bits), config.writebackWidth)
+    val completionExceptionBadVAddrValid = in Bits (config.writebackWidth bits)
+    val completionExceptionBadVAddr = in Vec (UInt(config.xlen bits), config.writebackWidth)
+    val completionExceptionTlbRefill = in Bits (config.writebackWidth bits)
     val completionBranchResolved = in Bits (config.writebackWidth bits)
     val completionBranchTaken = in Bits (config.writebackWidth bits)
     val completionBranchTarget = in Vec (UInt(config.xlen bits), config.writebackWidth)
@@ -41,6 +48,13 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     val commitValid = out Bits (config.commitWidth bits)
     val commitPc = out Vec (UInt(config.xlen bits), config.commitWidth)
     val commitResult = out Vec (Bits(config.xlen bits), config.commitWidth)
+    val commitSideEffectData = out Vec (Bits(config.xlen bits), config.commitWidth)
+    val commitExceptionValid = out Bits (config.commitWidth bits)
+    val commitExceptionEcode = out Vec (UInt(6 bits), config.commitWidth)
+    val commitExceptionEsubcode = out Vec (UInt(9 bits), config.commitWidth)
+    val commitExceptionBadVAddrValid = out Bits (config.commitWidth bits)
+    val commitExceptionBadVAddr = out Vec (UInt(config.xlen bits), config.commitWidth)
+    val commitExceptionTlbRefill = out Bits (config.commitWidth bits)
     val commitIsLoad = out Bits (config.commitWidth bits)
     val commitIsStore = out Bits (config.commitWidth bits)
     val commitIsBranch = out Bits (config.commitWidth bits)
@@ -91,14 +105,14 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     completion.recoveryEpoch := io.completionRecoveryEpoch(lane)
     completion.pdst := U(lane + 1, config.physicalRegIndexWidth bits)
     completion.writesPdst := io.completionWritesPdst(lane)
-    completion.data := B(0x100 + lane, config.xlen bits)
-    completion.sideEffectData := 0
+    completion.data := io.completionData(lane)
+    completion.sideEffectData := io.completionSideEffectData(lane)
     completion.exception.valid := io.completionExceptionValid(lane)
-    completion.exception.ecode := 0
-    completion.exception.esubcode := 0
-    completion.exception.badVAddrValid := False
-    completion.exception.badVAddr := 0
-    completion.exception.tlbRefill := False
+    completion.exception.ecode := io.completionExceptionEcode(lane)
+    completion.exception.esubcode := io.completionExceptionEsubcode(lane)
+    completion.exception.badVAddrValid := io.completionExceptionBadVAddrValid(lane)
+    completion.exception.badVAddr := io.completionExceptionBadVAddr(lane)
+    completion.exception.tlbRefill := io.completionExceptionTlbRefill(lane)
     completion.branchResolved := io.completionBranchResolved(lane)
     completion.branchTaken := io.completionBranchTaken(lane)
     completion.branchTarget := io.completionBranchTarget(lane)
@@ -113,10 +127,17 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
   io.allocatedPointer := rob.io.allocatedPointer
   io.completionWakeupValid := rob.io.completionWakeupValid
   io.completionWakeupCandidateValid := rob.io.completionWakeupCandidateValid
-  io.commitValid := rob.io.commitValid
-  for (lane <- 0 until config.commitWidth) {
-    io.commitPc(lane) := rob.io.commit(lane).pc
-    io.commitResult(lane) := rob.io.commit(lane).result
+    io.commitValid := rob.io.commitValid
+    for (lane <- 0 until config.commitWidth) {
+      io.commitPc(lane) := rob.io.commit(lane).pc
+      io.commitResult(lane) := rob.io.commit(lane).result
+      io.commitSideEffectData(lane) := rob.io.commit(lane).sideEffectData
+      io.commitExceptionValid(lane) := rob.io.commit(lane).exception.valid
+      io.commitExceptionEcode(lane) := rob.io.commit(lane).exception.ecode
+      io.commitExceptionEsubcode(lane) := rob.io.commit(lane).exception.esubcode
+      io.commitExceptionBadVAddrValid(lane) := rob.io.commit(lane).exception.badVAddrValid
+      io.commitExceptionBadVAddr(lane) := rob.io.commit(lane).exception.badVAddr
+      io.commitExceptionTlbRefill(lane) := rob.io.commit(lane).exception.tlbRefill
     io.commitIsLoad(lane) := rob.io.commit(lane).isLoad
     io.commitIsStore(lane) := rob.io.commit(lane).isStore
     io.commitIsBranch(lane) := rob.io.commit(lane).isBranch
@@ -141,7 +162,16 @@ class ReorderBufferSpec extends AnyFunSuite {
     dut.io.flush #= false
     dut.io.completionValid #= 0
     dut.io.completionWritesPdst #= 0
+    for (lane <- 0 until config.writebackWidth) {
+      dut.io.completionData(lane) #= BigInt(0x100 + lane)
+      dut.io.completionSideEffectData(lane) #= 0
+      dut.io.completionExceptionEcode(lane) #= 0
+      dut.io.completionExceptionEsubcode(lane) #= 0
+      dut.io.completionExceptionBadVAddr(lane) #= 0
+    }
     dut.io.completionExceptionValid #= 0
+    dut.io.completionExceptionBadVAddrValid #= 0
+    dut.io.completionExceptionTlbRefill #= 0
     dut.io.completionBranchResolved #= 0
     dut.io.completionBranchTaken #= 0
     dut.io.completionBranchMispredict #= 0
@@ -1285,5 +1315,116 @@ class ReorderBufferSpec extends AnyFunSuite {
         assert(dut.io.occupancy.toBigInt == 0)
       }
     }
+  }
+
+  test("ROB retains three producer payloads through same-cycle three-wide retirement") {
+    val config = OooCoreConfig.FourIssueThreeCommit.copy(
+      enableHeadCompletionCommitBypass = false,
+      enableBranchHeadCompletionBypass = false
+    )
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+        "/sim-workspace-ooo-rob-cold-payload")
+      .compile(new ReorderBufferProbe(config))
+      .doSim("ooo-rob-cold-payload-three-wide", 0x52543039) { dut =>
+        def sample(): Unit = {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+        }
+
+        dut.clockDomain.forkStimulus(period = 10)
+        initialize(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample()
+
+        dut.io.allocatePc(0) #= 0x100
+        dut.io.allocatePc(1) #= 0x104
+        dut.io.allocatePc(2) #= 0x108
+        dut.io.allocateValid #= 7
+        dut.io.allocateAccept #= true
+        sample()
+        assert(dut.io.occupancy.toBigInt == 3)
+
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        for (lane <- 0 until 3) {
+          dut.io.completionRobPointer(lane) #= lane
+          dut.io.completionData(lane) #= BigInt(0xa000 + lane)
+          dut.io.completionSideEffectData(lane) #= BigInt(0xb000 + lane)
+        }
+        dut.io.completionValid #= 7
+        sample()
+        assert(dut.io.commitValid.toBigInt == 0)
+
+        dut.io.completionValid #= 0
+        sample()
+        assert(dut.io.commitValid.toBigInt == 7)
+        for (lane <- 0 until 3) {
+          assert(dut.io.commitResult(lane).toBigInt == BigInt(0xa000 + lane))
+          assert(dut.io.commitSideEffectData(lane).toBigInt == BigInt(0xb000 + lane))
+        }
+        sample()
+        assert(dut.io.occupancy.toBigInt == 0)
+      }
+  }
+
+  test("ROB preserves completion exception payload in the precise retirement record") {
+    val config = OooCoreConfig.FourIssueThreeCommit.copy(
+      enableHeadCompletionCommitBypass = false,
+      enableBranchHeadCompletionBypass = false
+    )
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+        "/sim-workspace-ooo-rob-cold-exception")
+      .compile(new ReorderBufferProbe(config))
+      .doSim("ooo-rob-cold-exception", 0x5254303a) { dut =>
+        def sample(): Unit = {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+        }
+
+        dut.clockDomain.forkStimulus(period = 10)
+        initialize(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample()
+
+        dut.io.allocatePc(0) #= 0x200
+        dut.io.allocateValid #= 1
+        dut.io.allocateAccept #= true
+        sleep(1)
+        val pointer = dut.io.allocatedPointer(0).toBigInt
+        sample()
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.completionRobPointer(0) #= pointer
+        dut.io.completionExceptionValid #= 1
+        dut.io.completionExceptionEcode(0) #= 0x2a
+        dut.io.completionExceptionEsubcode(0) #= 0x101
+        dut.io.completionExceptionBadVAddrValid #= 1
+        dut.io.completionExceptionBadVAddr(0) #= BigInt("cafebabe", 16)
+        dut.io.completionExceptionTlbRefill #= 1
+        dut.io.completionValid #= 1
+        sample()
+        assert(dut.io.commitValid.toBigInt == 0)
+
+        dut.io.completionValid #= 0
+        dut.io.completionExceptionValid #= 0
+        dut.io.completionExceptionBadVAddrValid #= 0
+        dut.io.completionExceptionTlbRefill #= 0
+        sample()
+        assert((dut.io.commitValid.toBigInt & 1) == 1)
+        assert((dut.io.commitExceptionValid.toBigInt & 1) == 1)
+        assert(dut.io.commitExceptionEcode(0).toBigInt == 0x2a)
+        assert(dut.io.commitExceptionEsubcode(0).toBigInt == 0x101)
+        assert((dut.io.commitExceptionBadVAddrValid.toBigInt & 1) == 1)
+        assert(dut.io.commitExceptionBadVAddr(0).toBigInt == BigInt("cafebabe", 16))
+        assert((dut.io.commitExceptionTlbRefill.toBigInt & 1) == 1)
+        assert(dut.io.recoveryValid.toBoolean)
+        assert(dut.io.recoveryCause.toBigInt == 2)
+      }
   }
 }
