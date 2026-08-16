@@ -22,6 +22,7 @@ from common import (
     load_json as load_experiment_json,
     validate_experiment_manifest,
 )
+from route_analyze import parse_route_log
 
 
 REQUIRED_IMPL_ARTIFACTS = {
@@ -293,6 +294,7 @@ def main() -> int:
     clock = parse_key_values(sources["clock_timing_validation.txt"])
     drc = parse_drc(sources["soc_top_drc_routed.rpt"])
     utilization = parse_utilization(sources["soc_top_utilization_placed.rpt"])
+    physical_health = parse_route_log(sources["implementation.log"])
     timing_pass = implementation_passes(
         clock, drc, sources["soc_top.bit"], float(args.requested_mhz)
     )
@@ -341,6 +343,7 @@ def main() -> int:
         "clock": clock,
         "drc": drc,
         "utilization": utilization,
+        "physical_health": physical_health,
         "toolchain": generation["toolchain"],
         "experiment": {
             "id": experiment["experiment_id"],
@@ -407,6 +410,13 @@ def main() -> int:
         shutil.copy2(args.experiment_manifest, experiment_target)
         manifest["artifacts"][experiment_target.name] = artifact_record(experiment_target)
 
+        route_health_target = temporary / "route-health.json"
+        route_health_target.write_text(
+            json.dumps(physical_health, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        manifest["artifacts"][route_health_target.name] = artifact_record(route_health_target)
+
         manifest_path = temporary / "manifest.json"
         manifest_path.write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
@@ -430,6 +440,11 @@ def main() -> int:
             f"drc_errors={drc['errors']}",
             f"drc_critical_warnings={drc['critical_warnings']}",
             f"fully_routed={str(drc['fully_routed']).lower()}",
+            f"route_design_seconds={physical_health['route_design_seconds']}",
+            f"implementation_seconds={physical_health['implementation_seconds']}",
+            f"peak_route_overlaps={physical_health['peak_overlaps']}",
+            f"route_congestion_warnings={physical_health['congestion_warning_count']}",
+            f"max_route_congestion_percent={physical_health['congestion']['maximum_percent']}",
         ]
         for filename, record in sorted(manifest["artifacts"].items()):
             text_lines.append(f"{filename.replace('.', '_')}_sha256={record['sha256']}")
