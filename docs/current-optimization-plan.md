@@ -112,6 +112,32 @@ issueOperandSource` 高 route 路径；`MT11` 将 L1D refill 的 byte-mask/write
 局部化，目标是 partial route 中 256--729 fanout 的 refill/`lookupMshrId` 网络。每项先做
 定向测试、完整门禁、Yosys 同配置对照和合并 perf20；出现严重回退时再按提交边界分解。
 
+### R10 时序候选批次
+
+R10 不以“最后一次 top-50”替代历史归因。R7 的 50 条 `scheduledLoad.robPointer -> scheduledLoad
+payload` 路径、R8 expanded-window 的 `drainAfterFlush -> ROB entry CE` 路径，和 R9 placed 的 IQ/
+ROB/cache/multiplier 路径共同定义候选池。目标是在其中实际引入至少 6 个 R7--B02-F 期间的
+针对性时序优化，并额外引入至少 3 个全局独立优化；下列 11 项是起始池而不是上限：
+
+| ID | 来源 | 周期不变量与预期结构变化 | 最低验证 |
+| --- | --- | --- | --- |
+| MT12 | R7 scheduled-load token | 将 load owner、排序资格和宽 payload 的更新域拆开，避免 `robPointer` 进入每个 scheduled payload CE；不改变 selected load 到 translation/request 的拍数 | LSQ scheduling/forwarding/C04/C06、完整门禁、perf20、Yosys LSQ 与 top-N |
+| MT13 | R7 younger retry | 将 younger-retry 的资格和选中 owner 局部化，避免已注册 owner 再驱动全 LQ 选择；不改变 retry 的下一拍 order-check | LSQ retry/flush/epoch、完整门禁、perf20 |
+| MT14 | R7 store-drain | 将 recovery store-drain 对 rename/commit 的广播改为窄状态与局部 gating，保持 committed store 在新 epoch 前完全排空 | recovery、uncached/store drain、C06、func58 |
+| RT12 | R8 ROB flush visibility | flush 只清除 entry 可见性和窄 pointer/count，失效 payload 不再接受全局 flush CE；恢复拍数不变 | ROB wrap/epoch/C03、flush/exception、完整门禁 |
+| RT13 | R8 completion destination | 把 completion target 资格预解码为 bank-local write mask，减少 completion pointer 对全 ROB state 的比较/CE；不改变 wakeup/commit 时刻 | ROB multi-write/flush/head-bypass、PRF、完整门禁 |
+| RT14 | R8 commit read fanout | 将 candidate pointer 与 retirement metadata 的跨 bank 读取/选择局部化，避免 commit lane 广播扩大为 64-entry 控制网；三路 commit 可见性不变 | ROB commit/CSR/branch recovery、perf20、Yosys |
+| DQ02 | R8 dispatch payload | 仅在命中本 bank 的 rename 写入时更新 dispatch payload，分离全局 dispatch/flush 控制与宽 slot payload CE | dispatch/IQ enqueue/flush、完整门禁 |
+| IQT01 | R9 placed IQ | 局部化 source-tag 到 multiplier/issue operand 的扇出，不增加 issue 或 operand-read latency | IQ select/wakeup/flush、依赖链、perf20、top-N |
+| MT11 | R9 partial cache | refill byte-mask/write-owner 按 beat/byte bank 局部化，保持 store priority 和 L1D response 周期 | L1D partial-store/refill/error/C05/C06、Yosys memory/mux |
+| CT06 | R9 cache/L2 | 将 L2 lookup MSHR ID、write-state 与 maintenance 状态的控制更新分域，避免请求 owner 控制宽 payload CE | L2 dirty victim/error retry/maintenance、完整门禁 |
+| MX01 | R9 placed multiplier | 审计 DSP/carry 结果树的局部寄存和 operand mapping；只接受吞吐、乘法 latency 与 wakeup 时刻都不变的重排 | multiplier random/依赖链、perf20、Yosys DSP/carry 与 top-N |
+
+候选不以数量换取风险：有任何拍数、异常/epoch、存储顺序或 payload-owner 不变量无法证明时，
+该项不计入批次并保留审计记录。每个后续 direct full 前至少需要 5 个经定向测试、完整门禁、
+同配置 Yosys 和合并 perf20 验证的时序候选；若回退一个已验证候选，必须补入另一项，不能以
+单变量综合替代批次验证。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。
