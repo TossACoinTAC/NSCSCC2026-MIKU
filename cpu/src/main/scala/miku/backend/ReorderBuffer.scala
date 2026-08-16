@@ -568,12 +568,20 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val stagedStoreCompletionCurrent = RegInit(False)
   val stagedStoreCompletionRobPointer = Reg(UInt(config.robPointerWidth bits))
   val stagedCompletionTargets = Vec(Bits(config.robEntries bits), config.writebackWidth)
+  // The low pointer bits select exactly one payload bank. Predecode that
+  // narrow domain once instead of rebuilding a bank comparator in every
+  // completion-memory write port.
+  val stagedCompletionBankTargets = Vec(Bits(payloadBankCount bits), config.writebackWidth)
   for (lane <- 0 until config.writebackWidth) {
     val stagedIndex = stagedRobPointer(lane)(config.robIndexWidth - 1 downto 0)
     stagedCompletionTargets(lane) := Mux(
       stagedCompletionValid(lane) && stagedCompletionCurrent(lane),
       UIntToOh(stagedIndex, config.robEntries),
       B(0, config.robEntries bits)
+    )
+    stagedCompletionBankTargets(lane) := UIntToOh(
+      stagedRobPointer(lane)(payloadBankWidth - 1 downto 0),
+      payloadBankCount
     )
   }
   val stagedStoreCompletionTarget = Bits(config.robEntries bits)
@@ -632,8 +640,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         ),
         data = stagedCompletionPayload(lane).asBits,
         enable = completionWriteValid(lane) &&
-          stagedRobPointer(lane)(payloadBankWidth - 1 downto 0) ===
-          U(bank, payloadBankWidth bits)
+          stagedCompletionBankTargets(lane)(bank)
       )
     }
   }
