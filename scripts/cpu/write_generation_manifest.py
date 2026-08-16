@@ -28,6 +28,11 @@ def main() -> int:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--raw", type=Path, required=True)
     parser.add_argument("--published", type=Path, required=True)
+    parser.add_argument(
+        "--core-variant",
+        choices=("default", "expanded-window"),
+        default="default",
+    )
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     root = args.root.resolve()
@@ -41,6 +46,7 @@ def main() -> int:
         "source_tree": "cpu/src/main + cpu/build.sbt + cpu/project",
         "source_tree_sha256": cpu_source_hash(cpu),
         "source_commit": source_commit,
+        "core_variant": args.core_variant,
         "raw_rtl": str(args.raw.resolve()),
         "raw_rtl_sha256": file_hash(args.raw),
         "published_rtl": str(args.published.resolve()),

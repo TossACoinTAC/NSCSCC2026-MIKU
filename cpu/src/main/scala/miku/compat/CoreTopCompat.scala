@@ -8,7 +8,7 @@ final case class CoreTopCompatConfig(tlbEntries: Int = 32) {
   require(tlbEntries == 32, "only the locked TLBNUM=32 configuration is currently verified")
 }
 
-final class CoreTopCompat(config: CoreTopCompatConfig = CoreTopCompatConfig()) extends Component {
+final class CoreTopCompat(config: CoreTopCompatConfig = CoreTopCompatConfig(), coreConfig: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) extends Component {
   val io = new Bundle {
     val aclk = in Bool ()
     val aresetn = in Bool ()
@@ -96,7 +96,7 @@ final class CoreTopCompat(config: CoreTopCompatConfig = CoreTopCompatConfig()) e
   )
 
   val backendArea = new ClockingArea(coreClockDomain) {
-    val core = new OooCoreSystem(OooCoreConfig.FourIssueThreeCommit)
+    val core = new OooCoreSystem(coreConfig)
   }
   val core = backendArea.core
 

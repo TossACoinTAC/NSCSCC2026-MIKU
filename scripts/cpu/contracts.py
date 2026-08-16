@@ -110,6 +110,8 @@ def validate_generation_manifest(document: dict[str, Any]) -> None:
             raise ContractError(f"生成清单哈希错误: {key}")
     if not isinstance(document["toolchain"], dict):
         raise ContractError("生成清单 toolchain 必须是对象")
+    if document.get("core_variant", "default") not in {"default", "expanded-window"}:
+        raise ContractError("生成清单 core_variant 非法")
 
 
 def validate_sim_result(document: dict[str, Any]) -> None:

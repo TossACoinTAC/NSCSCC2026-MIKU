@@ -1,26 +1,45 @@
 package miku.compat
 
 import java.nio.file.{Files, Path, Paths}
+import miku.core.OooCoreConfig
 import spinal.core._
 
 private object CoreTopCompatGeneratorSupport {
-  private def outputArgument(args: Array[String]): String =
+  private final case class GeneratorArguments(outputDirectory: String, coreVariant: String)
+
+  private def generatorArguments(args: Array[String]): GeneratorArguments =
     args match {
-      case Array(path) if path.nonEmpty              => path
-      case Array("--out-dir", path) if path.nonEmpty => path
+      case Array(path) if path.nonEmpty => GeneratorArguments(path, "default")
+      case Array("--out-dir", path) if path.nonEmpty =>
+        GeneratorArguments(path, "default")
+      case Array("--out-dir", path, "--core-variant", variant)
+          if path.nonEmpty && variant.nonEmpty =>
+        GeneratorArguments(path, variant)
       case Array() =>
-        sys.env
-          .get("OUT_DIR")
-          .filter(_.nonEmpty)
-          .getOrElse(
+        GeneratorArguments(
+          sys.env
+            .get("OUT_DIR")
+            .filter(_.nonEmpty)
+            .getOrElse(
             throw new IllegalArgumentException(
               "output directory is required as an argument or OUT_DIR"
             )
-          )
+            ),
+          "default"
+        )
       case _ =>
         throw new IllegalArgumentException(
-          "usage: GenerateCoreTopCompat [--out-dir] <output-directory>"
+          "usage: GenerateCoreTopCompat [--out-dir] <output-directory> " +
+            "[--core-variant default|expanded-window]"
         )
+    }
+
+  private def coreConfig(variant: String): OooCoreConfig =
+    variant match {
+      case "default"         => OooCoreConfig.FourIssueThreeCommit
+      case "expanded-window" => OooCoreConfig.ExpandedWindow
+      case other =>
+        throw new IllegalArgumentException(s"unsupported core variant: $other")
     }
 
   private def findRepositoryRoot(path: Path): Option[Path] =
@@ -38,7 +57,8 @@ private object CoreTopCompatGeneratorSupport {
     }
 
   def generate(args: Array[String]): Unit = {
-    val outputDirectory = Paths.get(outputArgument(args)).toAbsolutePath.normalize()
+    val arguments = generatorArguments(args)
+    val outputDirectory = Paths.get(arguments.outputDirectory).toAbsolutePath.normalize()
     val workingDirectory = Paths.get("").toAbsolutePath.normalize()
     val classDirectory = Paths
       .get(getClass.getProtectionDomain.getCodeSource.getLocation.toURI)
@@ -70,7 +90,7 @@ private object CoreTopCompatGeneratorSupport {
     )
     spinalConfig.withTimescale = false
     spinalConfig.generateVerilog {
-      val dut = new CoreTopCompat(CoreTopCompatConfig())
+      val dut = new CoreTopCompat(CoreTopCompatConfig(), coreConfig(arguments.coreVariant))
       dut.setDefinitionName("core_top")
       dut
     }
