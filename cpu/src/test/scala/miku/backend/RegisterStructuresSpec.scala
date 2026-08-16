@@ -23,6 +23,7 @@ private final class RenameMapProbe(config: OooCoreConfig) extends Component {
     val commitArch = in Vec (UInt(config.archRegIndexWidth bits), config.commitWidth)
     val commitPdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.commitWidth)
     val commitPreviousPdst = out Vec (UInt(config.physicalRegIndexWidth bits), config.commitWidth)
+    val physicalReady = out Bits (config.physicalRegs bits)
     val flush = in Bool ()
   }
   noIoPrefix()
@@ -46,6 +47,7 @@ private final class RenameMapProbe(config: OooCoreConfig) extends Component {
   io.renameSource2Ready := registerMap.io.renameSource2Ready
   io.renameOldPdst := registerMap.io.renameOldPdst
   io.commitPreviousPdst := registerMap.io.commitPreviousPdst
+  io.physicalReady := registerMap.io.physicalReady
 }
 
 class RegisterStructuresSpec extends AnyFunSuite {
@@ -138,6 +140,9 @@ class RegisterStructuresSpec extends AnyFunSuite {
     sleep(1)
   }
 
+  private def physicalReady(dut: RenameMapProbe, index: Int): Boolean =
+    ((dut.io.physicalReady.toBigInt >> index) & 1) == 1
+
   test("rename handles same-cycle RAW and WAW in lane order") {
     val config = OooCoreConfig.FourIssueThreeCommit
     SimConfig.withVerilator
@@ -210,6 +215,64 @@ class RegisterStructuresSpec extends AnyFunSuite {
         sample(dut)
         assert(dut.io.renamePsrc1(0).toBigInt == 13)
       }
+  }
+
+  for ((name, config, highPdst) <- Seq(
+      ("default", OooCoreConfig.FourIssueThreeCommit, 63),
+      ("expanded-window", OooCoreConfig.ExpandedWindow, 127)
+    )) {
+    test(s"rename ready mask preserves allocation priority and flush for $name") {
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-register-ready-mask-$name"
+        )
+        .compile(new RenameMapProbe(config))
+        .doSim(s"ooo-register-ready-mask-$name", 0x5243 + highPdst) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearInputs(dut, config)
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          sample(dut)
+
+          dut.io.renameValid #= 7
+          dut.io.renameDestination(0) #= 1
+          dut.io.renameDestination(1) #= 2
+          dut.io.renameDestination(2) #= 3
+          dut.io.renamePdst(0) #= 7
+          dut.io.renamePdst(1) #= 12
+          dut.io.renamePdst(2) #= highPdst
+          sample(dut)
+          assert(!physicalReady(dut, 7))
+          assert(!physicalReady(dut, 12))
+          assert(!physicalReady(dut, highPdst))
+
+          clearInputs(dut, config)
+          dut.io.renameValid #= 1
+          dut.io.renameDestination(0) #= 4
+          dut.io.renamePdst(0) #= 12
+          dut.io.writebackValid #= 3
+          dut.io.writebackPdst(0) #= 7
+          dut.io.writebackPdst(1) #= 12
+          sample(dut)
+          assert(physicalReady(dut, 7))
+          assert(!physicalReady(dut, 12))
+
+          clearInputs(dut, config)
+          dut.io.writebackValid #= 3
+          dut.io.writebackPdst(0) #= 0
+          dut.io.writebackPdst(1) #= 12
+          sample(dut)
+          assert(physicalReady(dut, 0))
+          assert(physicalReady(dut, 12))
+
+          clearInputs(dut, config)
+          dut.io.flush #= true
+          sample(dut)
+          assert(dut.io.physicalReady.toBigInt == (BigInt(1) << config.physicalRegs) - 1)
+        }
+    }
   }
 
   test("free list flush restores the committed allocation head") {

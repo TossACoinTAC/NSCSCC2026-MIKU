@@ -94,16 +94,16 @@ final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
   val speculative = Vec.fill(config.archRegs)(Reg(UInt(config.physicalRegIndexWidth bits)) init (0))
   val architectural =
     Vec.fill(config.archRegs)(Reg(UInt(config.physicalRegIndexWidth bits)) init (0))
-  val ready = Vec.fill(config.physicalRegs)(Reg(Bool()) init (True))
+  val ready = Reg(Bits(config.physicalRegs bits)) init (
+    B((BigInt(1) << config.physicalRegs) - 1, config.physicalRegs bits)
+  )
   speculative(0).init(U(0, config.physicalRegIndexWidth bits))
   architectural(0).init(U(0, config.physicalRegIndexWidth bits))
-  ready(0).init(True)
-  ready(0) := True
 
   for (arch <- 0 until config.archRegs) {
     io.architecturalMappings(arch) := architectural(arch)
   }
-  io.physicalReady := ready.asBits
+  io.physicalReady := ready
 
   for (lane <- 0 until config.renameWidth) {
     io.renamePsrc1(lane) := speculative(io.renameSource1(lane))
@@ -160,42 +160,54 @@ final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
     }
   }
 
+  def balancedOr(values: Seq[Bits]): Bits = {
+    require(values.nonEmpty)
+    if (values.size == 1) {
+      values.head
+    } else {
+      val (lower, upper) = values.splitAt(values.size / 2)
+      balancedOr(lower) | balancedOr(upper)
+    }
+  }
+
+  val allocationMasks = Vec(Bits(config.physicalRegs bits), config.renameWidth)
+  for (lane <- 0 until config.renameWidth) {
+    allocationMasks(lane) := Mux(
+      io.renameValid(lane) && io.renameDestination(lane) =/= 0,
+      UIntToOh(io.renamePdst(lane), config.physicalRegs),
+      B(0, config.physicalRegs bits)
+    )
+  }
+  val completionMasks = Vec(Bits(config.physicalRegs bits), config.writebackWidth)
+  for (write <- 0 until config.writebackWidth) {
+    completionMasks(write) := Mux(
+      io.writebackValid(write),
+      UIntToOh(io.writebackPdst(write), config.physicalRegs),
+      B(0, config.physicalRegs bits)
+    )
+  }
+  val allocatedMask = balancedOr(allocationMasks.toSeq)
+  val completedMask = balancedOr(completionMasks.toSeq)
+
   when(io.flush) {
     for (arch <- 1 until config.archRegs) {
       speculative(arch) := architectural(arch)
     }
-    for (phys <- 1 until config.physicalRegs) { ready(phys) := True }
+    ready := B((BigInt(1) << config.physicalRegs) - 1, config.physicalRegs bits)
   }.otherwise {
     for (lane <- 0 until config.renameWidth) {
       when(io.renameValid(lane) && io.renameDestination(lane) =/= 0) {
         speculative(io.renameDestination(lane)) := io.renamePdst(lane)
       }
     }
-    for (phys <- 1 until config.physicalRegs) {
-      val allocated = (0 until config.renameWidth)
-        .map { lane =>
-          io.renameValid(lane) && io.renameDestination(lane) =/= 0 &&
-          io.renamePdst(lane) === U(phys, config.physicalRegIndexWidth bits)
-        }
-        .reduce(_ || _)
-      val completed = (0 until config.writebackWidth)
-        .map { write =>
-          io.writebackValid(write) &&
-          io.writebackPdst(write) === U(phys, config.physicalRegIndexWidth bits)
-        }
-        .reduce(_ || _)
-      when(allocated) {
-        ready(phys) := False
-      }.elsewhen(completed) {
-        ready(phys) := True
-      }
-    }
+    ready := (ready | completedMask) & ~allocatedMask
     for (lane <- 0 until config.commitWidth) {
       when(io.commitValid(lane) && io.commitArch(lane) =/= 0) {
         architectural(io.commitArch(lane)) := io.commitPdst(lane)
       }
     }
   }
+  ready(0) := True
 }
 
 final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
