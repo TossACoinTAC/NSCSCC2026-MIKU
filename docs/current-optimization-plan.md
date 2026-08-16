@@ -193,6 +193,14 @@ baseline `4,423,675 -> 4,320,785`（总周期 `-2.326%`，几何平均 `0.986232
 `fireye_B2 +0.35%` 是最大回退。该结果只是短路径 perf20，下一步必须补 matching
 func58 三 seed、Linux 固定窗口和 direct full 时序，通过后再决定是否进入组合板测。
 
+`L02` 的受限 younger-ready retry 形式也已在同一分支完成：当 scheduled Load 被本地
+alias/forwarding 条件阻塞且存在地址已就绪的更年轻 Load 时，选择下一个候选并在下一拍
+经过原有完整 Store/Load 顺序逻辑重新资格化。相对 L03+L15，完整短路径 perf20 为
+`4,316,663 -> 4,259,994`（`-1.313%`），几何平均 `0.991835`；主要收益
+`inner_product -7.59%`、`minmax_sequence -1.79%`、`loop_induction -1.54%`。
+完整 Scala 39 suites/233 tests 和本地 func58 seeds `240/255/141` 通过。
+该候选改变了 LSQ scheduler select 路径，matching direct full 的 LSQ/WNS 必须重点观察。
+
 `L15` 作为同一分支上的第二个独立候选已实现：L1D 在 victim writeback/writebackWait
 期间不再全局拒绝其他 set 的新 lookup，只保留 `setConflictMask` 的同 set 串行保护。
 本地短路径 A/B 相对 L03 为 `4,320,785 -> 4,316,663`（`-0.095%`），主要改善
