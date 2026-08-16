@@ -82,63 +82,92 @@ final class OooCommitAdapter(config: OooCoreConfig = OooCoreConfig.FourIssueThre
   io.exception.badVAddr := U(0, 32 bits)
   io.exception.tlbRefill := False
 
+  val serialCommitMask = Bits(config.commitWidth bits)
   for (lane <- 0 until config.commitWidth) {
-    val valid = !io.flush && io.commitValid(lane) && io.commit(lane).retired &&
+    serialCommitMask(lane) := !io.flush && io.commitValid(lane) && io.commit(lane).retired &&
       io.commit(lane).serializing
-    when(valid) {
-      io.serialCommitPc := io.commit(lane).pc
-      io.csrAddress := io.commit(lane).csrAddress
-      io.csrWriteData := io.commit(lane).sideEffectData
-      io.csrMask := io.commit(lane).csrMask
-      io.csrWriteValid := io.commit(lane).csrWrite
-      when(io.commit(lane).systemOperation === SystemOperation.ertn) {
-        io.ertnValid := True
-      }
-      when(io.commit(lane).systemOperation === SystemOperation.idle) {
-        io.idleValid := True
-      }
-      when(io.commit(lane).systemOperation === SystemOperation.tlbSearch) {
-        io.tlbSearchValid := True
-      }
-      when(io.commit(lane).systemOperation === SystemOperation.tlbRead) {
-        io.tlbReadValid := True
-      }
-      when(io.commit(lane).systemOperation === SystemOperation.tlbWrite) {
-        io.tlbWriteValid := True
-      }
-      when(io.commit(lane).systemOperation === SystemOperation.tlbFill) {
-        io.tlbFillValid := True
-      }
-      when(io.commit(lane).systemOperation === SystemOperation.invalidateTlb) {
-        io.tlbInvalidateValid := True
-        io.tlbInvalidateAsid := io.commit(lane).sideEffectData(9 downto 0)
-        io.tlbInvalidateVpn := io.commit(lane).sideEffectData(31 downto 13)
-        io.tlbInvalidateOperation := io.commit(lane).instruction(4 downto 0)
-      }
-      when(io.commit(lane).systemOperation === SystemOperation.loadLinked) {
-        io.reservationBitSet := True
-        io.reservationBitValue := !io.commit(lane).sideEffectData(0)
-        io.reservationAddressSet := !io.commit(lane).sideEffectData(0)
-        io.reservationLineAddress := io.commit(lane).sideEffectData(
-          config.xlen - 1 downto config.dataCache.offsetWidth
-        )
-        io.refetchValid := True
-      }
-      when(io.commit(lane).systemOperation === SystemOperation.storeConditional) {
-        io.reservationBitSet := True
-        io.reservationBitValue := False
-        io.refetchValid := True
-      }
-      when(
-        io.commit(lane).systemOperation === SystemOperation.instructionBarrier ||
-          io.commit(lane).systemOperation === SystemOperation.dataBarrier ||
-          io.commit(lane).systemOperation === SystemOperation.cacheOperation ||
-          io.commit(lane).systemOperation === SystemOperation.preload
-      ) {
-        io.refetchValid := True
-      }
-      when(io.commit(lane).csrWrite) { io.refetchValid := True }
+  }
+  val serialPc = UInt(config.xlen bits)
+  val serialCsrAddress = UInt(14 bits)
+  val serialSideEffectData = Bits(config.xlen bits)
+  val serialCsrMask = Bool()
+  val serialCsrWrite = Bool()
+  val serialSystemOperation = UInt(SystemOperation.Width bits)
+  val serialInstructionOperation = Bits(5 bits)
+  serialPc := io.commit(0).pc
+  serialCsrAddress := io.commit(0).csrAddress
+  serialSideEffectData := io.commit(0).sideEffectData
+  serialCsrMask := io.commit(0).csrMask
+  serialCsrWrite := io.commit(0).csrWrite
+  serialSystemOperation := io.commit(0).systemOperation
+  serialInstructionOperation := io.commit(0).instruction(4 downto 0)
+  for (lane <- 1 until config.commitWidth) {
+    when(serialCommitMask(lane)) {
+      serialPc := io.commit(lane).pc
+      serialCsrAddress := io.commit(lane).csrAddress
+      serialSideEffectData := io.commit(lane).sideEffectData
+      serialCsrMask := io.commit(lane).csrMask
+      serialCsrWrite := io.commit(lane).csrWrite
+      serialSystemOperation := io.commit(lane).systemOperation
+      serialInstructionOperation := io.commit(lane).instruction(4 downto 0)
     }
+  }
+  when(serialCommitMask.orR) {
+    io.serialCommitPc := serialPc
+    io.csrAddress := serialCsrAddress
+    io.csrWriteData := serialSideEffectData
+    io.csrMask := serialCsrMask
+    io.csrWriteValid := serialCsrWrite
+    when(serialSystemOperation === SystemOperation.ertn) {
+      io.ertnValid := True
+    }
+    when(serialSystemOperation === SystemOperation.idle) {
+      io.idleValid := True
+    }
+    when(serialSystemOperation === SystemOperation.tlbSearch) {
+      io.tlbSearchValid := True
+    }
+    when(serialSystemOperation === SystemOperation.tlbRead) {
+      io.tlbReadValid := True
+    }
+    when(serialSystemOperation === SystemOperation.tlbWrite) {
+      io.tlbWriteValid := True
+    }
+    when(serialSystemOperation === SystemOperation.tlbFill) {
+      io.tlbFillValid := True
+    }
+    when(serialSystemOperation === SystemOperation.invalidateTlb) {
+      io.tlbInvalidateValid := True
+      io.tlbInvalidateAsid := serialSideEffectData(9 downto 0)
+      io.tlbInvalidateVpn := serialSideEffectData(31 downto 13)
+      io.tlbInvalidateOperation := serialInstructionOperation
+    }
+    when(serialSystemOperation === SystemOperation.loadLinked) {
+      io.reservationBitSet := True
+      io.reservationBitValue := !serialSideEffectData(0)
+      io.reservationAddressSet := !serialSideEffectData(0)
+      io.reservationLineAddress := serialSideEffectData(
+        config.xlen - 1 downto config.dataCache.offsetWidth
+      )
+      io.refetchValid := True
+    }
+    when(serialSystemOperation === SystemOperation.storeConditional) {
+      io.reservationBitSet := True
+      io.reservationBitValue := False
+      io.refetchValid := True
+    }
+    when(
+      serialSystemOperation === SystemOperation.instructionBarrier ||
+        serialSystemOperation === SystemOperation.dataBarrier ||
+        serialSystemOperation === SystemOperation.cacheOperation ||
+        serialSystemOperation === SystemOperation.preload
+    ) {
+      io.refetchValid := True
+    }
+    when(serialCsrWrite) { io.refetchValid := True }
+  }
+
+  for (lane <- 0 until config.commitWidth) {
     when(!io.flush && io.commitValid(lane) && io.commit(lane).exception.valid) {
       io.exceptionValid := True
       io.exceptionPc := io.commit(lane).pc

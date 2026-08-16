@@ -170,6 +170,15 @@ class OooCommitAdapterSpec extends AnyFunSuite {
         assert(!dut.io.dataCacheWritebackInvalidateValid.toBoolean)
         assert(!dut.io.level2CacheInvalidateValid.toBoolean)
 
+        dut.io.commitValid #= 1
+        dut.io.retired #= 1
+        dut.io.serializing #= 1
+        dut.io.systemOperation(0) #= 16
+        dut.io.pc(0) #= BigInt("1c001000", 16)
+        sleep(1)
+        assert(dut.io.idleValid.toBoolean)
+        assert(dut.io.serialCommitPc.toBigInt == BigInt("1c001000", 16))
+
         dut.io.retired #= 0
         sleep(1)
         assert(!dut.io.refetchValid.toBoolean)
