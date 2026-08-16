@@ -518,11 +518,15 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   // Eight shallow banks hold all four refill lines. Each bank has at most one write per cycle:
   // a conflicting merged store is held, while a store sharing the returned MSHR/beat is folded
   // into the refill write. A lookup-time store capture temporarily backpressures that beat bank.
+  // Decode the beat domain once. Reusing these one-hot masks keeps the refill
+  // and merge enables local to their memory bank instead of rebuilding a
+  // compare against the beat number in every write port.
+  val refillBeatMask = UIntToOh(io.lineReadBeat.beat, CacheContract.BeatsPerLine)
+  val pendingStoreBeat = storeBeatIndex(pendingStoreAddress)
+  val pendingStoreBeatMask = UIntToOh(pendingStoreBeat, CacheContract.BeatsPerLine)
   for (beat <- 0 until CacheContract.BeatsPerLine) {
-    val selectedBeat = U(beat, CacheContract.BeatIndexWidth bits)
-    val refillSelect = refillBeatFire && io.lineReadBeat.beat === selectedBeat
-    val mergeStoreSelect = pendingStoreApply &&
-      storeBeatIndex(pendingStoreAddress) === selectedBeat
+    val refillSelect = refillBeatFire && refillBeatMask(beat)
+    val mergeStoreSelect = pendingStoreApply && pendingStoreBeatMask(beat)
     val sameCycleStore = refillSelect && mergeStoreSelect &&
       pendingStoreMshrId === refillId
     val writeMshrId = Mux(
