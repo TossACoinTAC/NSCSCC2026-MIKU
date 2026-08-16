@@ -127,9 +127,9 @@ final case class OooCoreConfig(
     enableFrontendTranslationTurnover: Boolean = true,
     enableFrontendHistoryTurnover: Boolean = true,
     enableBalancedFrontendPredictionSelect: Boolean = true,
-    // B02-E experiment: widen the gshare history and PHT while preserving the
-    // lazy-trained/BTFNT startup contract.  The base core remains the legacy A/B.
-    enableLargeGshare: Boolean = false,
+    // B02-F: widen the gshare history/PHT and qualify training per history row.  Cold rows use
+    // BTFNT without a runtime reset sweep or predictor-update backpressure.
+    enableLargeGshare: Boolean = true,
     enableFrontendCacheHitTurnover: Boolean = true,
     enableSpeculativeInstructionArrayRead: Boolean = true,
     // L1I never performs a lookup and a refill install in the same controller state.  Keep the

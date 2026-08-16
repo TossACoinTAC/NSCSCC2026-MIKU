@@ -1853,8 +1853,9 @@ class OooFrontendSpec extends AnyFunSuite {
         // A precise mispredict update overrides forward-not-taken on the next visit.
         val learnedPc = base + 0x200
         val learnedTarget = learnedPc + 0x10
-        // The BRAM-backed predictor clears the 128 BTB rows after reset; PHT payload does not need
-        // reset because an explicit trained bit guards every read.
+        // The BRAM-backed predictor clears the 128 BTB rows after reset.  Derive PHT metadata from
+        // the public configuration so this fixture remains valid as the history and row widths
+        // evolve; each history row owns its own training state.
         dut.clockDomain.waitSampling(134)
         sleep(1)
         dut.io.predictorUpdatePc #= learnedPc
@@ -1863,18 +1864,31 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.io.predictorUpdateType #= 0
         dut.io.predictorUpdateValid #= true
         var learnedHistory = 0
+        val phtIndexMask = (BigInt(1) << config.predictorPhtIndexWidth) - 1
+        def phtIndexFor(history: Int): Int = {
+          val foldedHistory =
+            (BigInt(history) & phtIndexMask) ^
+              ((BigInt(history) >> config.predictorPhtIndexWidth) & phtIndexMask)
+          (foldedHistory ^ ((learnedPc >> 4) & phtIndexMask)).toInt
+        }
         for (_ <- 0 until 6) {
-          val phtIndex = ((learnedHistory & 0x1f) << 5) | ((learnedPc >> 4) & 0x1f)
-          dut.io.predictorUpdateMetadata #= (phtIndex | (2 << 10))
+          dut.io.predictorUpdateMetadata #=
+            (phtIndexFor(learnedHistory) |
+              (2 << config.predictorMetadataStateLsb))
           dut.io.predictorRetireValid #= 1
           dut.io.predictorRetireTaken #= 1
           dut.io.predictorRetireType(0) #= 0
           sample(dut)
-          learnedHistory = ((learnedHistory << 1) | 1) & 0x1f
+          learnedHistory = (learnedHistory << 1) | 1
         }
-        dut.io.predictorUpdateValid #= false
+        // Train the row selected by the post-retirement history used on the revisit below.
+        dut.io.predictorUpdateMetadata #=
+          (phtIndexFor(learnedHistory) |
+            (2 << config.predictorMetadataStateLsb))
         dut.io.predictorRetireValid #= 0
         dut.io.predictorRetireTaken #= 0
+        sample(dut)
+        dut.io.predictorUpdateValid #= false
 
         dut.io.redirectTarget #= learnedPc
         dut.io.redirectValid #= true
