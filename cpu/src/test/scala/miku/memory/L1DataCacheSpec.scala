@@ -648,6 +648,66 @@ class L1DataCacheSpec extends AnyFunSuite {
       }
   }
 
+  test("L1D returns the oldest ready refill waiter before a younger slot") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1d")
+      .compile(new L1DataCacheProbe(config.copy(enableL1DWaiterAgeSelect = true)))
+      .doSim("ooo-l1d-oldest-ready-waiter", 0x4c3d) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling(config.dataCache.sets + 8)
+
+        def acceptRequest(address: BigInt, pointer: Int, pdst: Int): Unit = {
+          setRequest(dut, address, isWrite = false, data = 0, mask = 0xf, robPointer = pointer, pdst = pdst)
+          var wait = 0
+          while (!dut.io.requestReady.toBoolean && wait < 8) {
+            sample(dut)
+            wait += 1
+          }
+          assert(dut.io.requestReady.toBoolean)
+          sample(dut)
+          dut.io.requestValid #= false
+          sample(dut)
+        }
+
+        // Slot zero is deliberately younger than slot one.  Both loads merge into one MSHR beat,
+        // so the refill marks them ready on the same edge and physical slot order disagrees with
+        // ROB age.
+        acceptRequest(0x100, pointer = 10, pdst = 8)
+        var lineReadWait = 0
+        while (!dut.io.lineReadValid.toBoolean && lineReadWait < 8) {
+          sample(dut)
+          lineReadWait += 1
+        }
+        assert(dut.io.lineRead.mshrId.toBigInt == 0)
+        dut.io.lineReadReady #= true
+        sample(dut)
+        dut.io.lineReadReady #= false
+        acceptRequest(0x104, pointer = 5, pdst = 9)
+
+        dut.io.lineReadBeatValid #= true
+        dut.io.lineReadBeat.mshrId #= 0
+        dut.io.lineReadBeat.beat #= 0
+        dut.io.lineReadBeat.data #= BigInt("1122334455667788", 16)
+        dut.io.lineReadBeat.last #= false
+        sleep(1)
+        assert(dut.io.lineReadBeatReady.toBoolean)
+        sample(dut)
+        dut.io.lineReadBeatValid #= false
+        var wait = 0
+        while (!dut.io.responseValid.toBoolean && wait < 4) {
+          sample(dut)
+          wait += 1
+        }
+        assert(dut.io.responseValid.toBoolean)
+        assert(dut.io.response.robPointer.toBigInt == 5)
+        assert(dut.io.response.pdst.toBigInt == 9)
+      }
+  }
+
   test("L1D preserves a byte store accepted with the matching refill beat") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1d")

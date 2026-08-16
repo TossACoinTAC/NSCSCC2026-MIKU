@@ -606,7 +606,33 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   for (entry <- 0 until config.loadQueueEntries) {
     waiterReadyMask(entry) := waiters(entry).valid && waiterBeatReady(entry)
   }
-  val responseWaiterId = selectLowest(waiterReadyMask, config.loadQueueEntries)
+  val legacyResponseWaiterId = selectLowest(waiterReadyMask, config.loadQueueEntries)
+  val responseWaiterId = UInt(waiterIndexWidth bits)
+  responseWaiterId := legacyResponseWaiterId
+  if (config.enableL1DWaiterAgeSelect) {
+    // A waiter from a different recovery epoch is not ordered by the current ROB ring.  Keep the
+    // legacy physical-slot choice in that case; same-epoch candidates can use the normal wrap-safe
+    // ROB age predicate without putting stale responses into the new epoch's order domain.
+    val fallbackEpoch = waiters(legacyResponseWaiterId).recoveryEpoch
+    val epochMismatch = Bits(config.loadQueueEntries bits)
+    for (entry <- 0 until config.loadQueueEntries) {
+      epochMismatch(entry) := waiterReadyMask(entry) &&
+        waiters(entry).recoveryEpoch =/= fallbackEpoch
+    }
+    val allReadySameEpoch = !epochMismatch.orR
+    for (candidate <- 0 until config.loadQueueEntries) {
+      val olderThanOther = Bits(config.loadQueueEntries bits)
+      for (other <- 0 until config.loadQueueEntries) {
+        olderThanOther(other) := !waiterReadyMask(other) ||
+          !allReadySameEpoch ||
+          U(candidate, waiterIndexWidth bits) === U(other, waiterIndexWidth bits) ||
+          isOlder(waiters(candidate).robPointer, waiters(other).robPointer)
+      }
+      when(waiterReadyMask(candidate) && allReadySameEpoch && olderThanOther.andR) {
+        responseWaiterId := U(candidate, waiterIndexWidth bits)
+      }
+    }
+  }
   val responseMshrId = waiters(responseWaiterId).mshrId
   val responseRefillBeats = Vec(Bits(CacheContract.BeatBits bits), CacheContract.BeatsPerLine)
   for (beat <- 0 until CacheContract.BeatsPerLine) {
