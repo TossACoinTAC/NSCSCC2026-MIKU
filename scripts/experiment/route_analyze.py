@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Extract stable physical-health metrics from a completed Vivado route log."""
+"""Extract physical-health metrics from a Vivado route log."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def duration_seconds(value: str) -> int:
     return hours * 3600 + minutes * 60 + seconds
 
 
-def parse_route_log(path: Path) -> dict[str, Any]:
+def parse_route_log(path: Path, *, allow_partial: bool = False) -> dict[str, Any]:
     lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     iterations: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
@@ -35,6 +35,8 @@ def parse_route_log(path: Path) -> dict[str, Any]:
     post_route_tns_ns: float | None = None
     post_route_hold_wns_ns: float | None = None
     post_route_ths_ns: float | None = None
+    latest_intermediate_setup_wns_ns: float | None = None
+    latest_intermediate_tns_ns: float | None = None
     congestion_warning_count = 0
     failed_nets_samples: list[int] = []
     all_overlap_samples: list[int] = []
@@ -81,13 +83,17 @@ def parse_route_log(path: Path) -> dict[str, Any]:
         if overlap is not None:
             all_overlap_samples.append(int(overlap.group(1)))
 
+        timing = timing_line.search(stripped)
+        if timing is not None:
+            latest_intermediate_setup_wns_ns = float(timing.group(1))
+            latest_intermediate_tns_ns = float(timing.group(2))
+
         if current is not None:
             if overlap is not None:
                 value = int(overlap.group(1))
                 current["overlap_samples"].append(value)
                 current["peak_overlaps"] = max(current["peak_overlaps"], value)
                 current["final_overlaps"] = value
-            timing = timing_line.search(stripped)
             if timing is not None:
                 current["intermediate_setup_wns_ns"] = float(timing.group(1))
                 current["intermediate_tns_ns"] = float(timing.group(2))
@@ -152,9 +158,13 @@ def parse_route_log(path: Path) -> dict[str, Any]:
 
     if not iterations:
         raise RouteAnalysisError(f"日志中没有 Global Iteration: {path}")
-    if route_design_seconds is None:
+    complete = route_design_seconds is not None and post_route_setup_wns_ns is not None and \
+        post_route_hold_wns_ns is not None
+    if not allow_partial and route_design_seconds is None:
         raise RouteAnalysisError(f"日志中没有完成的 route_design duration: {path}")
-    if post_route_setup_wns_ns is None or post_route_hold_wns_ns is None:
+    if not allow_partial and (
+        post_route_setup_wns_ns is None or post_route_hold_wns_ns is None
+    ):
         raise RouteAnalysisError(f"日志中没有 Post Routing Timing Summary: {path}")
 
     iteration_overlap_samples = [
@@ -172,6 +182,7 @@ def parse_route_log(path: Path) -> dict[str, Any]:
 
     return {
         "schema_version": 1,
+        "complete": complete,
         "route_design_seconds": route_design_seconds,
         "implementation_seconds": implementation_seconds,
         "congestion_warning_count": congestion_warning_count,
@@ -203,7 +214,14 @@ def parse_route_log(path: Path) -> dict[str, Any]:
             "hold_wns_ns": post_route_hold_wns_ns,
             "ths_ns": post_route_ths_ns,
         },
-        "final_failed_nets": failed_nets_samples[-1] if failed_nets_samples else None,
+        "latest_intermediate_timing": {
+            "setup_wns_ns": latest_intermediate_setup_wns_ns,
+            "tns_ns": latest_intermediate_tns_ns,
+        },
+        "latest_failed_nets": failed_nets_samples[-1] if failed_nets_samples else None,
+        "final_failed_nets": (
+            failed_nets_samples[-1] if complete and failed_nets_samples else None
+        ),
     }
 
 
@@ -211,8 +229,13 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--log", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="accept an interrupted route and mark the report complete=false",
+    )
     args = parser.parse_args()
-    result = parse_route_log(args.log)
+    result = parse_route_log(args.log, allow_partial=args.allow_partial)
     result["log"] = str(args.log.resolve())
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(
@@ -221,6 +244,7 @@ def main() -> int:
     )
     print(
         "route health: "
+        f"complete={str(result['complete']).lower()} "
         f"peak_overlaps={result['peak_overlaps']} "
         f"iterations={result['iterations_with_overlaps']} "
         f"route_seconds={result['route_design_seconds']} "

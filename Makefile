@@ -53,6 +53,7 @@ TIMING_REPORT ?=
 TIMING_OUT ?= $(BUILD_ROOT)/reports/timing/$(notdir $(basename $(TIMING_REPORT))).json
 ROUTE_LOG ?=
 ROUTE_OUT ?= $(BUILD_ROOT)/reports/timing/$(notdir $(basename $(ROUTE_LOG)))-route-health.json
+ROUTE_ALLOW_PARTIAL ?= 0
 PERF_OBSERVATION_MATRIX ?=
 PERF_OBSERVATION_OUT ?= $(BUILD_ROOT)/reports/observations/perf20-$(shell date +%Y%m%d-%H%M%S).json
 TEST_BASE ?= HEAD
@@ -179,7 +180,8 @@ timing-analyze:
 
 route-analyze:
 	@test -n "$(strip $(ROUTE_LOG))" || { printf 'ROUTE_LOG 不能为空\n' >&2; exit 2; }
-	@python3 scripts/experiment/route_analyze.py --log "$(ROUTE_LOG)" --out "$(ROUTE_OUT)"
+	@python3 scripts/experiment/route_analyze.py --log "$(ROUTE_LOG)" --out "$(ROUTE_OUT)" \
+		$(if $(filter 1,$(ROUTE_ALLOW_PARTIAL)),--allow-partial,)
 
 yosys-analyze:
 	@test -f "$(YOSYS_RTL)" || { printf 'YOSYS_RTL 不存在: %s\n' "$(YOSYS_RTL)" >&2; exit 2; }

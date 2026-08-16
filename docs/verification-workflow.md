@@ -89,6 +89,7 @@ make yosys-compare YOSYS_BASE_REPORT=<baseline-summary.json> \
   YOSYS_CANDIDATE_REPORT=<candidate-summary.json>
 make timing-analyze TIMING_REPORT=<cpu_setup_top50.rpt>
 make route-analyze ROUTE_LOG=<implementation.log>
+make route-analyze ROUTE_LOG=<interrupted.log> ROUTE_ALLOW_PARTIAL=1
 make soc-impl SOC_EXPERIMENT_MANIFEST=<experiment-manifest.json>
 ```
 
@@ -96,6 +97,10 @@ make soc-impl SOC_EXPERIMENT_MANIFEST=<experiment-manifest.json>
 集合，不替代完整 `cpu-check`。比较器要求两组矩阵均为完整 20/20 pass，且 Chiplab、profile、
 suite、memory mode、software key 与 workload/seed 集合一致。模型和 CPU 身份允许不同，
 因为这正是 A/B 的变量。
+
+`route-analyze` 默认只接受完成的 route。只有已明确中止、且其 overlap、拥塞警告或
+intermediate timing 已足以否决候选时，才使用 `ROUTE_ALLOW_PARTIAL=1`；输出会标记
+`complete=false`，没有 post-route timing，也不能进入正式实现或里程碑证据。
 
 `yosys-analyze` 不依赖 `cpu-generate`，只读取调用方显式指定的冻结 RTL，并把输入快照、
 RTL hash、锁定 Yosys 身份、分析脚本、层次统计和 LTP 原始输出封装到不可覆盖的报告目录。

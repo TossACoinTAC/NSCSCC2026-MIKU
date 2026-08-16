@@ -39,6 +39,7 @@ wait_on_runs: Time (s): cpu = 00:07:12 ; elapsed = 02:06:19 . Memory (MB): peak 
             path.write_text(fixture, encoding="utf-8")
             result = parse_route_log(path)
         self.assertEqual(result["peak_overlaps"], 117377)
+        self.assertTrue(result["complete"])
         self.assertEqual(result["final_overlaps"], 0)
         self.assertEqual(result["iterations_with_overlaps"], 2)
         self.assertEqual(result["route_design_seconds"], 6429)
@@ -69,6 +70,23 @@ wait_on_runs: Time (s): cpu = 00:07:12 ; elapsed = 02:06:19 . Memory (MB): peak 
             )
             with self.assertRaises(RouteAnalysisError):
                 parse_route_log(path)
+
+    def test_explicitly_accepts_incomplete_route_log(self) -> None:
+        fixture = """INFO: [Route 35-416] Intermediate Timing Summary | WNS=-0.751 | TNS=-291.347| WHS=N/A | THS=N/A |
+Phase 4.2 Global Iteration 1
+ Number of Nodes with overlaps = 143787
+WARNING: [Route 35-447] Congestion is preventing the router from routing all nets.
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "runme.log"
+            path.write_text(fixture, encoding="utf-8")
+            result = parse_route_log(path, allow_partial=True)
+        self.assertFalse(result["complete"])
+        self.assertEqual(result["peak_overlaps"], 143787)
+        self.assertEqual(result["route_design_seconds"], None)
+        self.assertEqual(result["post_route_timing"]["setup_wns_ns"], None)
+        self.assertEqual(result["latest_intermediate_timing"]["setup_wns_ns"], -0.751)
+        self.assertEqual(result["final_failed_nets"], None)
 
     def test_rejects_malformed_duration(self) -> None:
         with self.assertRaises(RouteAnalysisError):
