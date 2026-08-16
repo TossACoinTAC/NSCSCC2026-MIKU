@@ -260,6 +260,15 @@ DecodeRenameBuffer、backend fallback 和 FreeList 回归覆盖了这两项语�
 受影响定向 suite、完整 `cpu-check`、完整 perf20，并在组合稳定后再运行 func58 和一次
 100 MHz direct full。
 
+### H09 结果
+
+H09 根据 M04 的 multiple-ready waiter 机会，在同一 recovery epoch 内按 ROB 年龄选择
+L1D refill waiter，并保留跨 epoch 的物理槽回退。完整门禁通过，完整 perf20 相对 A01
+为 `4,215,442 -> 4,215,222`，减少 220 cycles（`-0.005219%`），几何平均加速
+`1.000031642x`，2 项改善、18 项持平。实际收益远低于 M04 的 `83,442` cycles 机会
+上界，也不足以证明年龄比较值得引入 response 选择路径，因此 H09 默认关闭，仅保留
+配置开关和定向回归供后续新观测复核；本轮没有为 H09 启动 Vivado implementation。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
