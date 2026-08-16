@@ -652,12 +652,12 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       predecode.target
     )
     responsePredictorMetadata(lane) := 0
-    responsePredictorMetadata(lane)(9 downto 0) :=
-      responseContextPrediction(lane).phtIndex.asBits
-    responsePredictorMetadata(lane)(11 downto 10) :=
-      responseContextPrediction(lane).phtState.asBits
-    responsePredictorMetadata(lane)(12) := responseContextPrediction(lane).phtValid
-    responsePredictorMetadata(lane)(15 downto 13) := predecode.branchType.asBits
+    responsePredictorMetadata(lane)(
+      BankedFetchPrediction.PhtRowWidth - 1 downto 0
+    ) := responseContextPrediction(lane).phtIndex.asBits
+    responsePredictorMetadata(lane)(
+      BankedFetchPrediction.PhtRowWidth + 1 downto BankedFetchPrediction.PhtRowWidth
+    ) := responseContextPrediction(lane).phtState.asBits
     responsePrefix(lane + 1) :=
       responsePrefix(lane) + responseSlotCandidateValid(lane).asUInt
   }
@@ -750,9 +750,17 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   targetPredictor.io.phtUpdateValid := preciseUpdate &&
     io.predictorUpdateType === PredictedBranchType.conditional
   targetPredictor.io.phtUpdatePc := io.predictorUpdatePc
-  targetPredictor.io.phtUpdateIndex := io.predictorUpdateMetadata(9 downto 0).asUInt
-  targetPredictor.io.phtUpdateOldState := io.predictorUpdateMetadata(11 downto 10).asUInt
-  targetPredictor.io.phtUpdateOldValid := io.predictorUpdateMetadata(12)
+  targetPredictor.io.phtUpdateIndex := io
+    .predictorUpdateMetadata(BankedFetchPrediction.PhtRowWidth - 1 downto 0)
+    .asUInt
+  targetPredictor.io.phtUpdateOldState := io
+    .predictorUpdateMetadata(
+      BankedFetchPrediction.PhtRowWidth + 1 downto BankedFetchPrediction.PhtRowWidth
+    )
+    .asUInt
+  // The widened PHT is initialized by the predictor reset sweep; committed
+  // conditional branches are always authoritative updates.
+  targetPredictor.io.phtUpdateOldValid := True
   targetPredictor.io.phtUpdateTaken := io.predictorUpdateTaken
   targetPredictor.io.commitRasPush := io.predictorUpdateValid && io.predictorUpdateIsCall
   targetPredictor.io.commitRasPop := io.predictorUpdateValid && io.predictorUpdateIsReturn

@@ -370,6 +370,14 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val pendingDataStore = Bits(config.storeQueueEntries bits)
   val forwardingStore = Bits(config.storeQueueEntries bits)
   val olderUncachedStore = Bits(config.storeQueueEntries bits)
+  // Pre-align every older store's raw data to its 32-bit word.  Forwarding
+  // reads this value instead of repeating the byte/half shift-and-merge cone
+  // on the load completion path.
+  val storeForwardWord = Vec(Bits(config.xlen bits), config.storeQueueEntries)
+  // Per-byte-lane one-hot.  A lane is owned by the youngest older ready store
+  // that covers that byte, so several partial stores can satisfy one load as
+  // long as every requested byte has an owner.
+  val laneForwardOneHot = Vec(Bits(config.storeQueueEntries bits), config.xlen / 8)
   for (entry <- 0 until config.storeQueueEntries) {
     val store = stores(entry)
     val older = store.valid && isOlder(store.robPointer, scheduledLoad.robPointer)
@@ -388,7 +396,35 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     pendingDataStore(entry) := older && physicalAddressesKnown && sameWord && overlap &&
       !store.dataReady
     forwardingStore(entry) := older && physicalAddressesKnown && store.dataReady && sameWord && covers
+    storeForwardWord(entry) := formatStore(store.writeData, store.virtualAddress, store.size)
   }
+
+  for (lane <- 0 until config.xlen / 8) {
+    val laneCover = Bits(config.storeQueueEntries bits)
+    laneCover := B(0, config.storeQueueEntries bits)
+    for (entry <- 0 until config.storeQueueEntries) {
+      val store = stores(entry)
+      val olderReadyCover = store.valid &&
+        isOlder(store.robPointer, scheduledLoad.robPointer) &&
+        store.addressReady && store.dataReady && store.translationDone &&
+        scheduledLoad.translationDone &&
+        store.physicalAddress(config.xlen - 1 downto 2) ===
+          scheduledLoad.physicalAddress(config.xlen - 1 downto 2) &&
+        store.byteMask(lane)
+      laneCover(entry) := olderReadyCover
+    }
+    laneForwardOneHot(lane) := B(0, config.storeQueueEntries bits)
+    for (entry <- 0 until config.storeQueueEntries) {
+      val youngerCovers = (0 until config.storeQueueEntries).filter(_ != entry).map { other =>
+        laneCover(other) && isOlder(stores(entry).robPointer, stores(other).robPointer)
+      }.reduce(_ || _)
+      laneForwardOneHot(lane)(entry) := laneCover(entry) && !youngerCovers
+    }
+  }
+
+  val fullCoverage = (0 until config.xlen / 8)
+    .map(lane => !scheduledLoad.byteMask(lane) || laneForwardOneHot(lane).orR)
+    .reduce(_ && _)
 
   val olderLoadOrderBlock = Bits(config.loadQueueEntries bits)
   for (entry <- 0 until config.loadQueueEntries) {
@@ -402,13 +438,31 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
   val forwardingCount = CountOne(forwardingStore)
   val forwardingId = OHToUInt(OHMasking.first(forwardingStore))
+  // A single full-cover Store is the only case where the per-store banked data
+  // path is sufficient.  With several full-cover Stores, or any additional
+  // partial Store, the byte-lane merge must select the youngest owner per byte.
+  val mergedForwardRequired = forwardingCount =/= 1 || partialOverlapStore.orR
+  val partialOverlapBlocks = partialOverlapStore.orR && !fullCoverage
   val loadOrderClear = !bufferedCommittedStore && !unknownOlderStore.orR &&
     !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
-    !partialOverlapStore.orR && !pendingDataStore.orR
+    !partialOverlapBlocks && !pendingDataStore.orR
   val forwardCandidate = loadHeadReady && scheduledLoad.translationDone &&
     !scheduledLoad.uncached && !scheduledLoad.isLl && loadOrderClear &&
-    forwardingCount === 1
-  val cacheLoadBase = loadHeadReady && loadOrderClear && forwardingCount === 0
+    (forwardingCount === 1 || fullCoverage)
+  val cacheLoadBase = loadHeadReady && loadOrderClear && forwardingCount === 0 &&
+    !fullCoverage
+  val mergedForwardWord = Bits(config.xlen bits)
+  mergedForwardWord := 0
+  for (lane <- 0 until config.xlen / 8) {
+    val laneData = Bits(8 bits)
+    laneData := 0
+    for (entry <- 0 until config.storeQueueEntries) {
+      when(laneForwardOneHot(lane)(entry)) {
+        laneData := storeForwardWord(entry)(lane * 8 + 7 downto lane * 8)
+      }
+    }
+    mergedForwardWord(lane * 8 + 7 downto lane * 8) := laneData
+  }
   val loadAtRequiredOrderPoint = !scheduledLoad.uncached ||
     scheduledLoad.robPointer === io.robHeadPointer
   val cacheLoadCandidate = cacheLoadBase && scheduledLoad.translationDone &&
@@ -683,15 +737,21 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       generatedCompletion.recoveryEpoch := scheduledLoad.recoveryEpoch
       generatedCompletion.pdst := scheduledLoad.pdst
       generatedCompletion.writesPdst := scheduledLoad.writesPdst
-      generatedCompletion.data := formatLoad(
-        formatStore(
-          stores(forwardingId).writeData,
-          stores(forwardingId).virtualAddress,
-          stores(forwardingId).size
-        ),
+      val singleStoreData = formatLoad(
+        storeForwardWord(forwardingId),
         scheduledLoad.virtualAddress,
         scheduledLoad.size,
         scheduledLoad.signExtend
+      )
+      generatedCompletion.data := Mux(
+        mergedForwardRequired,
+        formatLoad(
+          mergedForwardWord,
+          scheduledLoad.virtualAddress,
+          scheduledLoad.size,
+          scheduledLoad.signExtend
+        ),
+        singleStoreData
       )
     }
   }.elsewhen(storeCompletionFire) {
@@ -763,6 +823,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     val writesPdst = RegInit(False)
     val epochCurrent = RegInit(False)
     val dataBanks = Vec.fill(config.storeQueueEntries)(Reg(Bits(config.xlen bits)))
+    val mergedData = Reg(Bits(config.xlen bits)) init (0)
+    val mergedRequired = RegInit(False)
 
     selectedStore := forwardingStore
     robPointer := scheduledLoad.robPointer
@@ -772,11 +834,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     epochCurrent := scheduledLoad.recoveryEpoch === io.currentRecoveryEpoch
     for (entry <- 0 until config.storeQueueEntries) {
       dataBanks(entry) := formatLoad(
-        formatStore(
-          stores(entry).writeData,
-          stores(entry).virtualAddress,
-          stores(entry).size
-        ),
+        storeForwardWord(entry),
         scheduledLoad.virtualAddress,
         scheduledLoad.size,
         scheduledLoad.signExtend
@@ -784,8 +842,18 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     }
     when(io.flush) {
       valid := False
+      mergedRequired := False
     }.otherwise {
       valid := forwardFire
+      when(forwardFire) {
+        mergedRequired := mergedForwardRequired
+        mergedData := formatLoad(
+          mergedForwardWord,
+          scheduledLoad.virtualAddress,
+          scheduledLoad.size,
+          scheduledLoad.signExtend
+        )
+      }
     }
 
     bankedForwardCompletionValid := valid
@@ -793,7 +861,11 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     bankedForwardCompletion.recoveryEpoch := recoveryEpoch
     bankedForwardCompletion.pdst := pdst
     bankedForwardCompletion.writesPdst := writesPdst
-    bankedForwardCompletion.data := dataBanks(OHToUInt(selectedStore))
+    bankedForwardCompletion.data := Mux(
+      mergedRequired,
+      mergedData,
+      dataBanks(OHToUInt(selectedStore))
+    )
     bankedForwardCompletion.sideEffectData := 0
     bankedForwardCompletion.exception.valid := False
     bankedForwardCompletion.exception.ecode := 0
@@ -1279,11 +1351,12 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     headLoadState.robPointer === scheduledLoad.robPointer && !headLoadState.addressReady
   val oldestLoadOrderBlocked = loadHeadReady && !loadOrderClear
   val multipleForwardingStoresBlock = loadHeadReady && scheduledLoad.translationDone &&
-    !scheduledLoad.uncached && !scheduledLoad.isLl && forwardingCount > 1
+    !scheduledLoad.uncached && !scheduledLoad.isLl && forwardingCount > 1 &&
+    !fullCoverage
   val oldestLoadLocalAliasBlocked = loadHeadReady && scheduledLoad.translationDone &&
     !scheduledLoad.uncached && !scheduledLoad.isLl && !bufferedCommittedStore &&
     !unknownOlderStore.orR && !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
-    (partialOverlapStore.orR || pendingDataStore.orR || forwardingCount > 1)
+    (partialOverlapBlocks || pendingDataStore.orR || multipleForwardingStoresBlock)
   val retryRotated =
     ((alternatePendingLoadAddressReady ## alternatePendingLoadAddressReady) |>> loadHead)
       .resize(config.loadQueueEntries)
