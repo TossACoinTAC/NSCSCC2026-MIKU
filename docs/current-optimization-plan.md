@@ -138,6 +138,17 @@ ROB/cache/multiplier 路径共同定义候选池。目标是在其中实际引�
 同配置 Yosys 和合并 perf20 验证的时序候选；若回退一个已验证候选，必须补入另一项，不能以
 单变量综合替代批次验证。
 
+本次实际落地 10 项，超过最低数量：MT12 (`c4ae9f8`)、MT13 (`69e0d73`)、MT14
+(`b0ac56c`)、RT12 (`3dbab9b`)、RT13 (`5f36353`)、RT14 (`9157f9e`)、DQ02
+(`33aca34`)、IQT01 (`3651e19`)、MT11 (`03f3bb1`) 和 CT06 (`3aa1c25`)。每项已完成
+对应定向 suite，批次提交后完整 `cpu-check` 通过。Yosys 对照见
+`build/reports/yosys/R10-CT06-vs-R9.json`：全核 cells 下降 `10.586%`、post-flatten
+cells 下降 `11.555%`、word bits 下降 `9.034%`，这是综合前结构筛选信息，不能替代
+Vivado WNS。R9 参考报告使用 `expanded-window`（ROB64/PRF128），而根 Makefile 默认
+生成 `default`（ROB32/PRF64），所以 perf20 必须按同一 `CPU_VARIANT` 形成 A/B，不能
+混写两种配置的总周期；当前两种配置的矩阵均已启动，长尾 `stringsearch` 完成前不写
+最终逐项结论。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。
