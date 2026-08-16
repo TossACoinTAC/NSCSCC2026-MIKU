@@ -38,10 +38,7 @@ final case class ReorderBufferCompletionPayload(config: OooCoreConfig) extends B
   // Completion exceptions use this word as badVAddr; resolved branches use it
   // as their target; all other completions use it as sideEffectData.
   val auxiliary = Bits(config.xlen bits)
-  val exceptionEcode = UInt(6 bits)
   val exceptionEsubcode = UInt(9 bits)
-  val exceptionBadVAddrValid = Bool()
-  val exceptionTlbRefill = Bool()
   val branchTaken = Bool()
 }
 
@@ -54,6 +51,11 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   // generation is resident state needed to reject a stale completion.
   val generation = Bool()
   val completionExceptionValid = Bool()
+  // These exception qualifiers drive retirement and CSR side-effect control.
+  // The cold subcode and bad-address payload remain in the completion RAM.
+  val completionExceptionEcode = UInt(6 bits)
+  val completionExceptionBadVAddrValid = Bool()
+  val completionExceptionTlbRefill = Bool()
   // This bit participates in the three-wide retirement stop prefix. Keep it
   // beside the entry state rather than on the completion-payload RAM output.
   val completionBranchMispredict = Bool()
@@ -240,6 +242,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.allocate(lane).uop.decoded.exception.valid
       entries(destination(config.robIndexWidth - 1 downto 0)).generation := destination.msb
       entries(destination(config.robIndexWidth - 1 downto 0)).completionExceptionValid := False
+      entries(destination(config.robIndexWidth - 1 downto 0)).completionExceptionEcode := U(0, 6 bits)
+      entries(destination(config.robIndexWidth - 1 downto 0)).completionExceptionBadVAddrValid := False
+      entries(destination(config.robIndexWidth - 1 downto 0)).completionExceptionTlbRefill := False
       entries(destination(config.robIndexWidth - 1 downto 0)).completionBranchMispredict := False
       entries(destination(config.robIndexWidth - 1 downto 0)).completionSource :=
         U(decodedCompletionSource, log2Up(config.writebackWidth + 2) bits)
@@ -399,13 +404,13 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     candidates(lane).exception.tlbRefill := candidates(lane).payload.decodedException.tlbRefill
     when(candidates(lane).state.completionExceptionValid) {
       candidates(lane).exception.valid := True
-      candidates(lane).exception.ecode := candidateCompletionPayload(lane).exceptionEcode
+      candidates(lane).exception.ecode := candidates(lane).state.completionExceptionEcode
       candidates(lane).exception.esubcode := candidateCompletionPayload(lane).exceptionEsubcode
       candidates(lane).exception.badVAddrValid :=
-        candidateCompletionPayload(lane).exceptionBadVAddrValid
+        candidates(lane).state.completionExceptionBadVAddrValid
       candidates(lane).exception.badVAddr := candidateCompletionPayload(lane).auxiliary.asUInt
       candidates(lane).exception.tlbRefill :=
-        candidateCompletionPayload(lane).exceptionTlbRefill
+        candidates(lane).state.completionExceptionTlbRefill
     }
   }
 
@@ -623,11 +628,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     when(stagedException(lane).valid) {
       stagedCompletionPayload(lane).auxiliary := stagedException(lane).badVAddr.asBits
     }
-    stagedCompletionPayload(lane).exceptionEcode := stagedException(lane).ecode
     stagedCompletionPayload(lane).exceptionEsubcode := stagedException(lane).esubcode
-    stagedCompletionPayload(lane).exceptionBadVAddrValid :=
-      stagedException(lane).badVAddrValid
-    stagedCompletionPayload(lane).exceptionTlbRefill := stagedException(lane).tlbRefill
     stagedCompletionPayload(lane).branchTaken := stagedBranchTaken(lane)
   }
   val completionWriteValid = Bits(config.writebackWidth bits)
@@ -762,6 +763,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       when(!io.flush && stagedCompletionMatches(entryIndex)(lane)) {
         entries(entryIndex).complete := True
         entries(entryIndex).completionExceptionValid := stagedException(lane).valid
+        entries(entryIndex).completionExceptionEcode := stagedException(lane).ecode
+        entries(entryIndex).completionExceptionBadVAddrValid := stagedException(lane).badVAddrValid
+        entries(entryIndex).completionExceptionTlbRefill := stagedException(lane).tlbRefill
         entries(entryIndex).completionBranchMispredict := stagedBranchMispredict(lane)
         entries(entryIndex).completionSource := lane
       }
@@ -769,6 +773,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     when(!io.flush && stagedStoreCompletionMatches(entryIndex)) {
       entries(entryIndex).complete := True
       entries(entryIndex).completionExceptionValid := False
+      entries(entryIndex).completionExceptionEcode := U(0, 6 bits)
+      entries(entryIndex).completionExceptionBadVAddrValid := False
+      entries(entryIndex).completionExceptionTlbRefill := False
       entries(entryIndex).completionBranchMispredict := False
       entries(entryIndex).completionSource := storeCompletionSource
     }
