@@ -331,8 +331,50 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // age comparisons here terminate at the loadBase register and are not in
   // the completion-to-ROB path.
   val allocationLoads = Bits(config.renameWidth bits)
+  private val allocationBankCount = 4
+  private val allocationBankWidth = log2Up(allocationBankCount)
+  require(config.loadQueueEntries % allocationBankCount == 0)
+  require(config.storeQueueEntries % allocationBankCount == 0)
+  val loadAllocationTargets = Vec(Bits(config.loadQueueEntries bits), config.renameWidth)
+  val storeAllocationTargets = Vec(Bits(config.storeQueueEntries bits), config.renameWidth)
+  val loadAllocationBankPayload = Vec.fill(config.renameWidth)(
+    Vec(LoadStoreQueueAllocate(config), allocationBankCount)
+  )
+  val storeAllocationBankPayload = Vec.fill(config.renameWidth)(
+    Vec(LoadStoreQueueAllocate(config), allocationBankCount)
+  )
   for (lane <- 0 until config.renameWidth) {
     allocationLoads(lane) := io.allocateValid(lane) && io.allocate(lane).isLoad
+    loadAllocationTargets(lane) := Mux(
+      allocationLoads(lane),
+      UIntToOh(io.allocate(lane).loadQueueIndex, config.loadQueueEntries),
+      B(0, config.loadQueueEntries bits)
+    )
+    storeAllocationTargets(lane) := Mux(
+      io.allocateValid(lane) && io.allocate(lane).isStore,
+      UIntToOh(io.allocate(lane).storeQueueIndex, config.storeQueueEntries),
+      B(0, config.storeQueueEntries bits)
+    )
+    for (bank <- 0 until allocationBankCount) {
+      loadAllocationBankPayload(lane)(bank).assignFromBits(
+        Mux(
+          allocationLoads(lane) &&
+            io.allocate(lane).loadQueueIndex(allocationBankWidth - 1 downto 0) ===
+              U(bank, allocationBankWidth bits),
+          io.allocate(lane).asBits,
+          B(0, io.allocate(lane).getBitsWidth bits)
+        )
+      )
+      storeAllocationBankPayload(lane)(bank).assignFromBits(
+        Mux(
+          io.allocateValid(lane) && io.allocate(lane).isStore &&
+            io.allocate(lane).storeQueueIndex(allocationBankWidth - 1 downto 0) ===
+              U(bank, allocationBankWidth bits),
+          io.allocate(lane).asBits,
+          B(0, io.allocate(lane).getBitsWidth bits)
+        )
+      )
+    }
   }
   val initialOldest = Bits(config.renameWidth bits)
   for (lane <- 0 until config.renameWidth) {
@@ -1070,30 +1112,34 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       storeHead := 0
     }
     for (lane <- 0 until config.renameWidth) {
-      when(io.allocateValid(lane) && io.allocate(lane).isStore) {
-        val index = io.allocate(lane).storeQueueIndex
-        stores(index).valid := True
-        stores(index).addressReady := False
-        stores(index).dataReady := False
-        stores(index).completed := False
-        stores(index).committed := False
-        stores(index).requestSent := False
-        stores(index).translationDone := False
-        stores(index).scSuccess := False
-        stores(index).robPointer := io.allocate(lane).robPointer
-        stores(index).recoveryEpoch := io.allocate(lane).recoveryEpoch
-        stores(index).memoryEpoch := io.allocate(lane).memoryEpoch
+      for (index <- 0 until config.storeQueueEntries) {
+        when(storeAllocationTargets(lane)(index)) {
+          val allocation = storeAllocationBankPayload(lane)(index % allocationBankCount)
+          stores(index).valid := True
+          stores(index).addressReady := False
+          stores(index).dataReady := False
+          stores(index).completed := False
+          stores(index).committed := False
+          stores(index).requestSent := False
+          stores(index).translationDone := False
+          stores(index).scSuccess := False
+          stores(index).robPointer := allocation.robPointer
+          stores(index).recoveryEpoch := allocation.recoveryEpoch
+          stores(index).memoryEpoch := allocation.memoryEpoch
+        }
       }
-      when(io.allocateValid(lane) && io.allocate(lane).isLoad) {
-        val index = io.allocate(lane).loadQueueIndex
-        loads(index).valid := True
-        loads(index).addressReady := False
-        loads(index).requestSent := False
-        loads(index).completed := False
-        loads(index).translationDone := False
-        loads(index).robPointer := io.allocate(lane).robPointer
-        loads(index).recoveryEpoch := io.allocate(lane).recoveryEpoch
-        loads(index).memoryEpoch := io.allocate(lane).memoryEpoch
+      for (index <- 0 until config.loadQueueEntries) {
+        when(loadAllocationTargets(lane)(index)) {
+          val allocation = loadAllocationBankPayload(lane)(index % allocationBankCount)
+          loads(index).valid := True
+          loads(index).addressReady := False
+          loads(index).requestSent := False
+          loads(index).completed := False
+          loads(index).translationDone := False
+          loads(index).robPointer := allocation.robPointer
+          loads(index).recoveryEpoch := allocation.recoveryEpoch
+          loads(index).memoryEpoch := allocation.memoryEpoch
+        }
       }
     }
 
