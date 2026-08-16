@@ -508,3 +508,53 @@ MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其
 DRC/route/bitstream 完整且 Linux 门禁通过后，`main` 可将该阶段 squash 成一个里程碑提交，
 不要求保留候选级提交拓扑。R5 稳定 bitstream 已完成 matching perf20 板测；后续每个新的
 时序闭合里程碑仍须使用自己的 matching bitstream 重新板测，R6 当前不能继承该结果。
+
+## R7：2026-08-16 四项研究集成与 100 MHz direct full 候选
+
+### 组合过程
+
+- `50ca302` 将四项研究成果一次性落地：16-bit GHR + 4x4096x2b banked gshare、
+  L1D/L2 每 MSHR 独立 victim buffer、LSQ byte-lane multi-store forwarding。
+  39 suites/235 tests 通过。
+- 完整 ideal perf20 为 `4,259,994 -> 3,953,187`（`-7.202%`，几何平均
+  `0.96594`）。但 full direct 默认策略 setup `-0.750 ns`，即使
+  `Performance_ExplorePostRoutePhysOpt` 也只到 `-0.318 ns`；top 路径集中在新增
+  LSQ byte-lane forwarding 锥。
+- 单独移除 byte-lane forwarding（保留 predictor、cache MSHR、L02 LDQ/retry），
+  ideal perf20 为 `3,954,644`，相对完整研究集成仅多 `0.037%`，因此该转发
+  不在最终组合保留。
+- `4ee3909` 把 `systemOperation == none` 与 memory-barrier 判定在 ROB 分配时
+  预解码为状态位，从 head-bypass/commit-valid 锥中移除 5-bit 比较。perf20 逐项
+  透明，direct/PRPHYS 路由起点从 research 版的约 `-0.38 ns` 降到约 `-0.17 ns`。
+- 最终候选 `dev/L03-predictor-cache-flags` 使用
+  `Performance_ExplorePostRoutePhysOpt` 的 matching direct full：100 MHz
+  setup/hold `+0.004/+0.051 ns`、setup TNS `0.000 ns`、fully routed、DRC 0 error、
+  bitstream 成功。`scripts/vivado/implement_postroutephys.sh` 已入库，默认要求
+  setup/hold 非负，并从 post-route physopt DCP 生成报告。
+
+### 软件证据
+
+- Scala 39 suites/233 tests 通过。
+- ideal perf20 20/20 全部到达 `1c000218`，总周期 `3,954,644`。
+- func58 random-AXI seeds `240/255/141` 均 58/58，`3A00003A` + led 1/1。
+- Linux fixed 50 ms、seed `5570815` 跑满窗口，无 difftest/trace error；
+  `linux-time-window-complete`。
+
+### 板测证据
+
+- Job `20260816-104635-ac3c820a`（source `ab820dd`，matching bitstream）20/20 pass：
+  - `soc_count = 33,404,839`，`cpu_count = 33,393,790`；
+  - 相对 R6 板测 `41,203,093 / 41,191,272` 分别 `-18.93% / -18.93%`；
+  - 相对 L02 direct 板测 `37,726,040 / 37,714,405` 分别 `-11.45% / -11.46%`。
+- 该 bitstream 的 timing summary 与 board package 中的 `timing_summary.rpt` 均为
+  `WNS +0.004 / TNS 0.000`，属于 matching direct full，而非 post-route 探索产物。
+
+### 下一步
+
+- 若官方/团队构建不接受 `Performance_ExplorePostRoutePhysOpt` 策略，需要回到
+  RTL 侧继续收敛默认 `Performance_Explore` 的 `-0.170 ns` 级负 slack；
+  `dev/L03-l02-flags` 是保留 L02 性能、只加 commit 预解码的保守候选。
+- 在时序预算允许时再评估 PHT candidate B（4x16384）；本地 ideal 总周期
+  `3,940,987`，比 candidate A 再少 `0.31%`，但 16k-cycle PHT reset sweep
+  需要更新 frontend 定向测试。
+
