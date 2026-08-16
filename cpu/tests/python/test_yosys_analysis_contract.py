@@ -27,9 +27,13 @@ def fixture_report(*, cells: int = 12, rtl_hash: str = "a" * 64) -> dict:
             "hierarchy": {
                 "total_cells": cells,
                 "total_memory_bits": 64,
+                "total_word_bits": cells * 2,
                 "modules": {
-                    "core_top": {"contribution_cells": 2},
-                    "Worker": {"contribution_cells": cells - 2},
+                    "core_top": {"contribution_cells": 2, "contribution_word_bits": 4},
+                    "Worker": {
+                        "contribution_cells": cells - 2,
+                        "contribution_word_bits": (cells - 2) * 2,
+                    },
                 },
             },
             "paths": {"core_top": {"length": 5}},
@@ -79,6 +83,40 @@ class YosysAnalysisContractTest(unittest.TestCase):
         self.assertEqual(summary["modules"]["Worker"]["contribution_cells"], 10)
         self.assertEqual(summary["modules"]["Worker"]["cell_buckets"]["mux"], 6)
 
+    def test_width_stat_normalizes_scalar_and_vector_cells(self) -> None:
+        raw = {
+            "modules": {
+                "\\core_top": {
+                    "num_cells": 2,
+                    "num_memory_bits": 0,
+                    "num_cells_by_type": {"$dff": 2},
+                },
+            },
+            "design": {
+                "num_cells": 2,
+                "num_memory_bits": 0,
+                "num_cells_by_type": {"$dff": 2},
+            },
+        }
+        width = {
+            "modules": {
+                "\\core_top": {
+                    "num_cells": 2,
+                    "num_memory_bits": 0,
+                    "num_cells_by_type": {"$dff_1": 1, "$dff_64": 1},
+                },
+            },
+            "design": {
+                "num_cells": 2,
+                "num_memory_bits": 0,
+                "num_cells_by_type": {"$dff_1": 1, "$dff_64": 1},
+            },
+        }
+        summary = summarize_stat(raw, width)
+        self.assertEqual(summary["total_cells"], 2)
+        self.assertEqual(summary["total_word_bits"], 65)
+        self.assertEqual(summary["modules"]["core_top"]["contribution_word_bits"], 65)
+
     def test_comparison_reports_module_and_path_deltas(self) -> None:
         baseline = fixture_report()
         candidate = fixture_report(cells=17, rtl_hash="d" * 64)
@@ -86,6 +124,7 @@ class YosysAnalysisContractTest(unittest.TestCase):
         result = compare_reports(baseline, candidate)
         self.assertEqual(result["summary"]["delta_cells"], 5)
         self.assertAlmostEqual(result["summary"]["delta_percent"], 100 * 5 / 12)
+        self.assertEqual(result["summary"]["delta_word_bits"], 10)
         self.assertEqual(result["module_deltas"][0]["module"], "Worker")
         self.assertEqual(result["path_deltas"][0]["delta_length"], 2)
 

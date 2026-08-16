@@ -124,6 +124,13 @@ def cell_bucket(cell_type: str) -> str:
     return "other"
 
 
+def cell_word_width(cell_type: str) -> int:
+    if not cell_type.startswith("$"):
+        return 1
+    match = re.search(r"_(\d+)$", cell_type)
+    return int(match.group(1)) if match is not None else 1
+
+
 def module_group(module: str) -> str:
     lowered = module.lower()
     if any(token in lowered for token in ("frontend", "widedecode", "la32rdecoder", "decoderename")):
@@ -166,7 +173,9 @@ def instance_counts(modules: dict[str, dict[str, Any]], top: str) -> dict[str, i
     return counts
 
 
-def summarize_stat(document: dict[str, Any]) -> dict[str, Any]:
+def summarize_stat(
+    document: dict[str, Any], width_document: dict[str, Any] | None = None
+) -> dict[str, Any]:
     raw_modules = document.get("modules")
     design = document.get("design")
     if not isinstance(raw_modules, dict) or not isinstance(design, dict):
@@ -175,9 +184,26 @@ def summarize_stat(document: dict[str, Any]) -> dict[str, Any]:
     if any(not isinstance(value, dict) for value in modules.values()):
         raise YosysAnalysisError("Yosys stat module record is not an object")
     counts = instance_counts(modules, TOP)
+    width_modules: dict[str, dict[str, Any]] = {}
+    width_design: dict[str, Any] = {}
+    if width_document is not None:
+        raw_width_modules = width_document.get("modules")
+        raw_width_design = width_document.get("design")
+        if not isinstance(raw_width_modules, dict) or not isinstance(raw_width_design, dict):
+            raise YosysAnalysisError("Yosys width stat JSON lacks modules/design")
+        width_modules = {
+            clean_module_name(str(name)): value for name, value in raw_width_modules.items()
+        }
+        if set(width_modules) != set(modules):
+            raise YosysAnalysisError("Yosys raw and width stat module sets differ")
+        if any(not isinstance(value, dict) for value in width_modules.values()):
+            raise YosysAnalysisError("Yosys width stat module record is not an object")
+        width_design = raw_width_design
     module_rows: dict[str, Any] = {}
     group_cells: dict[str, int] = {}
+    group_word_bits: dict[str, int] = {}
     contribution_total = 0
+    contribution_word_total = 0
     for name, module in modules.items():
         instances = counts.get(name, 0)
         if instances == 0:
@@ -199,12 +225,34 @@ def summarize_stat(document: dict[str, Any]) -> dict[str, Any]:
         group = module_group(name)
         group_cells[group] = group_cells.get(group, 0) + contribution
         contribution_total += contribution
+        primitive_word_local = 0
+        word_buckets: dict[str, int] = {}
+        if width_document is not None:
+            raw_width_types = width_modules[name].get("num_cells_by_type", {})
+            if not isinstance(raw_width_types, dict):
+                raise YosysAnalysisError(f"invalid width cell table for module {name}")
+            width_types = {
+                str(cell_type): int(count)
+                for cell_type, count in raw_width_types.items()
+                if clean_module_name(str(cell_type)) not in modules
+            }
+            for cell_type, count in width_types.items():
+                weighted = count * cell_word_width(cell_type)
+                primitive_word_local += weighted
+                bucket = cell_bucket(cell_type)
+                word_buckets[bucket] = word_buckets.get(bucket, 0) + weighted * instances
+        contribution_word_bits = primitive_word_local * instances
+        contribution_word_total += contribution_word_bits
+        group_word_bits[group] = group_word_bits.get(group, 0) + contribution_word_bits
         module_rows[name] = {
             "instances": instances,
             "primitive_cells_local": primitive_local,
             "contribution_cells": contribution,
             "memory_bits": int(module.get("num_memory_bits", 0)) * instances,
             "cell_buckets": dict(sorted(buckets.items())),
+            "primitive_word_bits_local": primitive_word_local,
+            "contribution_word_bits": contribution_word_bits,
+            "word_bit_buckets": dict(sorted(word_buckets.items())),
             "group": group,
         }
     total_cells = int(design.get("num_cells", -1))
@@ -212,11 +260,32 @@ def summarize_stat(document: dict[str, Any]) -> dict[str, Any]:
         raise YosysAnalysisError(
             f"hierarchy contribution mismatch: modules={contribution_total}, design={total_cells}"
         )
+    total_word_bits = 0
+    width_cell_types: dict[str, int] = {}
+    if width_document is not None:
+        raw_width_types = width_design.get("num_cells_by_type", {})
+        if not isinstance(raw_width_types, dict):
+            raise YosysAnalysisError("invalid design width cell table")
+        width_cell_types = {
+            str(cell_type): int(count) for cell_type, count in raw_width_types.items()
+        }
+        total_word_bits = sum(
+            count * cell_word_width(cell_type)
+            for cell_type, count in width_cell_types.items()
+        )
+        if contribution_word_total != total_word_bits:
+            raise YosysAnalysisError(
+                "hierarchy word-bit contribution mismatch: "
+                f"modules={contribution_word_total}, design={total_word_bits}"
+            )
     return {
         "total_cells": total_cells,
         "total_memory_bits": int(design.get("num_memory_bits", 0)),
         "cell_types": design.get("num_cells_by_type", {}),
+        "total_word_bits": total_word_bits,
+        "width_cell_types": width_cell_types,
         "group_cells": dict(sorted(group_cells.items())),
+        "group_word_bits": dict(sorted(group_word_bits.items())),
         "modules": dict(sorted(module_rows.items())),
     }
 
@@ -258,12 +327,22 @@ def compare_reports(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict
     for name in sorted(set(base_modules) | set(cand_modules)):
         before = int(base_modules.get(name, {}).get("contribution_cells", 0))
         after = int(cand_modules.get(name, {}).get("contribution_cells", 0))
+        before_word_bits = int(
+            base_modules.get(name, {}).get("contribution_word_bits", 0)
+        )
+        after_word_bits = int(
+            cand_modules.get(name, {}).get("contribution_word_bits", 0)
+        )
         module_rows.append({
             "module": name,
             "baseline_cells": before,
             "candidate_cells": after,
             "delta_cells": after - before,
             "delta_percent": percent_delta(before, after),
+            "baseline_word_bits": before_word_bits,
+            "candidate_word_bits": after_word_bits,
+            "delta_word_bits": after_word_bits - before_word_bits,
+            "delta_word_bits_percent": percent_delta(before_word_bits, after_word_bits),
         })
     module_rows.sort(key=lambda row: (-abs(row["delta_cells"]), row["module"]))
     base_paths = baseline["analysis"].get("paths", {})
@@ -280,6 +359,8 @@ def compare_reports(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict
         })
     before_total = int(base_hierarchy["total_cells"])
     after_total = int(cand_hierarchy["total_cells"])
+    before_word_bits = int(base_hierarchy.get("total_word_bits", 0))
+    after_word_bits = int(cand_hierarchy.get("total_word_bits", 0))
     return {
         "schema_version": 1,
         "kind": "yosys-structural-comparison",
@@ -292,6 +373,10 @@ def compare_reports(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict
             "candidate_cells": after_total,
             "delta_cells": after_total - before_total,
             "delta_percent": percent_delta(before_total, after_total),
+            "baseline_word_bits": before_word_bits,
+            "candidate_word_bits": after_word_bits,
+            "delta_word_bits": after_word_bits - before_word_bits,
+            "delta_word_bits_percent": percent_delta(before_word_bits, after_word_bits),
             "baseline_memory_bits": int(base_hierarchy["total_memory_bits"]),
             "candidate_memory_bits": int(cand_hierarchy["total_memory_bits"]),
         },
@@ -303,7 +388,10 @@ def compare_reports(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict
 def analysis_config() -> dict[str, Any]:
     return {
         "top": TOP,
-        "passes": ["read_verilog -sv", "hierarchy", "proc", "opt_clean", "check", "flatten", "ltp -noff"],
+        "passes": [
+            "read_verilog -sv", "hierarchy", "proc", "opt_clean", "check",
+            "stat -json", "stat -json -width", "flatten", "ltp -noff",
+        ],
         "path_modules": list(PATH_MODULES),
         "mapping": "generic-word-level",
     }
@@ -339,6 +427,7 @@ def run_analyze(args: argparse.Namespace) -> int:
     ).hexdigest()
 
     hierarchy_stat = out / "hierarchy-stat.json"
+    hierarchy_width_stat = out / "hierarchy-width-stat.json"
     top_ltp = out / "ltp-core_top.txt"
     module_ltp = {module: out / f"ltp-{module}.txt" for module in PATH_MODULES}
     script_lines = [
@@ -348,6 +437,7 @@ def run_analyze(args: argparse.Namespace) -> int:
         "opt_clean",
         "check -assert",
         f"tee -q -o {hierarchy_stat.name} stat -json -top {TOP}",
+        f"tee -q -o {hierarchy_width_stat.name} stat -json -width -top {TOP}",
     ]
     script_lines.extend(
         f"tee -q -o {path.name} ltp -noff {module}"
@@ -380,7 +470,7 @@ def run_analyze(args: argparse.Namespace) -> int:
         tail = result.stdout[-2000:] if result.stdout else ""
         raise YosysAnalysisError(f"Yosys structural analysis failed ({result.returncode}): {tail}")
 
-    hierarchy = summarize_stat(load_json(hierarchy_stat))
+    hierarchy = summarize_stat(load_json(hierarchy_stat), load_json(hierarchy_width_stat))
     paths = {TOP: parse_ltp(top_ltp)}
     paths.update({module: parse_ltp(path) for module, path in module_ltp.items()})
     tool_identity = {
@@ -397,6 +487,7 @@ def run_analyze(args: argparse.Namespace) -> int:
         "script": script,
         "log": log,
         "hierarchy_stat": hierarchy_stat,
+        "hierarchy_width_stat": hierarchy_width_stat,
         "top_ltp": top_ltp,
         **{f"ltp_{module}": path for module, path in module_ltp.items()},
     }.items():
@@ -422,8 +513,10 @@ def run_analyze(args: argparse.Namespace) -> int:
             "hierarchy": hierarchy,
             "paths": paths,
             "interpretation": (
-                "Generic word-level cells and LTP node counts are early structural proxies; "
-                "they are not LUT/FF estimates, placement-aware delay, WNS, or a Vivado gate."
+                "Generic cell objects, word-width-weighted operation bits, and LTP node counts "
+                "are early structural proxies. Word-bit weighting prevents vector packing from "
+                "appearing as free area, but none of these metrics is a LUT/FF estimate, "
+                "placement-aware delay, WNS, or a Vivado gate."
             ),
         },
         "artifacts": artifacts,
@@ -432,6 +525,7 @@ def run_analyze(args: argparse.Namespace) -> int:
     write_json(out / "summary.json", summary)
     print(
         f"Yosys {args.label}: cells={hierarchy['total_cells']}, "
+        f"word_bits={hierarchy['total_word_bits']}, "
         f"top_ltp={paths[TOP]['length']}, elapsed={elapsed:.2f}s"
     )
     print(out / "summary.json")
@@ -445,6 +539,11 @@ def run_compare(args: argparse.Namespace) -> int:
     print(
         f"Yosys cells: {summary['baseline_cells']} -> {summary['candidate_cells']} "
         f"({summary['delta_percent']:+.3f}%)"
+    )
+    print(
+        f"Yosys word bits: {summary['baseline_word_bits']} -> "
+        f"{summary['candidate_word_bits']} "
+        f"({summary['delta_word_bits_percent']:+.3f}%)"
     )
     for row in comparison["module_deltas"][:12]:
         if row["delta_cells"]:
