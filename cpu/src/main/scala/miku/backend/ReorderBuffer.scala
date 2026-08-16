@@ -43,7 +43,6 @@ final case class ReorderBufferCompletionPayload(config: OooCoreConfig) extends B
   val exceptionBadVAddrValid = Bool()
   val exceptionTlbRefill = Bool()
   val branchTaken = Bool()
-  val branchMispredict = Bool()
 }
 
 final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
@@ -55,6 +54,9 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   // generation is resident state needed to reject a stale completion.
   val generation = Bool()
   val completionExceptionValid = Bool()
+  // This bit participates in the three-wide retirement stop prefix. Keep it
+  // beside the entry state rather than on the completion-payload RAM output.
+  val completionBranchMispredict = Bool()
   val completionSource = UInt(log2Up(config.writebackWidth + 2) bits)
 }
 
@@ -238,6 +240,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.allocate(lane).uop.decoded.exception.valid
       entries(destination(config.robIndexWidth - 1 downto 0)).generation := destination.msb
       entries(destination(config.robIndexWidth - 1 downto 0)).completionExceptionValid := False
+      entries(destination(config.robIndexWidth - 1 downto 0)).completionBranchMispredict := False
       entries(destination(config.robIndexWidth - 1 downto 0)).completionSource :=
         U(decodedCompletionSource, log2Up(config.writebackWidth + 2) bits)
     }
@@ -442,12 +445,12 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       effectiveBranchMispredict(lane) := Mux(
         headBranchBypass,
         stagedHeadBranchBypassMispredict,
-        candidateCompletionPayload(lane).branchMispredict
+        candidates(lane).state.completionBranchMispredict
       )
     } else {
       effectiveBranchTaken(lane) := candidateCompletionPayload(lane).branchTaken
       effectiveBranchTarget(lane) := candidateCompletionPayload(lane).auxiliary.asUInt
-      effectiveBranchMispredict(lane) := candidateCompletionPayload(lane).branchMispredict
+      effectiveBranchMispredict(lane) := candidates(lane).state.completionBranchMispredict
     }
     if (lane == 0) {
       branchPrefix(lane) := retiringBranch.asUInt.resized
@@ -626,7 +629,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       stagedException(lane).badVAddrValid
     stagedCompletionPayload(lane).exceptionTlbRefill := stagedException(lane).tlbRefill
     stagedCompletionPayload(lane).branchTaken := stagedBranchTaken(lane)
-    stagedCompletionPayload(lane).branchMispredict := stagedBranchMispredict(lane)
   }
   val completionWriteValid = Bits(config.writebackWidth bits)
   for (lane <- 0 until config.writebackWidth) {
@@ -760,12 +762,14 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       when(!io.flush && stagedCompletionMatches(entryIndex)(lane)) {
         entries(entryIndex).complete := True
         entries(entryIndex).completionExceptionValid := stagedException(lane).valid
+        entries(entryIndex).completionBranchMispredict := stagedBranchMispredict(lane)
         entries(entryIndex).completionSource := lane
       }
     }
     when(!io.flush && stagedStoreCompletionMatches(entryIndex)) {
       entries(entryIndex).complete := True
       entries(entryIndex).completionExceptionValid := False
+      entries(entryIndex).completionBranchMispredict := False
       entries(entryIndex).completionSource := storeCompletionSource
     }
   }
