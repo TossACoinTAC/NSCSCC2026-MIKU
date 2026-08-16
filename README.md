@@ -1,4 +1,6 @@
 # MIKU
+<img width="418" height="235.25" alt="miku" src="https://github.com/user-attachments/assets/7b1726f8-774a-4a3e-bcec-55cc33ed3f3f" />
+
 
 MIKU（MIKU IS KINDA UNORDERED）是面向龙芯杯决赛 Linux 目标的 LA32R 乱序 SoC CPU。
 源码使用 SpinalHDL，平台来自锁定的 Chiplab c398 快照。
