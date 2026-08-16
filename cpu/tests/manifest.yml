@@ -32,3 +32,6 @@ tests:
   - name: experiment
     path: tests/python/test_experiment_contract.py
     categories: [artifact, harness]
+  - name: yosys-analysis
+    path: tests/python/test_yosys_analysis_contract.py
+    categories: [artifact, harness]

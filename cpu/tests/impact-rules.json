@@ -57,9 +57,9 @@
     },
     {
       "name": "experiment-harness",
-      "paths": ["scripts/experiment/*.py", "scripts/vivado/archive.py", "Makefile", "cpu/tests/manifest.yml", "cpu/tests/impact-rules.json", "cpu/tests/python/test_experiment_contract.py"],
+      "paths": ["scripts/experiment/*.py", "scripts/vivado/archive.py", "Makefile", "cpu/tests/manifest.yml", "cpu/tests/impact-rules.json", "cpu/tests/python/test_experiment_contract.py", "cpu/tests/python/test_yosys_analysis_contract.py"],
       "scala_suites": [],
-      "python_contracts": ["tests/python/test_experiment_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_repository_contract.py"]
+      "python_contracts": ["tests/python/test_experiment_contract.py", "tests/python/test_yosys_analysis_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_repository_contract.py"]
     },
     {
       "name": "performance-observation",
@@ -77,7 +77,7 @@
       "name": "python-contract-suite",
       "paths": ["cpu/tests/python/test_*.py"],
       "scala_suites": [],
-      "python_contracts": ["tests/python/test_cache_memory_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_core_interface.py", "tests/python/test_experiment_contract.py", "tests/python/test_generation_contract.py", "tests/python/test_perf_observation_contract.py", "tests/python/test_perf_observation_summary.py", "tests/python/test_repository_contract.py", "tests/python/test_sim_contract.py", "tests/python/test_toolchain_contract.py"]
+      "python_contracts": ["tests/python/test_cache_memory_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_core_interface.py", "tests/python/test_experiment_contract.py", "tests/python/test_generation_contract.py", "tests/python/test_perf_observation_contract.py", "tests/python/test_perf_observation_summary.py", "tests/python/test_repository_contract.py", "tests/python/test_sim_contract.py", "tests/python/test_toolchain_contract.py", "tests/python/test_yosys_analysis_contract.py"]
     },
     {
       "name": "generation-identity",
