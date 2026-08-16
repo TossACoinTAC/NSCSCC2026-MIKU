@@ -222,7 +222,66 @@ expanded-window R10 组合执行一次 matching 100 MHz direct full。后续 dir
 保留 5 个完成定向验证、完整门禁、Yosys
 和 perf20 的时序候选；若任何候选被移除，必须补入新的候选并保留独立证据。
 
-## 5. 当前优先级与下一步
+## 5. R11 候选账本与证据边界
+
+R11 在 R10 组合之上记录当前净保留的 13 项局部时序候选。R7--B02-F 压力期间的焦点项为
+MT15、L2T01、MT17、L1T01、L1T02、L1T03、L2T02、BPT01 和 MT18；全局独立项为 IQT02、MX01、
+RFT01 和 CA01。数量按当前净保留项而不是历史实现次数计。所有保留项均已通过其受影响范围的
+定向 suite。“定向通过”不能外推为批次级正确性、周期透明性、资源或 WNS，提交顺序也不是合并后
+组合证据的替代品。下表的“证据与下一门禁”保留候选提交时的线性门禁设计；最终 10-bit 组合的
+实时完成状态以后文的组合级记录为准。
+
+| 候选 | 局部实现与不变量 | 定向验证状态 | 证据与下一门禁 |
+| --- | --- | --- | --- |
+| IQT02 | 将 IQ source-tag 作为 token 在 source 端本地捕获，减少 issue source-tag 的跨域选择；不得改变 issue、operand-read 或 wakeup 时刻 | 已通过受影响的 IQ 定向 suite | `147bf8e`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| MX01 | 使用统一的 signed/unsigned `33x33` extended-product 数据通路；吞吐、乘法 latency 和 wakeup 时刻保持不变 | 已通过受影响的 multiplier 定向 suite | `eae011a`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| MT15 | 拆分 scheduled-load translation 的状态与更新域；selected load 到 translation/request 的拍数保持不变 | 已通过受影响的 LSQ translation 定向 suite | `f09a5f9`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| L2T01 | 以 one-hot grant 局部化 L2 read request 选择；仲裁优先级、请求身份、错误/retry 与响应周期保持不变 | 已通过受影响的 L2 read-request 定向 suite | `dee2208`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| MT17 | 以 one-hot grant 捕获 selected load；LSQ 选择、顺序检查、flush/epoch 与 request 周期保持不变 | 已通过受影响的 LSQ selected-load 定向 suite | `5bf8208`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| L1T01 | 将 line-match miss state 的 merge grant 局部化；merge 身份、优先级与 response 周期保持不变 | 已通过受影响的 L1D line-match 定向 suite | `73a6100`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| L1T02 | 将 L1D read request grant 局部化；请求仲裁、身份与 response 周期保持不变 | 已通过受影响的 L1D read-request 定向 suite | `f8dd050`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| L1T03 | 将 L1D victim writeback grant 局部化；victim ownership、写回顺序与 backpressure 语义保持不变 | 已通过受影响的 L1D victim-writeback 定向 suite | `f3314d0`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| L2T02 | 将 L2 victim writeback grant 局部化；victim ownership、写回顺序与 backpressure 语义保持不变 | 已通过受影响的 L2 victim-writeback 定向 suite | `7d82ea1`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| RFT01 | 预取并固定捕获 FreeList `head+0/1/2` 分配候选；rename 分配、recovery snapshot 与释放顺序保持不变 | 已通过受影响的 FreeList/rename 定向 suite | `f99f8d0`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| BPT01 | 共享 predictor table-update bank decoder；预测、训练、恢复和初始化可见性保持不变 | 已通过受影响的 predictor 定向 suite | `9a37c21`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| MT18 | 移除 younger-ready valid 的全局广播；retry-ready 资格、选择优先级与 LSQ 顺序语义保持不变 | 已通过受影响的 LSQ retry-ready 定向 suite | `b3e43be`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+| CA01 | 共享 single selected serial-op decode；commit、异常、serializing 与 system-operation 语义保持不变 | 已通过受影响的 commit/serial-op 定向 suite | `a4f25df`；Yosys、组合 `cpu-check`、perf20 与 func58 已通过，matching Vivado 待运行 |
+
+同配置组合结构对照为 `build/reports/yosys/R11-thirteen-vs-R10-expanded.json`：全核 cells
+`64994 -> 64845`（`-0.229%`）、post-flat cells `58915 -> 58766`（`-0.253%`）、word bits
+`+0.120%`。局部 cells 变化为 CA01 `-141`、LSQ `-29`、L2 `-8`、predictor `-6`、L1D `+4`、
+FreeList `+7`、前三个 IQ 各 `+8`。这只是同配置的综合前结构筛选，不能替代 Vivado 时序或资源。
+
+RT15 的 branch mispredict hot state（`41e8ef5`）与 RT16 的 completion exception qualifier
+（`d9b399e`）都曾通过定向 suite，但同配置 Yosys 分别使 ROB 增加 `1027` 与 `4108` cells，已由
+`8e6f229` 与 `a18b4f8` 回退；两项不计入 R11 的 13 项净保留候选。R10 或更早 run 的 partial
+route 只保留为候选来源和路径审计信息。特别是 R10 之前记录的中间 WNS，不是 R11 matching RTL
+的 WNS，也不能作为 R11 的资源、DRC、bitstream、Linux 或板测证据。R11 的正式实现结论只能由
+冻结了 R11 源码、生成 RTL、软件、工具和 Chiplab 身份的 direct full manifest 产生。
+
+16-bit GHR 的 R11 组合完整 `cpu-check` 已通过（41 suites、261 tests；Python contracts 94/94），
+完整 perf20 20/20 与 R9 的 `3,845,728` cycles 逐项精确相等。B02-F2 随后以相同的表容量和
+index/fold 方案比较 history 宽度：同一 8 workload 短扫的 8/10/12/14/16-bit 总周期为
+`921,351/904,190/913,675/926,110/928,346`。最终默认 10-bit 的完整 perf20 为 `3,798,148` cycles，
+相对 16-bit 降 `1.237217%`、几何平均加速 `1.022277448x`；`fireye_D1`、`fireye_I2`、`quick_sort`
+分别增加 `0.12434%`、`2.60670%`、`0.63021%`，其余 workload 改善，`select_sort`、`stringsearch`
+分别改善 `15.83875%`、`6.70686%`。比较证据为
+`build/reports/comparisons/R11-B02F-history10-vs-history16.json`。`b4935cb` 为宽 history 的高位
+fold 固定测试 fixture 合同，`e0b5626` 将 Makefile/OooCoreConfig 默认改为 10-bit。
+
+最终默认 10-bit 组合冻结于 `a3950fe`，matching RTL SHA-256 为
+`c4e0ff15924e89593d4eba1244685a9d8154f644b9c668273c35ec2ab87d6e4b`。完整 `cpu-check` 为
+40 suites、259 tests 全过，Python contracts 94/94，generation、strict lint、Yosys 与 docs contract
+均通过。func58 random-AXI seeds `240/255/141` 均为 58/58，matrix 为
+`build/sim/runs/cpu_70e97d278882_chiplab_c398d274812f/clean-func58_model_baa572b05940_software_3fe689f227db/random/matrix_1892a80af7f5_func58.csv`。
+
+最终配置的 Yosys summary 为 `build/reports/yosys/R11-final-history10-expanded/summary.json`；相对
+16-bit R11 组合的 `build/reports/yosys/R11-history10-vs-history16.json` 显示全核 cells
+`64845 -> 64844`、word bits `442080 -> 442002`、post-flat cells `58766 -> 58765`，predictor
+减少 1 cell。这只是综合前结构筛选信息。matching 100 MHz direct Vivado 仍待运行，故尚未形成该
+最终组合的 Vivado WNS/资源、DRC、bitstream、Linux 或板测结论。
+
+## 6. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
@@ -244,11 +303,11 @@ expanded-window R10 组合执行一次 matching 100 MHz direct full。后续 dir
 7. 当前阶段以 CT05 的 isolated perf20、最终组合通过的 func58 三 seed 和 B02-F 的完整软件门禁为准。任何
    post-route physopt 仅用于路径探索，不是 matching direct full，不能作为正式时序、资源、组合收益或板测归因证据。
 
-## 6. 详细说明的维护边界
+## 7. 详细说明的维护边界
 
 上表保存每个候选的完整机制、风险、决策指标、当前状态和效果。涉及流水级行为、示例和理论推导的长篇说明继续保留在 [architecture.md](architecture.md) 对应的十二阶段章节，以免把教学主线拆碎；这些章节不再维护第二份状态列。候选状态发生变化时只更新本文，并把不可变的 cycles、RTL hash、工具版本、WNS/资源和报告路径写入对应实验 manifest。
 
-## 7. 证据入口
+## 8. 证据入口
 
 - 当前 RTL：`build/rtl/generation-manifest.json`。
 - R6 L11 perf20：`build/sim/runs/cpu_1548f170c573_chiplab_c398d274812f/clean-perf20_model_858465589681_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`；逐项比较为 `build/reports/comparisons/R6-L11.json`。

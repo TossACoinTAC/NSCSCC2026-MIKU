@@ -152,6 +152,62 @@ ROB/cache/multiplier 路径共同定义候选池。目标是在其中实际引�
 `build/reports/comparisons/R10-expanded-vs-R9-B02F.json`。同一配置的 func58 random-AXI
 seeds `240/255/141` 也均通过。default 矩阵仅作补充验证，不参与 expanded-window 的晋级归因。
 
+### R11 时序候选批次
+
+R11 从 R10 的组合 RTL 继续，只收录不改变外部可见拍数的局部拓扑重排。当前净保留 13 项：
+R7--B02-F 压力期间的焦点项为 MT15、L2T01、MT17、L1T01、L1T02、L1T03、L2T02、BPT01 和
+MT18；全局独立项为 IQT02、MX01、RFT01 和 CA01。数量按当前净保留项计，不按历史实现次数计。
+所有保留项各自受影响的定向 suite 已通过，但这只证明候选的定向功能合同，不构成 R11 组合的
+完整软件、周期或实现结论。
+
+| 候选 | 提交 | 局部目标与保持的不变量 | 当前定向门禁 | 后续门禁 |
+| --- | --- | --- | --- | --- |
+| IQT02 | `147bf8e` | IQ source-tag 以 token 在本地捕获，缩短 issue source-tag 的跨域选择；issue、operand-read 与 wakeup 时刻不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado IQ top-N |
+| MX01 | `eae011a` | 合并 signed/unsigned `33x33` 乘法数据通路；吞吐、乘法 latency 与 wakeup 时刻不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado multiplier top-N |
+| MT15 | `f09a5f9` | 拆分 scheduled-load translation 状态；selected load 到 translation/request 的拍数不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado LSQ top-N |
+| L2T01 | `dee2208` | L2 read request 以 one-hot grant 局部化；仲裁优先级、请求身份和响应周期不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado L2 top-N |
+| MT17 | `5bf8208` | selected-load 以 one-hot grant 本地捕获；LSQ 选择、顺序检查与 request 周期不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado LSQ top-N |
+| L1T01 | `73a6100` | line-match miss state 的 merge grant 局部化；merge 身份、优先级与 response 周期不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado L1D top-N |
+| L1T02 | `f8dd050` | L1D read request grant 局部化；请求仲裁、身份与 response 周期不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado L1D top-N |
+| L1T03 | `f3314d0` | L1D victim writeback grant 局部化；victim ownership、写回顺序与 backpressure 语义不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado L1D top-N |
+| L2T02 | `7d82ea1` | L2 victim writeback grant 局部化；victim ownership、写回顺序与 backpressure 语义不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado L2 top-N |
+| RFT01 | `f99f8d0` | 固定捕获 FreeList `head+0/1/2` 分配候选；rename 分配、恢复和释放顺序不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado rename/FreeList top-N |
+| BPT01 | `9a37c21` | 共享 predictor table-update bank decoder；预测/训练可见性和恢复语义不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado predictor top-N |
+| MT18 | `b3e43be` | 移除 younger-ready valid 广播；retry-ready 资格和 LSQ 选择语义不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado LSQ top-N |
+| CA01 | `a4f25df` | 共享 selected serial-op decode；commit、异常和 serializing 语义不变 | 通过 | 组合 Yosys、完整 `cpu-check`、perf20、matching Vivado commit/ROB top-N |
+
+同配置 Yosys 已完成：`build/reports/yosys/R11-thirteen-vs-R10-expanded.json` 的全核 cells 为
+`64994 -> 64845`（`-0.229%`）、post-flat cells 为 `58915 -> 58766`（`-0.253%`）、word bits
+`+0.120%`。局部变化为 CA01 `-141`、LSQ `-29`、L2 `-8`、predictor `-6`、L1D `+4`、FreeList
+`+7`、前三个 IQ 各 `+8` cells；这些是同配置综合前结构筛选信息，不能替代 Vivado WNS。
+
+RT15 (`41e8ef5`) 与 RT16 (`d9b399e`) 均曾完成定向验证，但分别因同配置 Yosys 使 ROB 增加
+`1027` 与 `4108` cells，已由 `8e6f229` 与 `a18b4f8` 回退，不计入 R11 的 13 项净保留候选。
+16-bit GHR 的 R11 组合完整 `cpu-check` 已通过（41 suites、261 tests；Python contracts 94/94），
+完整 perf20 20/20 也与 R9 的 `3,845,728` cycles 逐项精确相等。随后 B02-F2 将默认 GHR 从
+16-bit 收敛为 10-bit：在同一 8 workload 短扫中，8/10/12/14/16-bit 的总周期分别为
+`921,351/904,190/913,675/926,110/928,346`；完整 10-bit perf20 为 `3,798,148` cycles，相对
+16-bit 降 `1.237217%`、几何平均加速 `1.022277448x`。`fireye_D1`、`fireye_I2`、`quick_sort`
+分别增加 `0.12434%`、`2.60670%`、`0.63021%`，其余项目改善；其中 `select_sort` 和
+`stringsearch` 分别改善 `15.83875%` 和 `6.70686%`。逐项比较为
+`build/reports/comparisons/R11-B02F-history10-vs-history16.json`。`b4935cb` 将宽 history 的高位
+fold 固定为测试 fixture 合同，`e0b5626` 将 Makefile/OooCoreConfig 默认值改为 10-bit。
+
+最终默认 10-bit 组合冻结于 `a3950fe`，matching RTL SHA-256 为
+`c4e0ff15924e89593d4eba1244685a9d8154f644b9c668273c35ec2ab87d6e4b`。完整 `cpu-check` 已通过：
+40 suites、259 tests、Python contracts 94/94，generation、strict lint、Yosys 与 docs contract 均通过。
+func58 random-AXI seeds `240/255/141` 均为 58/58，matrix 为
+`build/sim/runs/cpu_70e97d278882_chiplab_c398d274812f/clean-func58_model_baa572b05940_software_3fe689f227db/random/matrix_1892a80af7f5_func58.csv`。
+最终 Yosys summary 为 `build/reports/yosys/R11-final-history10-expanded/summary.json`；相对 16-bit
+R11 组合的 comparison 为 `build/reports/yosys/R11-history10-vs-history16.json`，全核 cells
+`64845 -> 64844`、word bits `442080 -> 442002`、post-flat cells `58766 -> 58765`，predictor 减少
+1 cell。这些是同配置综合前结构筛选信息，不构成 Vivado 资源或时序结论。
+
+matching 100 MHz direct Vivado 尚待运行。因此没有可继承的 R11 WNS、资源、DRC、bitstream、Linux
+或板测结论。R10 的 partial route 及其任何中间 WNS 只可继续用于历史路径审计；只有冻结最终 R11
+源码、生成 RTL、软件、工具和 Chiplab 身份后的完整 direct implementation 才能产生正式实现结论。若
+任一组合门禁失败或发生不能接受的回退，按提交边界拆分并重新形成 R11 候选集。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。
