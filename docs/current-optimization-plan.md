@@ -348,6 +348,24 @@ RenameMap、PRF 和 FreeList，L15 的增量被拆到 LSQ/SDQ。三者全核 raw
 超过 400 MiB，因此不进入常规门禁。日常 Yosys 报告用于候选实现前的压力定位和候选间
 配对比较；100 MHz 晋级仍只接受 matching Vivado direct full implementation。
 
+### RT04：ROB 不可变退休 metadata 分 bank
+
+R02 的结构增量主要集中于 ROB。RT04 将只在 allocate 时写入的退休 metadata 从逐 entry
+寄存阵列迁入四个窄同步 bank，并复用既有 commit prefetch 指针；三路连续 allocate/commit
+指针占用不同低两位 bank，因此不增加读写端口或提交拍数。实现同时删除 payload 中重复的
+PC/system-operation，未保留会产生未驱动副本的生产 RTL A/B 路径；旧 baseline 已由冻结 RTL
+和 Yosys 报告承担对照。
+
+`ecfcf66` 的 ROB 17 项与完整 `cpu-check` 通过，门禁为 40 suites / 247 tests、Verilator
+strict-zero lint 和 87 项 Python 合同。发布 RTL SHA-256 为
+`1741aff8ec796a3923245ae472e974a145935a393e37a78d01f464e842dd785a`。完整 perf20 相对 A01
+为 `4,215,442 -> 4,215,442`，20 项逐项精确相等。Yosys generic cells 为
+`72,059 -> 69,148`（`-4.040%`），ROB 贡献从 `13,605` 降到 `10,694`；memory bits 只增加
+448。ROB/full-core raw LTP 仍为 `38/104`，所以当前只确认实现压力下降，时序收益留给后续
+与 R02 及其他独立候选组合的 matching direct full 判断。周期与结构证据分别见
+`build/reports/comparisons/R8-RT04-vs-A01.json` 和
+`build/reports/yosys/R8-default-vs-RT04-default-v2.json`。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
