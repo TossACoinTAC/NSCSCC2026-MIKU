@@ -28,6 +28,11 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   val decodedExceptionValid = Bool()
   val serializing = Bool()
   val systemOperation = UInt(SystemOperation.Width bits)
+  // Predecoded system-op qualifiers keep the five-bit decode and the two barrier
+  // compares out of the commit-valid/head-bypass timing cone.  They are captured
+  // together with systemOperation at allocation and never change afterwards.
+  val systemOperationIsNone = Bool()
+  val systemOperationIsMemoryBarrier = Bool()
   val pc = UInt(config.xlen bits)
   // Retirement and LSU ownership metadata is read every commit cycle.  Keeping it beside the
   // validity/completion state avoids routing these narrow fields through the wide payload-bank
@@ -106,6 +111,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     entry.decodedExceptionValid.init(False)
     entry.serializing.init(False)
     entry.systemOperation.init(SystemOperation.none)
+    entry.systemOperationIsNone.init(True)
+    entry.systemOperationIsMemoryBarrier.init(False)
     entry.pc.init(0)
   }
   private val payloadBankCount = 4
@@ -180,6 +187,12 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.allocate(lane).uop.decoded.serializing
       entries(destination(config.robIndexWidth - 1 downto 0)).systemOperation :=
         io.allocate(lane).uop.decoded.systemOperation
+      entries(destination(config.robIndexWidth - 1 downto 0)).systemOperationIsNone :=
+        io.allocate(lane).uop.decoded.systemOperation === SystemOperation.none
+      entries(destination(config.robIndexWidth - 1 downto 0)).systemOperationIsMemoryBarrier :=
+        io.allocate(lane).uop.decoded.systemOperation === SystemOperation.dataBarrier ||
+        io.allocate(lane).uop.decoded.systemOperation === SystemOperation.instructionBarrier ||
+        io.allocate(lane).uop.decoded.systemOperation === SystemOperation.cacheOperation
       entries(destination(config.robIndexWidth - 1 downto 0)).pc :=
         io.allocate(lane).uop.decoded.pc
       entries(destination(config.robIndexWidth - 1 downto 0)).isLoad :=
@@ -394,6 +407,14 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     } else {
       candidates(lane).payload.systemOperation
     })
+    io.commit(lane).systemOperationIsMemoryBarrier :=
+      (if (config.enableRobSystemOperationState) {
+        candidates(lane).state.systemOperationIsMemoryBarrier
+      } else {
+        candidates(lane).payload.systemOperation === SystemOperation.dataBarrier ||
+          candidates(lane).payload.systemOperation === SystemOperation.instructionBarrier ||
+          candidates(lane).payload.systemOperation === SystemOperation.cacheOperation
+      })
     io.commit(lane).csrAddress := candidates(lane).payload.csrAddress
     io.commit(lane).csrWrite := candidates(lane).payload.csrWrite
     io.commit(lane).csrMask := candidates(lane).payload.csrMask
@@ -620,24 +641,24 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     // Ordinary current-epoch completions and, when enabled, fully resolved branches
     // may bypass the final entry.complete register. Serializing/system operations and
     // either decoded or completion exceptions retain the precise retirement boundary.
-    val candidateSystemOperation = if (config.enableRobSystemOperationState) {
-      candidates(0).state.systemOperation
+    val candidateSystemOperationIsNone = if (config.enableRobSystemOperationState) {
+      candidates(0).state.systemOperationIsNone
     } else {
-      candidates(0).payload.systemOperation
+      candidates(0).payload.systemOperation === SystemOperation.none
     }
     headCompletionBypass := !io.flush && candidates(0).state.payloadReady &&
       stagedHeadCompletionBypassValid &&
       candidates(0).state.valid && !candidates(0).state.complete &&
       !candidates(0).exception.valid && !candidates(0).state.serializing &&
       !candidates(0).state.isBranch &&
-      candidateSystemOperation === SystemOperation.none
+      candidateSystemOperationIsNone
     headCompletionBypassResult := stagedHeadCompletionBypassResult
     if (config.enableBranchHeadCompletionBypass) {
       headBranchBypass := !io.flush && candidates(0).state.payloadReady &&
         stagedHeadBranchBypassValid && candidates(0).state.valid &&
         !candidates(0).state.complete && !candidates(0).exception.valid &&
         !candidates(0).state.serializing && candidates(0).state.isBranch &&
-        candidateSystemOperation === SystemOperation.none
+        candidateSystemOperationIsNone
     } else {
       headBranchBypass := False
     }
