@@ -38,6 +38,8 @@ final class BankedFetchPredictor(
   private val bankWidth = log2Up(config.fetchWidth)
   private val btbRowWidth = log2Up(btbEntriesPerBank)
   private val phtRowWidth = log2Up(phtEntriesPerBank)
+  private val phtEntryWidth = if (config.enableLargeGshare) 3 else 2
+  private val phtValidBit = 2
   private val btbTagWidth = config.xlen - fetchGroupOffsetWidth - btbRowWidth
   private val rasIndexWidth = log2Up(rasDepth)
   private val rasCountWidth = log2Up(rasDepth + 1)
@@ -95,8 +97,16 @@ final class BankedFetchPredictor(
     Mem(Bits(btbEntryWidth bits), btbEntriesPerBank)
   )
   val phtBanks = Array.fill(config.fetchWidth)(
-    Mem(Bits(2 bits), phtEntriesPerBank)
+    Mem(Bits(phtEntryWidth bits), phtEntriesPerBank)
   )
+  if (config.enableLargeGshare) {
+    // The validity domain is a gshare row, not a BTB PC.  Keep the valid bit beside its counter
+    // so a new GHR context uses BTFNT until that exact row has received a precise update.  FPGA
+    // RAM initialization establishes the cold-bitstream contract without a 4096-cycle sweep.
+    for (bank <- phtBanks) {
+      bank.initBigInt(Seq.fill(phtEntriesPerBank)(BigInt(1))) // {valid=0, state=01}
+    }
+  }
 
   val invalidating = RegInit(True)
   val invalidateRow = Reg(UInt(btbRowWidth bits)) init (0)
@@ -281,7 +291,7 @@ final class BankedFetchPredictor(
   }
 
   val btbRead = Vec(Bits(btbEntryWidth bits), config.fetchWidth)
-  val phtRead = Vec(Bits(2 bits), config.fetchWidth)
+  val phtRead = Vec(Bits(phtEntryWidth bits), config.fetchWidth)
   for (bank <- 0 until config.fetchWidth) {
     val btbWrite = io.btbUpdateValid &&
       btbUpdateBank === U(bank, bankWidth bits) && !invalidating
@@ -297,9 +307,15 @@ final class BankedFetchPredictor(
 
     val phtWrite = io.phtUpdateValid &&
       phtUpdateBank === U(bank, bankWidth bits)
+    val phtWriteData = Bits(phtEntryWidth bits)
+    if (config.enableLargeGshare) {
+      phtWriteData := True.asBits ## phtNextState.asBits
+    } else {
+      phtWriteData := phtNextState.asBits
+    }
     phtBanks(bank).write(
       address = io.phtUpdateIndex,
-      data = phtNextState.asBits,
+      data = phtWriteData,
       enable = phtWrite
     )
     phtRead(bank) := phtBanks(bank).readSync(
@@ -310,13 +326,29 @@ final class BankedFetchPredictor(
     val entryTag = btbRead(bank)(btbTagLsb + btbTagWidth - 1 downto btbTagLsb)
     io.prediction(bank).hit := io.responseValid && btbRead(bank)(btbValidBit) &&
       entryTag === capturedTag
-    io.prediction(bank).phtValid := io.responseValid &&
-      btbRead(bank)(btbDirectionTrainedBit)
+    if (config.enableLargeGshare) {
+      io.prediction(bank).phtValid := io.prediction(bank).hit && phtRead(bank)(phtValidBit)
+    } else {
+      io.prediction(bank).phtValid := io.responseValid &&
+        btbRead(bank)(btbDirectionTrainedBit)
+    }
     io.prediction(bank).branchType :=
       btbRead(bank)(btbTypeLsb + PredictedBranchType.Width - 1 downto btbTypeLsb).asUInt
+    val learnedPhtState = Bits(2 bits)
+    if (config.enableLargeGshare) {
+      learnedPhtState := phtRead(bank)(1 downto 0)
+    } else {
+      learnedPhtState := phtRead(bank)
+    }
+    val learnedPhtStateValid = Bool()
+    if (config.enableLargeGshare) {
+      learnedPhtStateValid := io.prediction(bank).phtValid
+    } else {
+      learnedPhtStateValid := btbRead(bank)(btbDirectionTrainedBit)
+    }
     io.prediction(bank).phtState := Mux(
-      btbRead(bank)(btbDirectionTrainedBit),
-      phtRead(bank),
+      learnedPhtStateValid,
+      learnedPhtState,
       Mux(btbRead(bank)(btbStaticTakenBit), B"10", B"01")
     ).asUInt
     io.prediction(bank).phtIndex := capturedPhtIndex
