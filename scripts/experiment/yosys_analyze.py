@@ -15,7 +15,7 @@ import time
 from typing import Any
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 TOP = "core_top"
 PATH_MODULES = (
     "OooFrontend",
@@ -107,6 +107,18 @@ def parse_ltp_text(text: str) -> dict[str, Any]:
 
 def parse_ltp(path: Path) -> dict[str, Any]:
     return parse_ltp_text(path.read_text(encoding="utf-8", errors="replace"))
+
+
+def oversized_ltp(paths: list[Path], max_bytes: int) -> list[tuple[Path, int]]:
+    oversized = []
+    for path in paths:
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            continue
+        if size > max_bytes:
+            oversized.append((path, size))
+    return oversized
 
 
 def cell_bucket(cell_type: str) -> str:
@@ -301,6 +313,8 @@ def validate_report(document: dict[str, Any]) -> None:
         raise YosysAnalysisError("invalid RTL hash in Yosys analysis")
     if not isinstance(document["analysis"].get("hierarchy"), dict):
         raise YosysAnalysisError("Yosys analysis lacks hierarchy summary")
+    if not isinstance(document["analysis"].get("post_flatten"), dict):
+        raise YosysAnalysisError("Yosys analysis lacks post-flatten summary")
 
 
 def percent_delta(baseline: int, candidate: int) -> float | None:
@@ -361,8 +375,16 @@ def compare_reports(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict
     after_total = int(cand_hierarchy["total_cells"])
     before_word_bits = int(base_hierarchy.get("total_word_bits", 0))
     after_word_bits = int(cand_hierarchy.get("total_word_bits", 0))
+    base_flat = baseline["analysis"].get("post_flatten")
+    cand_flat = candidate["analysis"].get("post_flatten")
+    if not isinstance(base_flat, dict) or not isinstance(cand_flat, dict):
+        raise YosysAnalysisError("Yosys analysis lacks post-flatten summary")
+    before_flat_cells = int(base_flat["total_cells"])
+    after_flat_cells = int(cand_flat["total_cells"])
+    before_flat_word_bits = int(base_flat.get("total_word_bits", 0))
+    after_flat_word_bits = int(cand_flat.get("total_word_bits", 0))
     return {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "kind": "yosys-structural-comparison",
         "baseline": baseline["input"],
         "candidate": candidate["input"],
@@ -379,21 +401,39 @@ def compare_reports(baseline: dict[str, Any], candidate: dict[str, Any]) -> dict
             "delta_word_bits_percent": percent_delta(before_word_bits, after_word_bits),
             "baseline_memory_bits": int(base_hierarchy["total_memory_bits"]),
             "candidate_memory_bits": int(cand_hierarchy["total_memory_bits"]),
+            "baseline_post_flatten_cells": before_flat_cells,
+            "candidate_post_flatten_cells": after_flat_cells,
+            "delta_post_flatten_cells": after_flat_cells - before_flat_cells,
+            "delta_post_flatten_percent": percent_delta(
+                before_flat_cells, after_flat_cells
+            ),
+            "baseline_post_flatten_word_bits": before_flat_word_bits,
+            "candidate_post_flatten_word_bits": after_flat_word_bits,
+            "delta_post_flatten_word_bits": (
+                after_flat_word_bits - before_flat_word_bits
+            ),
+            "delta_post_flatten_word_bits_percent": percent_delta(
+                before_flat_word_bits, after_flat_word_bits
+            ),
         },
         "module_deltas": module_rows,
         "path_deltas": path_rows,
     }
 
 
-def analysis_config() -> dict[str, Any]:
+def analysis_config(max_ltp_bytes: int) -> dict[str, Any]:
     return {
         "top": TOP,
         "passes": [
             "read_verilog -sv", "hierarchy", "proc", "opt_clean", "check",
-            "stat -json", "stat -json -width", "flatten", "ltp -noff",
+            "hierarchy stat -json", "hierarchy stat -json -width",
+            "scoped flatten", "scoped ltp -noff", "flatten top", "opt_clean",
+            "post-flatten stat -json", "post-flatten stat -json -width",
+            "top ltp -noff",
         ],
         "path_modules": list(PATH_MODULES),
         "mapping": "generic-word-level",
+        "max_ltp_bytes": max_ltp_bytes,
     }
 
 
@@ -421,13 +461,16 @@ def run_analyze(args: argparse.Namespace) -> int:
         [str(yosys_path), "-V"], check=True, text=True, stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT, timeout=30,
     ).stdout.strip()
-    config = analysis_config()
+    max_ltp_bytes = args.max_ltp_mb * 1024 * 1024
+    config = analysis_config(max_ltp_bytes)
     config_sha256 = hashlib.sha256(
         json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
 
     hierarchy_stat = out / "hierarchy-stat.json"
     hierarchy_width_stat = out / "hierarchy-width-stat.json"
+    post_flatten_stat = out / "post-flatten-stat.json"
+    post_flatten_width_stat = out / "post-flatten-width-stat.json"
     top_ltp = out / "ltp-core_top.txt"
     module_ltp = {module: out / f"ltp-{module}.txt" for module in PATH_MODULES}
     script_lines = [
@@ -438,39 +481,80 @@ def run_analyze(args: argparse.Namespace) -> int:
         "check -assert",
         f"tee -q -o {hierarchy_stat.name} stat -json -top {TOP}",
         f"tee -q -o {hierarchy_width_stat.name} stat -json -width -top {TOP}",
+        "design -save hierarchical",
     ]
-    script_lines.extend(
-        f"tee -q -o {path.name} ltp -noff {module}"
-        for module, path in module_ltp.items()
-    )
+    for module, path in module_ltp.items():
+        script_lines.extend((
+            "design -load hierarchical",
+            f"flatten {module}",
+            "opt_clean",
+            f"tee -q -o {path.name} ltp -noff {module}",
+        ))
     script_lines.extend((
+        "design -load hierarchical",
         "flatten",
         "opt_clean",
         "check -assert",
+        f"tee -q -o {post_flatten_stat.name} stat -json -top {TOP}",
+        f"tee -q -o {post_flatten_width_stat.name} stat -json -width -top {TOP}",
         f"tee -q -o {top_ltp.name} ltp -noff",
     ))
     script = out / "analysis.ys"
     script.write_text("\n".join(script_lines) + "\n", encoding="utf-8")
     log = out / "yosys.log"
     started = time.monotonic()
-    try:
-        result = subprocess.run(
+    ltp_paths = [top_ltp, *module_ltp.values()]
+    process = subprocess.Popen(
             [str(yosys_path), "-Q", "-q", "-l", log.name, "-s", script.name],
             cwd=out,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            timeout=args.timeout,
-            check=False,
         )
-    except subprocess.TimeoutExpired as error:
-        raise YosysAnalysisError(f"Yosys structural analysis timed out after {args.timeout}s") from error
+    deadline = started + args.timeout
+    process_output = ""
+    while True:
+        try:
+            process_output, _ = process.communicate(timeout=1)
+            break
+        except subprocess.TimeoutExpired:
+            oversized = oversized_ltp(ltp_paths, max_ltp_bytes)
+            if oversized:
+                process.terminate()
+                try:
+                    process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
+                details = []
+                for path, size in oversized:
+                    details.append(f"{path.name}={size} bytes")
+                    path.unlink(missing_ok=True)
+                raise YosysAnalysisError(
+                    "Yosys LTP artifact exceeded the hard size limit "
+                    f"({max_ltp_bytes} bytes): {', '.join(details)}"
+                )
+            if time.monotonic() >= deadline:
+                process.terminate()
+                try:
+                    process.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.communicate()
+                raise YosysAnalysisError(
+                    f"Yosys structural analysis timed out after {args.timeout}s"
+                )
     elapsed = time.monotonic() - started
-    if result.returncode != 0:
-        tail = result.stdout[-2000:] if result.stdout else ""
-        raise YosysAnalysisError(f"Yosys structural analysis failed ({result.returncode}): {tail}")
+    if process.returncode != 0:
+        tail = process_output[-2000:] if process_output else ""
+        raise YosysAnalysisError(
+            f"Yosys structural analysis failed ({process.returncode}): {tail}"
+        )
 
     hierarchy = summarize_stat(load_json(hierarchy_stat), load_json(hierarchy_width_stat))
+    post_flatten = summarize_stat(
+        load_json(post_flatten_stat), load_json(post_flatten_width_stat)
+    )
     paths = {TOP: parse_ltp(top_ltp)}
     paths.update({module: parse_ltp(path) for module, path in module_ltp.items()})
     tool_identity = {
@@ -488,6 +572,8 @@ def run_analyze(args: argparse.Namespace) -> int:
         "log": log,
         "hierarchy_stat": hierarchy_stat,
         "hierarchy_width_stat": hierarchy_width_stat,
+        "post_flatten_stat": post_flatten_stat,
+        "post_flatten_width_stat": post_flatten_width_stat,
         "top_ltp": top_ltp,
         **{f"ltp_{module}": path for module, path in module_ltp.items()},
     }.items():
@@ -511,11 +597,14 @@ def run_analyze(args: argparse.Namespace) -> int:
             "config_sha256": config_sha256,
             "elapsed_seconds": round(elapsed, 3),
             "hierarchy": hierarchy,
+            "post_flatten": post_flatten,
             "paths": paths,
             "interpretation": (
-                "Generic cell objects, word-width-weighted operation bits, and LTP node counts "
-                "are early structural proxies. Word-bit weighting prevents vector packing from "
-                "appearing as free area, but none of these metrics is a LUT/FF estimate, "
+                "Hierarchy statistics preserve ownership but can include logic later pruned; "
+                "post-flatten statistics expose the optimized whole-core structure. Scoped LTP "
+                "first flattens each target module so child-port feedback does not create false "
+                "combinational-loop paths. Generic cells, word-width-weighted operation bits, "
+                "and LTP nodes remain early structural proxies, not LUT/FF estimates, "
                 "placement-aware delay, WNS, or a Vivado gate."
             ),
         },
@@ -526,6 +615,7 @@ def run_analyze(args: argparse.Namespace) -> int:
     print(
         f"Yosys {args.label}: cells={hierarchy['total_cells']}, "
         f"word_bits={hierarchy['total_word_bits']}, "
+        f"post_flatten_cells={post_flatten['total_cells']}, "
         f"top_ltp={paths[TOP]['length']}, elapsed={elapsed:.2f}s"
     )
     print(out / "summary.json")
@@ -544,6 +634,12 @@ def run_compare(args: argparse.Namespace) -> int:
         f"Yosys word bits: {summary['baseline_word_bits']} -> "
         f"{summary['candidate_word_bits']} "
         f"({summary['delta_word_bits_percent']:+.3f}%)"
+    )
+    print(
+        "Yosys post-flatten cells: "
+        f"{summary['baseline_post_flatten_cells']} -> "
+        f"{summary['candidate_post_flatten_cells']} "
+        f"({summary['delta_post_flatten_percent']:+.3f}%)"
     )
     for row in comparison["module_deltas"][:12]:
         if row["delta_cells"]:
@@ -564,6 +660,7 @@ def main() -> int:
     analyze.add_argument("--label", required=True)
     analyze.add_argument("--yosys", default="/usr/bin/yosys")
     analyze.add_argument("--timeout", type=int, default=180)
+    analyze.add_argument("--max-ltp-mb", type=int, default=8)
     analyze.set_defaults(run=run_analyze)
     compare = subparsers.add_parser("compare")
     compare.add_argument("--baseline", type=Path, required=True)

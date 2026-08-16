@@ -98,14 +98,18 @@ suite、memory mode、software key 与 workload/seed 集合一致。模型和 CP
 
 `yosys-analyze` 不依赖 `cpu-generate`，只读取调用方显式指定的冻结 RTL，并把输入快照、
 RTL hash、锁定 Yosys 身份、分析脚本、层次统计和 LTP 原始输出封装到不可覆盖的报告目录。
-它按真实实例数同时汇总 generic cell 对象数和 `stat -width` 的操作位宽归一化 word-bits，
-并对 frontend、predictor、IQ/dispatch、ROB/rename、LSQ、cache/L2 等关键模块输出最长
-组合拓扑节点数。cell 对象数用于观察结构展开，word-bits 用于避免向量打包造成虚假的面积
-下降；`yosys-compare` 只接受
+它按真实实例数同时汇总保留归属关系的 hierarchy generic cells 和 `stat -width` word-bits，
+再给出经过整核 flatten/`opt_clean` 后的全局统计，用来区分局部结构迁移与真正被剪枝后的整核
+压力。关键模块在计算 LTP 前会单独展开其子层级，避免把子模块端口反馈误报成超长组合环；原始
+LTP 文件因此保持在可审计的小尺寸。cell 对象数用于观察结构展开，word-bits 用于避免向量
+打包造成虚假的面积下降；`yosys-compare` 只接受
 Yosys 工具身份和分析配置完全相同的两份报告，避免把工具变化误记为候选变化。
+每个 LTP 原始文件还有默认 8 MiB 的硬上限；若 Yosys 因新层级反馈产生异常规模的假环诊断，
+harness 会终止分析并删除超限文件，不能生成可用于候选决策的半成品报告。
 
-这些指标用于综合前发现容量扩张、宽 mux、局部深链和压力集中的模块。generic cells 和
-word-bits 都不是 Vivado LUT/FF，raw LTP 不包含器件映射、布线和时钟约束，均不能替代 matching direct
+这些指标用于综合前发现容量扩张、宽 mux、局部深链和压力集中的模块。hierarchy 统计可能包含
+后续会被剪枝的逻辑，post-flatten 统计也仍未做 FPGA 器件映射；generic cells 和 word-bits 都
+不是 Vivado LUT/FF，LTP 不包含器件映射、布线和时钟约束，均不能替代 matching direct
 full implementation 的 WNS/TNS、资源、DRC 和 fully-routed 门禁。完整 `synth_xilinx`
 包含昂贵的资源共享、memory/techmap 与器件映射，不进入日常 harness；只有明确的深度
 研究需要时才单独运行并限制日志与资源。

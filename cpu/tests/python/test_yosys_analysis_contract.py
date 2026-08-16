@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 
@@ -11,6 +12,7 @@ sys.path.insert(0, str(ROOT / "scripts/experiment"))
 from yosys_analyze import (
     YosysAnalysisError,
     compare_reports,
+    oversized_ltp,
     parse_ltp_text,
     summarize_stat,
 )
@@ -18,7 +20,7 @@ from yosys_analyze import (
 
 def fixture_report(*, cells: int = 12, rtl_hash: str = "a" * 64) -> dict:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "kind": "yosys-structural-analysis",
         "input": {"label": "fixture", "rtl_sha256": rtl_hash},
         "tool": {"identity_sha256": "b" * 64},
@@ -33,6 +35,17 @@ def fixture_report(*, cells: int = 12, rtl_hash: str = "a" * 64) -> dict:
                     "Worker": {
                         "contribution_cells": cells - 2,
                         "contribution_word_bits": (cells - 2) * 2,
+                    },
+                },
+            },
+            "post_flatten": {
+                "total_cells": cells - 1,
+                "total_memory_bits": 64,
+                "total_word_bits": cells * 2 - 2,
+                "modules": {
+                    "core_top": {
+                        "contribution_cells": cells - 1,
+                        "contribution_word_bits": cells * 2 - 2,
                     },
                 },
             },
@@ -57,6 +70,14 @@ class YosysAnalysisContractTest(unittest.TestCase):
         self.assertEqual(result["start"], "\\source [0]")
         self.assertEqual(result["endpoint"], "\\destination [0]")
         self.assertNotIn("mycpu_top.v:10", " ".join(result["head"] + result["tail"]))
+
+    def test_ltp_size_gate_rejects_only_oversized_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            small = Path(directory) / "small.txt"
+            large = Path(directory) / "large.txt"
+            small.write_bytes(b"x" * 8)
+            large.write_bytes(b"x" * 9)
+            self.assertEqual(oversized_ltp([small, large], 8), [(large, 9)])
 
     def test_hierarchy_weights_shared_module_instances(self) -> None:
         summary = summarize_stat({
@@ -125,6 +146,8 @@ class YosysAnalysisContractTest(unittest.TestCase):
         self.assertEqual(result["summary"]["delta_cells"], 5)
         self.assertAlmostEqual(result["summary"]["delta_percent"], 100 * 5 / 12)
         self.assertEqual(result["summary"]["delta_word_bits"], 10)
+        self.assertEqual(result["summary"]["delta_post_flatten_cells"], 5)
+        self.assertEqual(result["summary"]["delta_post_flatten_word_bits"], 10)
         self.assertEqual(result["module_deltas"][0]["module"], "Worker")
         self.assertEqual(result["path_deltas"][0]["delta_length"], 2)
 

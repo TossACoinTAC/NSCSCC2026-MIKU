@@ -62,6 +62,7 @@ YOSYS_BASE_REPORT ?=
 YOSYS_CANDIDATE_REPORT ?=
 YOSYS_COMPARE_OUT ?= $(BUILD_ROOT)/reports/yosys/compare-$(shell date +%Y%m%d-%H%M%S).json
 YOSYS_ANALYSIS_TIMEOUT ?= 180
+YOSYS_LTP_MAX_MB ?= 8
 BOARD_JOB ?=
 POST_ROUTE_INPUT_DCP ?= $(BUILD_ROOT)/chiplab-perf/fpga/nscscc-team/run_vivado/project/loongson.runs/impl_1/soc_top_routed.dcp
 POST_ROUTE_OUTPUT ?= $(BUILD_ROOT)/vivado/postroute-$(shell date +%Y%m%d-%H%M%S)
@@ -177,7 +178,8 @@ yosys-analyze:
 	@test -f "$(YOSYS_RTL)" || { printf 'YOSYS_RTL 不存在: %s\n' "$(YOSYS_RTL)" >&2; exit 2; }
 	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/experiment/yosys_analyze.py" analyze \
 		--rtl "$(YOSYS_RTL)" --label "$(YOSYS_LABEL)" --out "$(YOSYS_ANALYSIS_OUT)" \
-		--yosys /usr/bin/yosys --timeout "$(YOSYS_ANALYSIS_TIMEOUT)"
+		--yosys /usr/bin/yosys --timeout "$(YOSYS_ANALYSIS_TIMEOUT)" \
+		--max-ltp-mb "$(YOSYS_LTP_MAX_MB)"
 
 yosys-compare:
 	@test -f "$(YOSYS_BASE_REPORT)" || { printf 'YOSYS_BASE_REPORT 不存在: %s\n' "$(YOSYS_BASE_REPORT)" >&2; exit 2; }
