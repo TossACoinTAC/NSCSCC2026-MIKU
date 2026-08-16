@@ -88,6 +88,7 @@ class RegisterStructuresSpec extends AnyFunSuite {
   private def clearFreeListInputs(dut: PhysicalRegisterFreeList, config: OooCoreConfig): Unit = {
     dut.io.allocateValid #= 0
     dut.io.allocateAccept #= false
+    dut.io.allocateAcceptMask #= 0
     dut.io.commitFreeValid #= 0
     dut.io.flush #= false
     for (lane <- 0 until config.commitWidth) {
@@ -391,6 +392,34 @@ class RegisterStructuresSpec extends AnyFunSuite {
         sleep(1)
         assert(dut.io.allocateReady.toBoolean)
         assert(!dut.io.allocateCapacityReady.toBoolean)
+      }
+  }
+
+  test("free list accept mask cannot consume tags for non-writing uops") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-free-list")
+      .compile(new PhysicalRegisterFreeList(config))
+      .doSim("ooo-free-list-qualified-accept-mask", 0x4655) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearFreeListInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        freeListSample(dut)
+
+        // The backend may accept three uops while only lane zero writes a GPR.
+        // Even a defensively over-broad accept mask must consume exactly p1.
+        dut.io.allocateValid #= 1
+        dut.io.allocateAccept #= true
+        dut.io.allocateAcceptMask #= 7
+        checkAllocation(dut, Seq(1))
+        freeListSample(dut)
+
+        dut.io.allocateAccept #= false
+        dut.io.allocateAcceptMask #= 0
+        dut.io.allocateValid #= 7
+        checkAllocation(dut, Seq(2, 3, 4))
       }
   }
 }

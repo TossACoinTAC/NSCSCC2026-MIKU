@@ -69,7 +69,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val allocate = in Vec (ReorderBufferAllocate(config), config.renameWidth)
     val allocateReady = out Bool ()
     val allocateCapacityReady = out Bool ()
+    val allocateOldestReady = out Bool ()
     val allocateAccept = in Bool ()
+    val allocateAcceptMask = in Bits (config.renameWidth bits)
     val allocatedPointer = out Vec (UInt(config.robPointerWidth bits), config.renameWidth)
 
     val completionValid = in Bits (config.writebackWidth bits)
@@ -129,8 +131,15 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
 
   val requested = allocatePrefix(config.renameWidth)
   val freeSlots = U(config.robEntries, occupancy.getWidth bits) - occupancy
+  val acceptedMask = Bits(config.renameWidth bits)
+  acceptedMask := Mux(
+    io.allocateAcceptMask.orR,
+    io.allocateAcceptMask,
+    Mux(io.allocateAccept, io.allocateValid, B(0, config.renameWidth bits))
+  )
   io.allocateCapacityReady := freeSlots >= requested
   io.allocateReady := !io.flush && io.allocateCapacityReady
+  io.allocateOldestReady := !io.flush && freeSlots =/= 0
 
   val allocationPayload = Vec(ReorderBufferPayload(config), config.renameWidth)
   for (lane <- 0 until config.renameWidth) {
@@ -169,7 +178,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       io.allocate(lane).uop.decoded.predictorMetadata
     allocationPayload(lane).decodedException := io.allocate(lane).uop.decoded.exception
 
-    when(io.allocateAccept && io.allocateValid(lane)) {
+    when(acceptedMask(lane)) {
       val destination = allocationDestination(lane)
       entries(destination(config.robIndexWidth - 1 downto 0)).valid := True
       entries(destination(config.robIndexWidth - 1 downto 0)).complete :=
@@ -216,7 +225,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     stagedAllocationValid := 0
   }.otherwise {
     for (lane <- 0 until config.renameWidth) {
-      stagedAllocationValid(lane) := io.allocateAccept && io.allocateValid(lane)
+      stagedAllocationValid(lane) := acceptedMask(lane)
       stagedAllocationPointer(lane) := allocationDestination(lane)
     }
   }
@@ -236,7 +245,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   for (bank <- 0 until payloadBankCount) {
     val writeMask = Bits(config.renameWidth bits)
     for (lane <- 0 until config.renameWidth) {
-      writeMask(lane) := io.allocateAccept && io.allocateValid(lane) &&
+      writeMask(lane) := acceptedMask(lane) &&
         allocationDestination(lane)(payloadBankWidth - 1 downto 0) ===
         U(bank, payloadBankWidth bits)
     }
@@ -661,8 +670,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       entry.serializing := False
     }
   }.otherwise {
-    when(io.allocateAccept) {
-      allocatePointer := allocatePointer + requested
+    when(acceptedMask.orR) {
+      allocatePointer := allocatePointer + CountOne(acceptedMask)
     }
     for (lane <- 0 until config.commitWidth) {
       when(io.commitValid(lane)) {
@@ -671,7 +680,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       }
     }
     commitPointer := commitPointer + committedCount
-    occupancy := occupancy + Mux(io.allocateAccept, requested, 0) - committedCount
+    occupancy := occupancy + CountOne(acceptedMask) - committedCount
   }
 
   io.empty := occupancy === 0

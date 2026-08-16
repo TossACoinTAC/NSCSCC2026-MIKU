@@ -77,6 +77,9 @@ final case class OooCoreConfig(
     commitWidth: Int = 3,
     writebackWidth: Int = 5,
     physicalRegs: Int = 64,
+    // Admit the oldest rename uop when a complete group cannot fit, then compact
+    // the remaining decode-buffer entries behind it.
+    enableRenameOldestFallback: Boolean = true,
     robEntries: Int = 32,
     instructionBufferEntries: Int = 16,
     dispatchQueueEntries: Int = 8,

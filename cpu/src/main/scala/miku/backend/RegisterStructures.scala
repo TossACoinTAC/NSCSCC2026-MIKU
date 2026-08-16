@@ -224,7 +224,9 @@ final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourI
     val allocatePdst = out Vec (UInt(config.physicalRegIndexWidth bits), config.renameWidth)
     val allocateReady = out Bool ()
     val allocateCapacityReady = out Bool ()
+    val allocateOldestReady = out Bool ()
     val allocateAccept = in Bool ()
+    val allocateAcceptMask = in Bits (config.renameWidth bits)
     val commitFreeValid = in Bits (config.commitWidth bits)
     val commitFreePdst = in Vec (UInt(config.physicalRegIndexWidth bits), config.commitWidth)
     val flush = in Bool ()
@@ -259,12 +261,24 @@ final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourI
 
   val requested = CountOne(io.allocateValid)
   io.allocateReady := !io.flush && freeCount >= requested
+  io.allocateOldestReady := !io.flush && freeCount >= io.allocateValid(0).asUInt
   // The global rename decision must not depend on destination decode and its
   // CountOne cone. Reserve enough registers for a worst-case rename group;
   // the exact ready signal remains available for local contract checks.
   io.allocateCapacityReady := freeCount >= U(config.renameWidth, countWidth bits)
 
-  val acceptedCount = Mux(io.allocateAccept, requested, U(0, requested.getWidth bits))
+  // Keep standalone structure tests and older wrappers source-compatible: a
+  // legacy boolean accept still means the complete request group is accepted.
+  val acceptedMask = Bits(config.renameWidth bits)
+  acceptedMask := Mux(
+    io.allocateAcceptMask.orR,
+    io.allocateAcceptMask,
+    Mux(io.allocateAccept, io.allocateValid, B(0, config.renameWidth bits))
+  )
+  // An accepted uop without a GPR destination consumes no physical register.
+  // Qualify both here and at the backend boundary so a uop-accept mask can
+  // never drain the FreeList with stores, branches, or serial operations.
+  val acceptedCount = CountOne(acceptedMask & io.allocateValid)
   val releaseValid = Bits(config.commitWidth bits)
   for (lane <- 0 until config.commitWidth) {
     releaseValid(lane) := io.commitFreeValid(lane) && io.commitFreePdst(lane) =/= 0

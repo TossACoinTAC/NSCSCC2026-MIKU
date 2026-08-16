@@ -106,6 +106,7 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
   }
   rob.io.allocateValid := io.allocateValid
   rob.io.allocateAccept := io.allocateAccept
+  rob.io.allocateAcceptMask := Mux(io.allocateAccept, io.allocateValid, B(0, config.renameWidth bits))
   rob.io.flush := io.flush
 
   io.allocateReady := rob.io.allocateReady

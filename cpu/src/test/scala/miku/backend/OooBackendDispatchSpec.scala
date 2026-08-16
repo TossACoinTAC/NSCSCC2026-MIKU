@@ -619,6 +619,45 @@ class OooBackendDispatchSpec extends AnyFunSuite {
       }
   }
 
+  test("rename oldest fallback admits lane zero when a complete group is blocked") {
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+        "/sim-workspace-ooo-backend-dispatch")
+      .compile(new OooBackendDispatchProbe(config.copy(enableRenameOldestFallback = true)))
+      .doSim("ooo-backend-rename-oldest-fallback", 0x4cA1) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearControl(dut)
+        // Keep execution stopped until the rename-side queues expose a real
+        // resource boundary; the test must observe partial acceptance rather
+        // than merely a decode bubble.
+        dut.io.issueReady #= 0
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        val basePc = BigInt("1c100000", 16)
+        var partialObserved = false
+        var cycles = 0
+        while (!partialObserved && cycles < 64) {
+          dut.io.inputValid #= 7
+          for (lane <- 0 until config.renameWidth) {
+            dut.io.pc(lane) #= basePc + (cycles * config.renameWidth + lane) * 4
+            dut.io.instruction(lane) #= (BigInt("02800000", 16) | (lane + 1))
+          }
+          sleep(1)
+          val ready = dut.io.renameReady.toBigInt
+          if (ready == 1) {
+            partialObserved = true
+          }
+          dut.clockDomain.waitSampling()
+          cycles += 1
+        }
+        assert(partialObserved, s"no oldest-lane fallback observed after $cycles cycles")
+        dut.io.inputValid #= 0
+      }
+  }
+
   test("registered LSU address buffering preserves ordered issues across backpressure") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-backend-dispatch")

@@ -16,7 +16,9 @@ final class DispatchQueue(
     val enqueueValid = in Bits (config.renameWidth bits)
     val enqueue = in Vec (RenamedMicroOp(config), config.renameWidth)
     val enqueueReady = out Bool ()
+    val enqueueOldestReady = out Bool ()
     val enqueueAccept = in Bool ()
+    val enqueueAcceptMask = in Bits (config.renameWidth bits)
 
     val dequeueValid = out Bits (config.dispatchWidth bits)
     val dequeue = out Vec (RenamedMicroOp(config), config.dispatchWidth)
@@ -39,6 +41,7 @@ final class DispatchQueue(
   val enqueueCount = enqueuePrefix(config.renameWidth)
   val freeSlots = U(config.dispatchQueueEntries, countWidth bits) - count
   io.enqueueReady := freeSlots >= enqueueCount
+  io.enqueueOldestReady := freeSlots =/= 0
 
   for (lane <- 0 until config.dispatchWidth) {
     io.dequeueValid(lane) := count > U(lane, countWidth bits)
@@ -47,22 +50,28 @@ final class DispatchQueue(
   }
   val dequeueFire = io.dequeueValid & io.dequeueReady
   val dequeueCount = CountOne(dequeueFire)
+  val acceptedMask = Bits(config.renameWidth bits)
+  acceptedMask := Mux(
+    io.enqueueAcceptMask.orR,
+    io.enqueueAcceptMask,
+    Mux(io.enqueueAccept, io.enqueueValid, B(0, config.renameWidth bits))
+  )
 
   when(io.flush) {
     head := tail
     count := U(0, countWidth bits)
   }.otherwise {
-    when(io.enqueueAccept) {
+    when(acceptedMask.orR) {
       for (lane <- 0 until config.renameWidth) {
-        when(io.enqueueValid(lane)) {
+        when(acceptedMask(lane)) {
           val destination = (tail + enqueuePrefix(lane)).resized
           entries(destination) := io.enqueue(lane)
         }
       }
-      tail := tail + enqueueCount
+      tail := tail + CountOne(acceptedMask)
     }
     head := head + dequeueCount
-    count := count + Mux(io.enqueueAccept, enqueueCount, U(0, prefixWidth bits)) -
+    count := count + CountOne(acceptedMask) -
       dequeueCount
   }
 

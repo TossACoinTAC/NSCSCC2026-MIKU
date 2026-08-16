@@ -241,6 +241,9 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val resourcesReady = dispatchQueue.io.enqueueReady &&
     rob.io.allocateCapacityReady && freeList.io.allocateCapacityReady &&
     lsqAllocator.io.allocateCapacityReady && !io.flush
+  val oldestReady = dispatchQueue.io.enqueueOldestReady &&
+    rob.io.allocateOldestReady && freeList.io.allocateOldestReady &&
+    lsqAllocator.io.allocateOldestReady && !io.flush
   val observationRenamePresent = io.renameValid.orR && !io.flush
   rob.io.observationRenameAdmission(0) := observationRenamePresent
   rob.io.observationRenameAdmission(1) := observationRenamePresent && !resourcesReady
@@ -258,11 +261,24 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     lsqAllocator.io.allocateCapacityReady
   rob.io.observationRenameAdmission(7) :=
     observationRenamePresent && !lsqAllocator.io.allocateCapacityReady
-  val acceptAll = resourcesReady && io.renameValid.orR
   val accepted = Bits(config.renameWidth bits)
   val allLanes = B((BigInt(1) << config.renameWidth) - 1, config.renameWidth bits)
-  accepted := Mux(acceptAll, io.renameValid, B(0, config.renameWidth bits))
-  io.renameReady := Mux(resourcesReady, allLanes, B(0, config.renameWidth bits))
+  val acceptAll = resourcesReady && io.renameValid.orR
+  val acceptOldest = if (config.enableRenameOldestFallback) {
+    !resourcesReady && io.renameValid(0) && oldestReady
+  } else {
+    False
+  }
+  accepted := B(0, config.renameWidth bits)
+  when(acceptAll) {
+    accepted := io.renameValid
+  }.elsewhen(acceptOldest) {
+    accepted(0) := True
+  }
+  // Preserve the elastic ready contract for a group that would fit: all input
+  // lanes may arrive next cycle. A partial fallback exposes only the consumed
+  // oldest lane so the decode buffer compacts the remainder.
+  io.renameReady := Mux(resourcesReady, allLanes, accepted)
 
   val acceptedBarrier = Bits(config.renameWidth bits)
   for (lane <- 0 until config.renameWidth) {
@@ -317,10 +333,17 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     registerMap.io.renamePdst(lane) := freeList.io.allocatePdst(lane)
   }
 
-  rob.io.allocateAccept := acceptAll
-  freeList.io.allocateAccept := acceptAll
-  lsqAllocator.io.allocateAccept := acceptAll
-  dispatchQueue.io.enqueueAccept := acceptAll
+  rob.io.allocateAccept := accepted.orR
+  rob.io.allocateAcceptMask := accepted
+  freeList.io.allocateAccept := accepted.orR
+  // Keep the accepted-uop identity nonzero even when the oldest accepted uop
+  // has no GPR destination. The FreeList qualifies this mask with
+  // allocateValid internally, avoiding ambiguity with the legacy boolean path.
+  freeList.io.allocateAcceptMask := accepted
+  lsqAllocator.io.allocateAccept := accepted.orR
+  lsqAllocator.io.allocateAcceptMask := accepted
+  dispatchQueue.io.enqueueAccept := accepted.orR
+  dispatchQueue.io.enqueueAcceptMask := accepted
   lsqAllocator.io.releaseLoadValid := io.releaseLoadValid
   lsqAllocator.io.releaseStoreValid := io.releaseStoreValid
   lsqAllocator.io.flush := io.flush

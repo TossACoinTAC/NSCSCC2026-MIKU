@@ -17,7 +17,9 @@ final class LoadStoreQueueAllocator(config: OooCoreConfig = OooCoreConfig.FourIs
     val allocateStoreIndex = out Vec (UInt(config.storeQueueIndexWidth bits), config.renameWidth)
     val allocateReady = out Bool ()
     val allocateCapacityReady = out Bool ()
+    val allocateOldestReady = out Bool ()
     val allocateAccept = in Bool ()
+    val allocateAcceptMask = in Bits (config.renameWidth bits)
 
     val releaseLoadValid = in Bits (config.commitWidth bits)
     val releaseStoreValid = in Bits (config.commitWidth bits)
@@ -50,21 +52,31 @@ final class LoadStoreQueueAllocator(config: OooCoreConfig = OooCoreConfig.FourIs
   val storeFree = U(config.storeQueueEntries, countWidth bits) - storeOccupancy
   io.allocateCapacityReady := loadFree >= loadRequested && storeFree >= storeRequested
   io.allocateReady := !io.flush && io.allocateCapacityReady
+  io.allocateOldestReady := !io.flush &&
+    loadFree >= io.allocateIsLoad(0).asUInt && storeFree >= io.allocateIsStore(0).asUInt
 
   val loadReleased = CountOne(io.releaseLoadValid)
   val storeReleased = CountOne(io.releaseStoreValid)
+  val acceptedMask = Bits(config.renameWidth bits)
+  acceptedMask := Mux(
+    io.allocateAcceptMask.orR,
+    io.allocateAcceptMask,
+    Mux(io.allocateAccept, io.allocateValid, B(0, config.renameWidth bits))
+  )
   when(io.flush) {
     loadTail := U(0, config.loadQueueIndexWidth bits)
     storeTail := U(0, config.storeQueueIndexWidth bits)
     loadOccupancy := U(0, countWidth bits)
     storeOccupancy := U(0, countWidth bits)
   }.otherwise {
-    when(io.allocateAccept) {
-      loadTail := loadTail + loadRequested
-      storeTail := storeTail + storeRequested
+    val acceptedLoadCount = CountOne(acceptedMask & io.allocateIsLoad)
+    val acceptedStoreCount = CountOne(acceptedMask & io.allocateIsStore)
+    when(acceptedMask.orR) {
+      loadTail := loadTail + acceptedLoadCount
+      storeTail := storeTail + acceptedStoreCount
     }
-    loadOccupancy := loadOccupancy + Mux(io.allocateAccept, loadRequested, 0) - loadReleased
-    storeOccupancy := storeOccupancy + Mux(io.allocateAccept, storeRequested, 0) - storeReleased
+    loadOccupancy := loadOccupancy + acceptedLoadCount - loadReleased
+    storeOccupancy := storeOccupancy + acceptedStoreCount - storeReleased
   }
 
   io.loadOccupancy := loadOccupancy

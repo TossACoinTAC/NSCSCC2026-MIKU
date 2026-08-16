@@ -24,15 +24,42 @@ final class DecodeRenameBuffer(
   val valid = Reg(Bits(config.renameWidth bits)) init (0)
   val payload = Vec.fill(config.renameWidth)(Reg(DecodedMicroOp(config)))
   val outputAccepted = (valid & ~io.outputReady) === 0
+  // A01-min consumes only the oldest lane when backend resources cannot accept
+  // the complete group. Keep younger entries and refill the freed tail.
+  val partialOutput = valid(0) && io.outputReady(0) &&
+    ((valid & ~io.outputReady) =/= 0)
   val replace = !valid.orR || outputAccepted
   val allLanes = B((BigInt(1) << config.decodeWidth) - 1, config.decodeWidth bits)
+  val partialInputReady = Bits(config.decodeWidth bits)
+  partialInputReady := 0
+  when(valid(2)) {
+    partialInputReady := B(1, config.decodeWidth bits)
+  }.elsewhen(valid(1)) {
+    partialInputReady := B(3, config.decodeWidth bits)
+  }
 
-  io.inputReady := Mux(replace && !io.flush, allLanes, B(0, config.decodeWidth bits))
+  io.inputReady := Mux(
+    partialOutput && !io.flush,
+    partialInputReady,
+    Mux(replace && !io.flush, allLanes, B(0, config.decodeWidth bits))
+  )
   io.outputValid := valid
   io.output := payload
 
   when(io.flush) {
     valid := 0
+  }.elsewhen(partialOutput) {
+    when(valid(2)) {
+      payload(0) := payload(1)
+      payload(1) := payload(2)
+      when(io.inputValid(0)) { payload(2) := io.input(0) }
+      valid := Cat(io.inputValid(0), B(3, 2 bits))
+    }.elsewhen(valid(1)) {
+      payload(0) := payload(1)
+      when(io.inputValid(0)) { payload(1) := io.input(0) }
+      when(io.inputValid(1)) { payload(2) := io.input(1) }
+      valid := Cat(io.inputValid(1), io.inputValid(0), True)
+    }
   }.elsewhen(replace) {
     valid := io.inputValid
     for (lane <- 0 until config.renameWidth) {

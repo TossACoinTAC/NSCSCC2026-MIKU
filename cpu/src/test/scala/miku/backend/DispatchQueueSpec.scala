@@ -23,6 +23,7 @@ private final class DispatchQueueProbe(config: OooCoreConfig) extends Component 
   queue.io.enqueueValid := io.enqueueValid
   queue.io.enqueue := io.enqueue
   queue.io.enqueueAccept := io.enqueueAccept
+  queue.io.enqueueAcceptMask := Mux(io.enqueueAccept, io.enqueueValid, B(0, config.renameWidth bits))
   queue.io.dequeueReady := io.dequeueReady
   queue.io.flush := io.flush
   io.enqueueReady := queue.io.enqueueReady
