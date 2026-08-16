@@ -131,11 +131,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val payloadBanks = Array.fill(payloadBankCount)(Mem(Bits(payloadWidth bits), payloadDepth))
   val retirementMetadataBanks =
     Array.fill(payloadBankCount)(Mem(Bits(retirementMetadataWidth bits), payloadDepth))
-  // A producer owns the only write port of each memory.  Replicating once per
-  // commit lane gives three independent synchronous reads without a wide
-  // multi-write register file in the ROB entries.
-  val completionPayloadMemories = Array.fill(config.writebackWidth, config.commitWidth)(
-    Mem(Bits(completionPayloadWidth bits), config.robEntries)
+  // A producer owns one write per cycle, while three consecutive commit pointers
+  // always select distinct low-two-bit banks.  Four shallow banks therefore provide
+  // the required one-write/three-read bandwidth without three full-depth replicas.
+  val completionPayloadMemories = Array.fill(config.writebackWidth, payloadBankCount)(
+    Mem(Bits(completionPayloadWidth bits), payloadDepth)
   )
   val appliedCompletionValid = Reg(Bits(config.writebackWidth bits)) init (0)
   val appliedCompletionPointer = Vec.fill(config.writebackWidth)(
@@ -308,31 +308,37 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val payloadBankRead = Vec(Bits(payloadWidth bits), payloadBankCount)
   val retirementMetadataBankRead =
     Vec(Bits(retirementMetadataWidth bits), payloadBankCount)
+  val payloadBankReadLane = Vec(UInt(log2Up(config.commitWidth) bits), payloadBankCount)
   for (bank <- 0 until payloadBankCount) {
     val readMask = Bits(config.commitWidth bits)
     for (lane <- 0 until config.commitWidth) {
       readMask(lane) := payloadReadPointer(lane)(payloadBankWidth - 1 downto 0) ===
         U(bank, payloadBankWidth bits)
     }
-    val readLane = selectLowest(readMask, log2Up(config.commitWidth))
+    payloadBankReadLane(bank) := selectLowest(readMask, log2Up(config.commitWidth))
     payloadBankRead(bank) := payloadBanks(bank).readSync(
-      address = payloadReadPointer(readLane)(
+      address = payloadReadPointer(payloadBankReadLane(bank))(
         config.robIndexWidth - 1 downto payloadBankWidth
       ),
       enable = True
     )
     retirementMetadataBankRead(bank) := retirementMetadataBanks(bank).readSync(
-      address = payloadReadPointer(readLane)(
+      address = payloadReadPointer(payloadBankReadLane(bank))(
         config.robIndexWidth - 1 downto payloadBankWidth
       ),
       enable = True
     )
   }
 
-  val completionPayloadRead = Array.tabulate(config.writebackWidth, config.commitWidth) {
-    (producerLane, commitLane) =>
-      completionPayloadMemories(producerLane)(commitLane).readSync(
-        address = payloadReadPointer(commitLane)(config.robIndexWidth - 1 downto 0),
+  val completionPayloadBankRead = Vec.fill(config.writebackWidth)(
+    Vec.fill(payloadBankCount)(Bits(completionPayloadWidth bits))
+  )
+  for (producerLane <- 0 until config.writebackWidth; bank <- 0 until payloadBankCount) {
+    completionPayloadBankRead(producerLane)(bank) :=
+      completionPayloadMemories(producerLane)(bank).readSync(
+        address = payloadReadPointer(payloadBankReadLane(bank))(
+          config.robIndexWidth - 1 downto payloadBankWidth
+        ),
         enable = True
       )
   }
@@ -354,7 +360,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     selectedCompletionPayload := 0
     for (producerLane <- 0 until config.writebackWidth) {
       when(candidates(lane).state.completionSource === producerLane) {
-        selectedCompletionPayload := completionPayloadRead(producerLane)(lane)
+        selectedCompletionPayload := completionPayloadBankRead(producerLane)(bank)
       }
       // A completion can make lane 1 or 2 eligible on the same edge that its
       // synchronous memory is written.  Define that case explicitly instead
@@ -609,11 +615,15 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       laneMatches(entryIndex) := stagedCompletionMatches(entryIndex)(lane)
     }
     completionWriteValid(lane) := !io.flush && laneMatches.orR
-    for (commitLane <- 0 until config.commitWidth) {
-      completionPayloadMemories(lane)(commitLane).write(
-        address = stagedRobPointer(lane)(config.robIndexWidth - 1 downto 0),
+    for (bank <- 0 until payloadBankCount) {
+      completionPayloadMemories(lane)(bank).write(
+        address = stagedRobPointer(lane)(
+          config.robIndexWidth - 1 downto payloadBankWidth
+        ),
         data = stagedCompletionPayload(lane).asBits,
-        enable = completionWriteValid(lane)
+        enable = completionWriteValid(lane) &&
+          stagedRobPointer(lane)(payloadBankWidth - 1 downto 0) ===
+          U(bank, payloadBankWidth bits)
       )
     }
   }

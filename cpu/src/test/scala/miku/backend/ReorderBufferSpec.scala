@@ -512,7 +512,8 @@ class ReorderBufferSpec extends AnyFunSuite {
 
   test("banked ROB payload remains ordered across the physical index wrap") {
     val config = OooCoreConfig.FourIssueThreeCommit.copy(
-      enableHeadCompletionCommitBypass = true
+      enableHeadCompletionCommitBypass = false,
+      enableBranchHeadCompletionBypass = false
     )
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-rob")
@@ -543,9 +544,11 @@ class ReorderBufferSpec extends AnyFunSuite {
           dut.io.completionRobPointer(0) #= pointer
           dut.io.completionValid #= 1
           sample()
+          assert(dut.io.commitValid.toBigInt == 0)
+          dut.io.completionValid #= 0
+          sample()
           assert(dut.io.commitValid.toBigInt == 1)
           assert(dut.io.commitPc(0).toBigInt == index)
-          dut.io.completionValid #= 0
           sample()
           assert(dut.io.occupancy.toBigInt == 0)
         }
@@ -566,16 +569,25 @@ class ReorderBufferSpec extends AnyFunSuite {
         dut.io.allocateAccept #= false
         for (lane <- 0 until config.commitWidth) {
           dut.io.completionRobPointer(lane) #= pointers(lane)
+          dut.io.completionData(lane) #= BigInt(0xc031 + lane)
+          dut.io.completionSideEffectData(lane) #= BigInt(0xd031 + lane)
         }
         dut.io.completionValid #= 7
         sample()
-        assert(dut.io.commitValid.toBigInt == 1)
-        assert(dut.io.commitPc(0).toBigInt == 0x31)
+        assert(dut.io.commitValid.toBigInt == 0)
         dut.io.completionValid #= 0
         sample()
-        assert(dut.io.commitValid.toBigInt == 3)
+        assert(dut.io.commitValid.toBigInt == 7)
         assert(
-          (0 until 2).map(lane => dut.io.commitPc(lane).toBigInt) == Seq(0x32, 0x33)
+          (0 until 3).map(lane => dut.io.commitPc(lane).toBigInt) == Seq(0x31, 0x32, 0x33)
+        )
+        assert(
+          (0 until 3).map(lane => dut.io.commitResult(lane).toBigInt) ==
+            Seq(BigInt(0xc031), BigInt(0xc032), BigInt(0xc033))
+        )
+        assert(
+          (0 until 3).map(lane => dut.io.commitSideEffectData(lane).toBigInt) ==
+            Seq(BigInt(0xd031), BigInt(0xd032), BigInt(0xd033))
         )
         sample()
         assert(dut.io.occupancy.toBigInt == 0)
