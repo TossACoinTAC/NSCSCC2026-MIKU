@@ -386,6 +386,25 @@ word-bits `479,449 -> 474,011`（`-1.134%`），RenameMap `13,723 -> 8,285`
 `build/reports/yosys/R8-RT04-vs-RT05-default-word-v1.json` 和
 `build/reports/yosys/R8-RT04-vs-RT05-R02-expanded-word-v1.json`。
 
+### RT06：FreeList 四 bank 存储
+
+RT06 利用三宽连续分配与回收不会在同拍命中相同低两位 bank 的性质，把 64/128 项循环
+FreeList 拆成四个单读单写寄存器 bank。allocate 输出仍是组合可见，release、pointer wrap、
+architectural snapshot 和 flush 均保持原边沿；默认与 expanded-window 测试各运行两倍物理
+寄存器数的 sparse mask、同拍 recycle 和多次 wrap，并继续复用原有 flush/commit 合同。
+
+`563633f` 的 RegisterStructures suite 12/12、完整 `cpu-check`、strict-zero lint 和合同门禁
+通过；发布 RTL SHA-256 为
+`6b8c6bbdd52f2e791240a1186bbc13ff83dfe114b8ca26ff96a91f26aa3e4f80`。相对 RT05 的
+perf20 为 `4,215,442 -> 4,215,442`，20 项逐项精确相等。default FreeList word-bits
+`4,739 -> 2,399`（`-49.378%`），全核 `474,011 -> 471,671`（`-0.494%`）；R02
+配置下 FreeList `10,595 -> 4,954`（`-53.242%`），全核 `583,088 -> 577,447`
+（`-0.967%`）。局部 raw LTP 因 bank write 选择从 10 增至 12，全核仍为 104；因此该项
+不能仅凭面积代理晋级，必须在 R02 组合 matching direct full 中检查 FreeList/rename 路径。
+证据见 `build/reports/comparisons/R8-RT06-vs-RT05.json`、
+`build/reports/yosys/R8-RT05-vs-RT06-default-word-v1.json` 和
+`build/reports/yosys/R8-RT05-vs-RT06-R02-expanded-word-v1.json`。
+
 ## R1：时序候选与周期验证
 
 首批按 `BT01 -> MT01 -> MT02 -> FT02 -> FT03` 线性累积；首轮 route 暴露 IQ 宽 payload
