@@ -220,12 +220,18 @@ final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourI
   private val usableCapacity = config.physicalRegs - 1
   private val pointerWidth = log2Up(storageCapacity)
   private val countWidth = log2Up(usableCapacity + 1)
+  private val bankCount = 4
+  private val bankSelectWidth = log2Up(bankCount)
+  private val bankDepth = storageCapacity / bankCount
+  private val bankRowWidth = log2Up(bankDepth)
 
   require(usableCapacity > 0)
   require(
     (storageCapacity & (storageCapacity - 1)) == 0,
     "the free-list storage uses natural binary pointer wrap"
   )
+  require(storageCapacity >= bankCount && storageCapacity % bankCount == 0)
+  require(config.renameWidth < bankCount && config.commitWidth < bankCount)
 
   private def advance(pointer: UInt, amount: UInt): UInt = {
     (pointer + amount.resize(pointerWidth)).resized
@@ -248,11 +254,14 @@ final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourI
   // One physical slot is a sentinel and is never included in freeCount.  The
   // power-of-two storage removes modulo-63 compare/subtract logic from every
   // three-wide release address while preserving exactly p1..p63 as allocatable.
-  val freeEntries = Vec((0 until storageCapacity).map { index =>
-    Reg(UInt(config.physicalRegIndexWidth bits)) init U(
-      if (index < usableCapacity) index + 1 else 0,
-      config.physicalRegIndexWidth bits
-    )
+  val freeEntryBanks = Vec((0 until bankCount).map { bank =>
+    Vec((0 until bankDepth).map { row =>
+      val index = row * bankCount + bank
+      Reg(UInt(config.physicalRegIndexWidth bits)) init U(
+        if (index < usableCapacity) index + 1 else 0,
+        config.physicalRegIndexWidth bits
+      )
+    })
   })
   val headPtr = Reg(UInt(pointerWidth bits)) init U(0, pointerWidth bits)
   val architecturalHeadPtr = Reg(UInt(pointerWidth bits)) init U(0, pointerWidth bits)
@@ -263,13 +272,32 @@ final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourI
     Reg(UInt(countWidth bits)) init U(usableCapacity, countWidth bits)
 
   val allocateOffset = Vec(UInt(pointerWidth bits), config.renameWidth)
+  val allocateAddress = Vec(UInt(pointerWidth bits), config.renameWidth)
+  val allocateBank = Vec(UInt(bankSelectWidth bits), config.renameWidth)
+  val allocateRow = Vec(UInt(bankRowWidth bits), config.renameWidth)
   for (lane <- 0 until config.renameWidth) {
     allocateOffset(lane) := (if (lane == 0) U(0)
                              else
                                CountOne(
                                  io.allocateValid(lane - 1 downto 0)
                                )).resized
-    io.allocatePdst(lane) := freeEntries(advance(headPtr, allocateOffset(lane)))
+    allocateAddress(lane) := advance(headPtr, allocateOffset(lane))
+    allocateBank(lane) := allocateAddress(lane)(bankSelectWidth - 1 downto 0)
+    allocateRow(lane) := allocateAddress(lane)(pointerWidth - 1 downto bankSelectWidth)
+  }
+  val bankReadData = Vec(UInt(config.physicalRegIndexWidth bits), bankCount)
+  for (bank <- 0 until bankCount) {
+    val selectedRow = UInt(bankRowWidth bits)
+    selectedRow := allocateRow(0)
+    for (lane <- 0 until config.renameWidth) {
+      when(allocateBank(lane) === U(bank, bankSelectWidth bits)) {
+        selectedRow := allocateRow(lane)
+      }
+    }
+    bankReadData(bank) := freeEntryBanks(bank)(selectedRow)
+  }
+  for (lane <- 0 until config.renameWidth) {
+    io.allocatePdst(lane) := bankReadData(allocateBank(lane))
   }
 
   val requested = CountOne(io.allocateValid)
@@ -308,14 +336,32 @@ final class PhysicalRegisterFreeList(config: OooCoreConfig = OooCoreConfig.FourI
   confirmedArchitecturalFreeCount :=
     (architecturalFreeCount - confirmedCount + releaseCount).resized
 
+  val releaseAddress = Vec(UInt(pointerWidth bits), config.commitWidth)
+  val releaseBank = Vec(UInt(bankSelectWidth bits), config.commitWidth)
+  val releaseRow = Vec(UInt(bankRowWidth bits), config.commitWidth)
   for (lane <- 0 until config.commitWidth) {
     val releaseOffset = (if (lane == 0) U(0)
-                         else
-                           CountOne(
-                             releaseValid(lane - 1 downto 0)
-                           )).resized
-    when(releaseValid(lane)) {
-      freeEntries(advance(tailPtr, releaseOffset)) := io.commitFreePdst(lane)
+                         else CountOne(releaseValid(lane - 1 downto 0))).resized
+    releaseAddress(lane) := advance(tailPtr, releaseOffset)
+    releaseBank(lane) := releaseAddress(lane)(bankSelectWidth - 1 downto 0)
+    releaseRow(lane) := releaseAddress(lane)(pointerWidth - 1 downto bankSelectWidth)
+  }
+  for (bank <- 0 until bankCount) {
+    val writeValid = Bool()
+    val writeRow = UInt(bankRowWidth bits)
+    val writePdst = UInt(config.physicalRegIndexWidth bits)
+    writeValid := False
+    writeRow := releaseRow(0)
+    writePdst := io.commitFreePdst(0)
+    for (lane <- 0 until config.commitWidth) {
+      when(releaseValid(lane) && releaseBank(lane) === U(bank, bankSelectWidth bits)) {
+        writeValid := True
+        writeRow := releaseRow(lane)
+        writePdst := io.commitFreePdst(lane)
+      }
+    }
+    when(writeValid) {
+      freeEntryBanks(bank)(writeRow) := writePdst
     }
   }
 

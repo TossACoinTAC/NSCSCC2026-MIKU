@@ -485,4 +485,63 @@ class RegisterStructuresSpec extends AnyFunSuite {
         checkAllocation(dut, Seq(2, 3, 4))
       }
   }
+
+  for ((name, config) <- Seq(
+      ("default", OooCoreConfig.FourIssueThreeCommit),
+      ("expanded-window", OooCoreConfig.ExpandedWindow)
+    )) {
+    test(s"free list banks preserve sparse allocation and simultaneous recycle for $name") {
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-free-list-banked-$name"
+        )
+        .compile(new PhysicalRegisterFreeList(config))
+        .doSim(s"ooo-free-list-banked-$name", 0x4660 + config.physicalRegs) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearFreeListInputs(dut, config)
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          freeListSample(dut)
+
+          val free = scala.collection.mutable.Queue((1 until config.physicalRegs): _*)
+          val inFlight = scala.collection.mutable.Queue.empty[Int]
+          val masks = Seq(7, 5, 3, 1, 6, 2, 4)
+
+          for (cycle <- 0 until config.physicalRegs * 2) {
+            val mask = masks(cycle % masks.size)
+            val allocateCount = Integer.bitCount(mask)
+            assert(free.size >= allocateCount)
+            val expected = free.take(allocateCount).toVector
+            val releaseCount = math.min(config.commitWidth, inFlight.size)
+            val released = Vector.fill(releaseCount)(inFlight.dequeue())
+
+            dut.io.allocateValid #= mask
+            dut.io.allocateAccept #= false
+            dut.io.allocateAcceptMask #= mask
+            dut.io.commitFreeValid #= (1 << releaseCount) - 1
+            for (lane <- 0 until config.commitWidth) {
+              dut.io.commitFreePdst(lane) #=
+                (if (lane < releaseCount) released(lane).toLong else 0L)
+            }
+
+            sleep(1)
+            assert(dut.io.allocateReady.toBoolean)
+            var offset = 0
+            for (lane <- 0 until config.renameWidth) {
+              if (((mask >> lane) & 1) != 0) {
+                assert(dut.io.allocatePdst(lane).toBigInt == expected(offset))
+                offset += 1
+              }
+            }
+            freeListSample(dut)
+
+            for (_ <- 0 until allocateCount) free.dequeue()
+            expected.foreach(inFlight.enqueue(_))
+            released.foreach(free.enqueue(_))
+          }
+        }
+    }
+  }
 }
