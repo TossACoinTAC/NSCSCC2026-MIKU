@@ -794,10 +794,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     commitPointer := allocatePointer
     occupancy := U(0, occupancy.getWidth bits)
     for (entry <- entries) {
+      // Validity is the only flush-visible state.  The next allocation writes
+      // complete/payloadReady/decodedExceptionValid before the entry can
+      // retire, so clearing those payload-side bits here only creates a wide
+      // redirect CE fanout.
       entry.valid := False
-      entry.complete := False
-      entry.payloadReady := False
-      entry.decodedExceptionValid := False
     }
   }.otherwise {
     when(acceptedMask.orR) {
