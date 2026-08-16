@@ -10,7 +10,8 @@ import scala.util.Random
 private final class IssueQueueProbe(
     config: OooCoreConfig,
     portIndex: Int = 0,
-    separateSelectWakeup: Boolean = false
+    separateSelectWakeup: Boolean = false,
+    tokenizedIssueOutput: Boolean = false
 )
     extends Component {
   val io = new Bundle {
@@ -30,7 +31,7 @@ private final class IssueQueueProbe(
   }
   noIoPrefix()
 
-  val queue = new IssueQueue(config, portIndex)
+  val queue = new IssueQueue(config, portIndex, tokenizedIssueOutput = tokenizedIssueOutput)
   queue.io.enqueueValid := io.enqueueValid
   queue.io.enqueue := io.enqueue
   queue.io.wakeupValid := io.wakeupValid
@@ -549,6 +550,73 @@ class IssueQueueSpec extends AnyFunSuite {
         dut.io.flush #= false
         sample(dut)
         assert(dut.io.enqueueReady.toBoolean)
+      }
+  }
+
+  test("tokenized IQ holds captured source tags across backpressure and flush") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    val multiplyPort =
+      config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Multiply))
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-iq-token-source-tags"
+      )
+      .compile(new IssueQueueProbe(config, multiplyPort, tokenizedIssueOutput = true))
+      .doSim("ooo-iq-token-source-tags", 0x4972) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        dut.io.enqueueValid #= true
+        dut.io.enqueue.robPointer #= 3
+        dut.io.enqueue.psrc1 #= 17
+        dut.io.enqueue.psrc2 #= 29
+        dut.io.enqueue.source1Ready #= true
+        dut.io.enqueue.source2Ready #= true
+        sample(dut)
+        dut.io.enqueueValid #= false
+        sample(dut)
+
+        assert(dut.io.issueValid.toBoolean)
+        assert(dut.io.issue.robPointer.toBigInt == 3)
+        assert(dut.io.issue.psrc1.toBigInt == 17)
+        assert(dut.io.issue.psrc2.toBigInt == 29)
+
+        // Exercise unrelated payload writes while the selected token is held.
+        dut.io.enqueueValid #= true
+        dut.io.enqueue.robPointer #= 4
+        dut.io.enqueue.psrc1 #= 41
+        dut.io.enqueue.psrc2 #= 43
+        for (_ <- 0 until 3) {
+          sample(dut)
+          assert(dut.io.issueValid.toBoolean)
+          assert(dut.io.issue.robPointer.toBigInt == 3)
+          assert(dut.io.issue.psrc1.toBigInt == 17)
+          assert(dut.io.issue.psrc2.toBigInt == 29)
+        }
+
+        dut.io.flush #= true
+        dut.io.issueReady #= true
+        sample(dut)
+        assert(!dut.io.issueValid.toBoolean)
+        assert(dut.io.occupancy.toBigInt == 0)
+
+        dut.io.flush #= false
+        dut.io.issueReady #= false
+        dut.io.enqueue.robPointer #= 7
+        dut.io.enqueue.psrc1 #= 47
+        dut.io.enqueue.psrc2 #= 53
+        sample(dut)
+        dut.io.enqueueValid #= false
+        sample(dut)
+        assert(dut.io.issueValid.toBoolean)
+        assert(dut.io.issue.robPointer.toBigInt == 7)
+        assert(dut.io.issue.psrc1.toBigInt == 47)
+        assert(dut.io.issue.psrc2.toBigInt == 53)
       }
   }
 

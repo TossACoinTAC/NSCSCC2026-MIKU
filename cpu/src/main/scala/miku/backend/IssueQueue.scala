@@ -187,7 +187,12 @@ final class IssueQueue(
     target.storeQueueIndex := source.storeQueueIndex
   }
 
-  private def unpackIssueEntry(target: RenamedMicroOp, source: IssueEntry): Unit = {
+  private def unpackIssueEntry(
+      target: RenamedMicroOp,
+      source: IssueEntry,
+      capturedPsrc1: UInt = null,
+      capturedPsrc2: UInt = null
+  ): Unit = {
     target.decoded.fuType := source.fuType
     target.decoded.pc :=
       (if (portHasAlu) source.alu.pc
@@ -260,8 +265,8 @@ final class IssueQueue(
     else target.decoded.exception := source.exception
     target.pdst := source.pdst
     target.oldPdst := 0
-    target.psrc1 := source.psrc1
-    target.psrc2 := source.psrc2
+    target.psrc1 := (if (capturedPsrc1 == null) source.psrc1 else capturedPsrc1)
+    target.psrc2 := (if (capturedPsrc2 == null) source.psrc2 else capturedPsrc2)
     target.source1Ready := source.source1Ready
     target.source2Ready := source.source2Ready
     target.robPointer := source.robPointer
@@ -390,10 +395,16 @@ final class IssueQueue(
   if (tokenizedIssueOutput) {
     val outputValid = RegInit(False)
     val outputSlot = Reg(UInt(entryIndexWidth bits)) init (0)
+    // The selected slot remains reserved until execution accepts the token,
+    // but its source tags are immutable. Capture those narrow fields beside
+    // the token so the following PRF address path does not cross the dynamic
+    // payload-slot mux.
+    val outputPsrc1 = Reg(UInt(config.physicalRegIndexWidth bits)) init (0)
+    val outputPsrc2 = Reg(UInt(config.physicalRegIndexWidth bits)) init (0)
     val outputEntry = IssueEntry(config, portIndex)
     outputEntry := payloadSlots(outputSlot)
     io.issueValid := outputValid
-    unpackIssueEntry(io.issue, outputEntry)
+    unpackIssueEntry(io.issue, outputEntry, outputPsrc1, outputPsrc2)
 
     val outputDequeue = io.issueValid && io.issueReady
     tokenOutputDequeue := outputDequeue
@@ -407,6 +418,8 @@ final class IssueQueue(
       when(queueDequeue) {
         outputValid := True
         outputSlot := issueSlot
+        outputPsrc1 := payloadSlots(issueSlot).psrc1
+        outputPsrc2 := payloadSlots(issueSlot).psrc2
       }
     }
     io.occupancy := (count + outputValid.asUInt).resized
