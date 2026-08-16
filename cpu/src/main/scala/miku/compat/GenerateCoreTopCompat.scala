@@ -30,13 +30,14 @@ private object CoreTopCompatGeneratorSupport {
       case _ =>
         throw new IllegalArgumentException(
           "usage: GenerateCoreTopCompat [--out-dir] <output-directory> " +
-            "[--core-variant default|expanded-window]"
+            "[--core-variant default|expanded-rob|expanded-window]"
         )
     }
 
   private def coreConfig(variant: String): OooCoreConfig =
     variant match {
       case "default"         => OooCoreConfig.FourIssueThreeCommit
+      case "expanded-rob"    => OooCoreConfig.ExpandedRob
       case "expanded-window" => OooCoreConfig.ExpandedWindow
       case other =>
         throw new IllegalArgumentException(s"unsupported core variant: $other")

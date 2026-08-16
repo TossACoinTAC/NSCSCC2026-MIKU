@@ -53,11 +53,15 @@ class OooCoreSpec extends AnyFunSuite {
 
   test("the expanded-window experiment changes capacity without changing the default core") {
     val default = OooCoreConfig.FourIssueThreeCommit
+    val expandedRob = OooCoreConfig.ExpandedRob
     val expanded = OooCoreConfig.ExpandedWindow
 
     assert(default.physicalRegs == 64)
     assert(default.robEntries == 32)
     assert(default.robPointerWidth == 6)
+    assert(expandedRob.physicalRegs == 64)
+    assert(expandedRob.robEntries == 64)
+    assert(expandedRob.robPointerWidth == 7)
     assert(expanded.physicalRegs == 128)
     assert(expanded.robEntries == 64)
     assert(expanded.robPointerWidth == 7)

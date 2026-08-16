@@ -234,10 +234,13 @@ object OooCoreConfig {
 
   val FourIssueThreeCommit: OooCoreConfig = OooCoreConfig()
 
+  val ExpandedRob: OooCoreConfig = FourIssueThreeCommit.copy(
+    robEntries = 64
+  )
+
   // R02 experiment only.  The public/default core remains FourIssueThreeCommit;
   // this variant is selected explicitly by the core-top generator.
-  val ExpandedWindow: OooCoreConfig = FourIssueThreeCommit.copy(
-    physicalRegs = 128,
-    robEntries = 64
+  val ExpandedWindow: OooCoreConfig = ExpandedRob.copy(
+    physicalRegs = 128
   )
 }
