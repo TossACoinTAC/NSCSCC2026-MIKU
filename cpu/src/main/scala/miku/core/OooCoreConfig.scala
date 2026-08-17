@@ -177,6 +177,9 @@ final case class OooCoreConfig(
     // When multiple refill waiters are ready, prefer the oldest ROB entry if all candidates share
     // one recovery epoch.  Fall back to physical waiter order across epochs.
     enableL1DWaiterAgeSelect: Boolean = false,
+    // Keep the refill-waiter arbitration local to L1D, then publish its response
+    // from a one-entry buffer. Hits retain their existing response cycle.
+    enableRegisteredL1DWaiterResponse: Boolean = true,
     enableDeferredFrontendCorrectionCleanup: Boolean = true,
     enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,

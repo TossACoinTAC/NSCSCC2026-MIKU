@@ -174,6 +174,8 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
 
   val responseValid = RegInit(False)
   val response = Reg(CacheResponse(config))
+  val waiterResponsePending = RegInit(False)
+  val waiterResponseBuffer = Reg(CacheResponse(config))
   responseValid := False
   io.responseValid := responseValid
   io.response := response
@@ -219,7 +221,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     freeWaiterMask(entry) := !waiters(entry).valid
   }
   val normalBusy = lookupPending || activeMissMask.orR || activeWaiterMask.orR ||
-    pendingStoreValid
+    pendingStoreValid || waiterResponsePending
   val maintenanceRequest = invalidatePending || newInvalidate ||
     writebackInvalidatePending || newWritebackInvalidate
   val startInvalidate = (invalidatePending || newInvalidate) && !normalBusy &&
@@ -701,6 +703,21 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val responseBeatIndex = refillBeatIndex(waiters(responseWaiterId).physicalAddress)
   val responseBeat = responseRefillBeats(responseBeatIndex)
   val waiterResponseFire = waiterReadyMask.orR && !lookupHitLoad
+  val bufferedWaiterResponse = if (config.enableRegisteredL1DWaiterResponse) {
+    waiterResponsePending && !lookupHitLoad
+  } else {
+    False
+  }
+  val waiterResponseCapture = if (config.enableRegisteredL1DWaiterResponse) {
+    waiterResponseFire && (!waiterResponsePending || bufferedWaiterResponse)
+  } else {
+    waiterResponseFire
+  }
+  val directWaiterResponse = if (config.enableRegisteredL1DWaiterResponse) {
+    False
+  } else {
+    waiterResponseFire
+  }
   val hitWaiterCollision = lookupHitLoad && waiterReadyMask.orR
   val collisionWaiterOlder = hitWaiterCollision &&
     waiters(responseWaiterId).recoveryEpoch === lookupRequest.recoveryEpoch &&
@@ -720,7 +737,10 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     response.loadQueueIndex := lookupRequest.loadQueueIndex
     response.data := selectWord(cacheArray.io.hitData, lookupRequest.physicalAddress)
     response.error := False
-  }.elsewhen(waiterResponseFire) {
+  }.elsewhen(bufferedWaiterResponse) {
+    responseValid := True
+    response := waiterResponseBuffer
+  }.elsewhen(directWaiterResponse) {
     responseValid := True
     response.robPointer := waiters(responseWaiterId).robPointer
     response.recoveryEpoch := waiters(responseWaiterId).recoveryEpoch
@@ -728,6 +748,17 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     response.loadQueueIndex := waiters(responseWaiterId).loadQueueIndex
     response.data := selectBeatWord(responseBeat, waiters(responseWaiterId).physicalAddress)
     response.error := misses(responseMshrId).refillError
+  }
+
+  when(waiterResponseCapture) {
+    if (config.enableRegisteredL1DWaiterResponse) {
+      waiterResponseBuffer.robPointer := waiters(responseWaiterId).robPointer
+      waiterResponseBuffer.recoveryEpoch := waiters(responseWaiterId).recoveryEpoch
+      waiterResponseBuffer.pdst := waiters(responseWaiterId).pdst
+      waiterResponseBuffer.loadQueueIndex := waiters(responseWaiterId).loadQueueIndex
+      waiterResponseBuffer.data := selectBeatWord(responseBeat, waiters(responseWaiterId).physicalAddress)
+      waiterResponseBuffer.error := misses(responseMshrId).refillError
+    }
     waiters(responseWaiterId).valid := False
     waiterBeatReady(responseWaiterId) := False
 
@@ -743,6 +774,14 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         misses(responseMshrId).state === L1DataMshrState.respond
     ) {
       misses(responseMshrId).valid := False
+    }
+  }
+
+  if (config.enableRegisteredL1DWaiterResponse) {
+    when(waiterResponseCapture) {
+      waiterResponsePending := True
+    }.elsewhen(bufferedWaiterResponse) {
+      waiterResponsePending := False
     }
   }
 

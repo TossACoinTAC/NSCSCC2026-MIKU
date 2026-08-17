@@ -350,7 +350,7 @@ class L1DataCacheSpec extends AnyFunSuite {
       }
   }
 
-  test("L1D returns a load as soon as its refill beat arrives") {
+  test("L1D publishes a refill waiter one cycle after its refill beat") {
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-l1d")
       .compile(new L1DataCacheProbe(config))
@@ -390,13 +390,11 @@ class L1DataCacheSpec extends AnyFunSuite {
         sleep(1)
         assert(dut.io.lineReadBeatReady.toBoolean)
         sample(dut)
+        assert(!dut.io.responseValid.toBoolean)
         dut.io.lineReadBeatValid #= false
-
-        var responseWait = 0
-        while (!dut.io.responseValid.toBoolean && responseWait < 3) {
-          sample(dut)
-          responseWait += 1
-        }
+        sample(dut)
+        assert(!dut.io.responseValid.toBoolean)
+        sample(dut)
         assert(dut.io.responseValid.toBoolean)
         assert(dut.io.response.robPointer.toBigInt == 7)
         assert(dut.io.response.recoveryEpoch.toBigInt == 11)
