@@ -20,3 +20,5 @@ make cpu-check
 与并行调度见 [`docs/verification-workflow.md`](docs/verification-workflow.md)，当前动态轮次见
 [`docs/current-optimization-plan.md`](docs/current-optimization-plan.md)，本次目录和
 工具链迁移的验证结果见 [`docs/migration-validation.md`](docs/migration-validation.md)。
+决赛自定义指令的 profile API、编码工具、能力边界和验证顺序见
+[`docs/custom-instructions.md`](docs/custom-instructions.md)。

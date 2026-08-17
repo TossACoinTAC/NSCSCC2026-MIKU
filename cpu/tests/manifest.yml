@@ -20,6 +20,9 @@ tests:
   - name: toolchain
     path: tests/python/test_toolchain_contract.py
     categories: [config, artifact]
+  - name: custom-instruction-word
+    path: tests/python/test_custom_instruction_word.py
+    categories: [harness]
   - name: repository
     path: tests/python/test_repository_contract.py
     categories: [config, artifact]

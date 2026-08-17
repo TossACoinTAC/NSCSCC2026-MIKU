@@ -62,6 +62,15 @@ class OooCoreSpec extends AnyFunSuite {
       () => OooCoreConfig(instructionBufferEntries = 4),
       () => OooCoreConfig(dispatchQueueEntries = 4),
       () => OooCoreConfig(instructionCache = CoreCacheGeometry(2, 64, 32)),
+      () => OooCoreConfig(
+        executionPorts = OooCoreConfig.DefaultExecutionPorts.updated(
+          2,
+          ExecutionPortConfig(
+            "branch-without-alu-payload",
+            Set(ExecutionUnitKind.Branch, ExecutionUnitKind.Multiply)
+          )
+        )
+      ),
       () => OooCoreConfig(executionPorts = OooCoreConfig.DefaultExecutionPorts.dropRight(1))
     )
     invalid.foreach(make => intercept[IllegalArgumentException](make()))

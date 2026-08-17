@@ -22,10 +22,13 @@ def main() -> int:
     candidates = (ROOT / "docs/optimization-candidates.md").read_text(encoding="utf-8")
     workflow = (ROOT / "docs/verification-workflow.md").read_text(encoding="utf-8")
     current_plan = (ROOT / "docs/current-optimization-plan.md").read_text(encoding="utf-8")
+    custom_instructions = (ROOT / "docs/custom-instructions.md").read_text(encoding="utf-8")
 
     require("docs/architecture.md" in readme, "README must link the architecture guide")
     require("docs/optimization-candidates.md" in readme, "README must link the candidate ledger")
     require("docs/current-optimization-plan.md" in readme, "README must link the current optimization plan")
+    require("docs/custom-instructions.md" in readme,
+            "README must link the custom-instruction guide")
     require("[optimization-candidates.md](optimization-candidates.md)" in architecture,
             "architecture must link the candidate ledger")
     require("[optimization-candidates.md](optimization-candidates.md)" in workflow,
@@ -46,6 +49,12 @@ def main() -> int:
         require(candidate in ids, f"candidate ledger is missing {candidate}")
     require("## 5. 优化候选账本" not in architecture,
             "architecture must not contain a second candidate ledger")
+    require("ContestCustomInstructionProfiles.scala" in custom_instructions,
+            "custom-instruction guide must identify the contest profile catalog")
+    require("make custom-test" in custom_instructions,
+            "custom-instruction guide must document the focused test target")
+    require("make custom-check CUSTOM_PROFILE=" in custom_instructions,
+            "custom-instruction guide must document profile RTL checks")
 
     print(f"documentation contract: {len(ids)} unique candidate IDs")
     return 0

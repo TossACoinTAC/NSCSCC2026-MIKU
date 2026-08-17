@@ -216,6 +216,7 @@ def load_experiment_evidence(
     validate_experiment_manifest(experiment, root)
     cpu = experiment["cpu"]
     expected = {
+        "custom_profile": generation["custom_profile"],
         "source_tree_sha256": generation["source_tree_sha256"],
         "raw_rtl_sha256": generation["raw_rtl_sha256"],
         "published_rtl_sha256": generation["published_rtl_sha256"],
@@ -289,8 +290,8 @@ def main() -> int:
 
     generation = json.loads(generation_path.read_text(encoding="utf-8"))
     required_generation = {
-        "source_tree_sha256", "source_commit", "raw_rtl_sha256",
-        "published_rtl_sha256", "toolchain",
+        "custom_profile", "source_tree_sha256", "source_commit",
+        "raw_rtl_sha256", "published_rtl_sha256", "toolchain",
     }
     missing_generation = required_generation - set(generation)
     if missing_generation:
@@ -348,6 +349,7 @@ def main() -> int:
         "purpose": "physical-exploration" if args.stage == "postroute" else "competition-build",
         "source": {
             "commit": source_commit,
+            "custom_profile": generation["custom_profile"],
             "tree_sha256": generation["source_tree_sha256"],
             "raw_rtl_sha256": generation["raw_rtl_sha256"],
             "published_rtl_sha256": expected_rtl,
@@ -445,6 +447,7 @@ def main() -> int:
             f"purpose={'physical-exploration' if args.stage == 'postroute' else 'competition-build'}",
             f"experiment_id={experiment['experiment_id']}",
             f"cpu_source_commit={source_commit}",
+            f"custom_profile={generation['custom_profile']}",
             f"cpu_source_tree_sha256={generation['source_tree_sha256']}",
             f"chiplab_commit={args.chiplab_commit}",
             f"requested_cpu_mhz={frequency}",
