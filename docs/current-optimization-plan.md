@@ -542,7 +542,7 @@ ROB/CSR 路径终止在 privileged redirect target CE。R18 以五个独立提�
 `LWT02 @ 729e7c5` 同样在源端形成 recovery-epoch 资格，避免从完整 completion mux 反推。
 五项都保持现有寄存边界，没有增加可观察拍数。
 
-最终 source commit 为 `729e7c5`，source tree SHA-256 为
+最终 source commit 为 `23b61b1f036f`，source tree SHA-256 为
 `3507e9180a105222bcbb4970dcffe1538925fb5c3a91cd47691717559e217564`，发布 RTL SHA-256 为
 `3e2deeabe1569d208d7f10d584951ca580ae4aeda94f463b15794327436ce18a`。完整 `cpu-check`
 为 40 suites / 265 tests，Python contracts 95/95；func58 random-AXI seeds `240/255/141`
@@ -553,8 +553,25 @@ ROB/CSR 路径终止在 privileged redirect target CE。R18 以五个独立提�
 Yosys 相对 R17 的全核 cells 为 `57,850 -> 57,827`、word bits 为
 `397,114 -> 397,034`、post-flat cells 为 `51,823 -> 51,805`；LSQ cells
 `7,552 -> 7,530`，LSQ local LTP 从 51 降至 47。比较见
-`build/reports/yosys/R17-vs-R18-five-timing-candidates.json`。这些是结构筛选证据；R18 的
-100 MHz matching direct full 必须使用上述 identity 重新执行，不能继承 R17 `-0.230 ns`。
+`build/reports/yosys/R17-vs-R18-five-timing-candidates.json`。这些是结构筛选证据，不能单独
+归因给五项中的任一项。
+
+R18 matching 100 MHz direct full 已完成并归档为
+`Post_Impl_Bundles/cpu_23b61b1f036f_chiplab_c398d274812f_perf_100mhz_20260818-013941/`。
+该 run 是 competition-flow eligible 的 matching implementation，fully routed、DRC 0 errors / 0
+critical warnings、bitstream 成功；route peak overlap `38,386`、最大拥挤 `96.3964%`，route 用时
+`412 s`。正式 setup/hold WNS 为 `-0.320/+0.011 ns`、setup TNS 为 `-17.444 ns`，195 个 setup
+failing endpoints；因此 `competition_eligible=false`，R18 只归档为 candidate，不是里程碑且不更新
+`main`。相对 R17，LSQ 从 top-50 的 37 条降为 0，说明本轮 LSQ 目标族已经退出 top-50；但全局
+setup WNS 从 `-0.230 ns` 恶化到 `-0.320 ns`，不能把 Vivado 物理变化归因给任何单项候选。
+
+R18 top-50 为 ROB/CSR 47 条（最差 `-0.320 ns`、平均 route `81.206%`）、IQ 2 条（最差
+`-0.209 ns`）、cache/L2 1 条（`-0.151 ns`）和 LSQ 0 条。最差簇为 ROB
+`candidatePointer` 到 RenameMap `architectural` 寄存器 CE 的广播；下一轮主攻保持 commit 可见性
+不变的 commit eligibility 局部化，收窄该广播。IQ 与 L1I 保留为次级路径族，只有在相同寄存边界
+与完整门禁下形成独立候选时再进入批次。top-50 与 route health 分别为
+`build/reports/timing/R18-five-timing-direct-top50.json` 和
+`build/reports/timing/R18-five-timing-route-health.json`。
 
 ## R0：实验合同
 
