@@ -33,7 +33,7 @@
     },
     {
       "name": "cache-hierarchy",
-      "paths": ["cpu/src/main/scala/miku/memory/L1*.scala", "cpu/src/main/scala/miku/memory/L2*.scala", "cpu/src/main/scala/miku/memory/Shared*.scala", "cpu/src/main/scala/miku/memory/DataCacheHierarchy.scala"],
+      "paths": ["cpu/src/main/scala/miku/memory/CacheArray.scala", "cpu/src/main/scala/miku/memory/L1*.scala", "cpu/src/main/scala/miku/memory/L2*.scala", "cpu/src/main/scala/miku/memory/Shared*.scala", "cpu/src/main/scala/miku/memory/DataCacheHierarchy.scala"],
       "scala_suites": ["miku.memory.DataCacheHierarchySpec", "miku.memory.L1DataCacheSpec", "miku.memory.L1InstructionCacheSpec", "miku.memory.L2CacheSpec", "miku.memory.SharedCacheHierarchySpec", "miku.backend.OooBackendWithDataCacheSpec"],
       "python_contracts": ["tests/python/test_cache_memory_contract.py"]
     },
