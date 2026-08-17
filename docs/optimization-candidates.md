@@ -521,6 +521,16 @@ Yosys 相对 R16 为 cells `57,882 -> 57,850`、word bits `397,735 -> 397,114`�
 这些结果只证明没有明显结构膨胀。R17 是否保留，取决于 matching 100 MHz direct full 能否闭合，
 或至少提供足以抵偿上述周期回退的物理改善；不继承 R16 `-0.334 ns` 作为当前结论。
 
+R17 matching direct full 已完成并归档为
+`Post_Impl_Bundles/cpu_7d54739e354c_chiplab_c398d274812f_perf_100mhz_20260817-232122/`：
+fully routed、failed/unrouted nets 0、overlap 0、DRC errors 0、critical warnings 0、bitstream
+成功；正式 setup/hold WNS `-0.230/+0.023 ns`，setup TNS `-12.471 ns`，DRC 另有 20 条非关键
+warning。它相对 R16 direct 的 setup 改善约 `0.104 ns`，但仍不是正 WNS milestone。matching
+top-50 为 LSQ 37、ROB/CSR 9、IQ 2、predictor 2；最差路径是
+`registeredPendingLoads -> scheduledLoadPayload_pdst` 的 LSQ 宽 CE（最高 fanout 约 48,209）。
+因此本轮候选的物理结论是“全局拥挤下降、LSQ CE 未解决”，不能把 `waiterResponseBuffer` 或
+PRF gate pruning 单独包装成时序闭合。
+
 ## 12. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)

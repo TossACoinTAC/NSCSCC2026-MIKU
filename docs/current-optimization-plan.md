@@ -506,6 +506,22 @@ R17 source commit 为 `2d19091`，source tree SHA-256 为
 `-14`、ROB `+5` cells。结构代理排除了明显规模膨胀，但是否足以换回至少 `0.435546%` 的周期
 代价，只能由本身份的 100 MHz matching direct full 判断；R16 的 WNS 不继承。
 
+R17 matching direct full 已完成并归档为
+`Post_Impl_Bundles/cpu_7d54739e354c_chiplab_c398d274812f_perf_100mhz_20260817-232122/`。
+该 run fully routed、failed/unrouted nets 为 0、最终 overlap 为 0、DRC errors 为 0、critical
+warnings 为 0，并成功写出 bitstream；DRC 另有 20 条平台/工具 warning。正式 clock validation
+为 setup/hold WNS `-0.230/+0.023 ns`、setup TNS `-12.471 ns`，所以 R17 仍是 candidate，
+不满足正 WNS milestone，也不进入 `main`。相对 R16 的 setup `-0.334 ns`，改善约 `0.104 ns`；
+该改善不能单独归因给五项中的任何一项。
+
+R17 top-50 统计为 LSQ 37、ROB/CSR 9、IQ 2、predictor 2，frontend 和 cache/L2 均为 0；
+最差路径来自 LSQ `registeredPendingLoads -> scheduledLoadPayload_pdst` 的宽 CE 控制，
+最高扇出约 48,209，路径 slack 约 `-0.230 ns`。route health 的最大方向性拥挤为 North
+`92.7928%`（East `86.1673%`、South `88.7387%`、West `88.6948%`），比 R16 观察到的
+局部 99% 峰值下降，但 LSQ CE 仍是下一轮首要结构性目标。top-50 与 route health 分别见
+`build/reports/timing/R17-five-timing-direct-top50.json`、归档内 `route-health.json` 和
+`timing_summary.rpt`。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。
