@@ -1162,18 +1162,22 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // output below for tracing, but consumers need not rebuild this predicate.
   val registeredLoadWakeupValid = completionValid && completionLoadWakeup &&
     completionLoadWakeupEpochCurrent
-  val bankedLoadWakeupValid = bankedForwardCompletionValid &&
-    bankedForwardCompletion.writesPdst && bankedForwardCompletion.pdst =/= 0 &&
-    bankedForwardWakeupEpochCurrent
-  io.loadWakeupValid := registeredLoadWakeupValid ||
-    (Bool(config.enableBankedForwardLoadFastWakeup) && bankedLoadWakeupValid)
   io.loadWakeupPdst := completion.pdst
   io.loadWakeupRecoveryEpoch := completion.recoveryEpoch
   io.loadWakeupEpochCurrent := completionLoadWakeupEpochCurrent
-  when(bankedForwardCompletionValid) {
-    io.loadWakeupPdst := bankedForwardCompletion.pdst
-    io.loadWakeupRecoveryEpoch := bankedForwardCompletion.recoveryEpoch
-    io.loadWakeupEpochCurrent := bankedForwardWakeupEpochCurrent
+  if (config.enableBankedForwardLoadFastWakeup) {
+    val bankedLoadWakeupValid = bankedForwardCompletionValid &&
+      bankedForwardCompletion.writesPdst && bankedForwardCompletion.pdst =/= 0 &&
+      bankedForwardWakeupEpochCurrent
+    io.loadWakeupValid := registeredLoadWakeupValid || bankedLoadWakeupValid
+    when(bankedForwardCompletionValid) {
+      io.loadWakeupPdst := bankedForwardCompletion.pdst
+      io.loadWakeupRecoveryEpoch := bankedForwardCompletion.recoveryEpoch
+      io.loadWakeupEpochCurrent := bankedForwardWakeupEpochCurrent
+    }
+  } else {
+    // Keep the disabled fast-wakeup payload out of the IQ tag-selection cone.
+    io.loadWakeupValid := registeredLoadWakeupValid
   }
 
   loadReleaseValid := B(0, config.commitWidth bits)

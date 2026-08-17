@@ -1731,9 +1731,12 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         assert(dut.io.completion.robPointer.toBigInt == 1)
         assert(dut.io.completion.pdst.toBigInt == 7)
         assert(dut.io.completion.data.toBigInt == BigInt("12345678", 16))
-        assert(dut.io.loadWakeupValid.toBoolean == (!banked || fastWake))
-        assert(dut.io.loadWakeupPdst.toBigInt == 7)
-        assert(dut.io.loadWakeupRecoveryEpoch.toBigInt == 0)
+        val wakeupExpected = !banked || fastWake
+        assert(dut.io.loadWakeupValid.toBoolean == wakeupExpected)
+        if (wakeupExpected) {
+          assert(dut.io.loadWakeupPdst.toBigInt == 7)
+          assert(dut.io.loadWakeupRecoveryEpoch.toBigInt == 0)
+        }
         assert(!dut.io.dataRequestValid.toBoolean)
       }
     }
