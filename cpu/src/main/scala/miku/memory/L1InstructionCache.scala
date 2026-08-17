@@ -207,14 +207,24 @@ final class L1InstructionCache(
   } else {
     False
   }
-  cacheArray.io.lookupValid := speculativeHitTurnoverLookup
+  // The speculative turnover read already owns the array port before the current
+  // lookup result is confirmed.  Do not re-assert it through requestFire when
+  // that response proves to be a hit; non-speculative turnover still starts its
+  // successor lookup from the accepted request.
+  val requestStartsArrayLookup = requestFire && !refillRequestFire && (if (
+    config.enableSpeculativeInstructionArrayRead
+  ) {
+    !lookupHitTurnoverFire
+  } else {
+    True
+  })
+  cacheArray.io.lookupValid := speculativeHitTurnoverLookup || requestStartsArrayLookup
   when(requestFire) {
     request := io.request
     requestKilled := io.kill
     when(refillRequestFire) {
       refillResponseSent := False
     }.otherwise {
-      cacheArray.io.lookupValid := True
       cacheArray.io.lookupAddress := io.request.physicalAddress
       state := L1InstructionCacheState.lookup
     }

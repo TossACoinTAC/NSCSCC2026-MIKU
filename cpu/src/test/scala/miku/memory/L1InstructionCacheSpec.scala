@@ -583,7 +583,7 @@ class L1InstructionCacheSpec extends AnyFunSuite {
       }
   }
 
-  test("speculative instruction-array read preserves hit turnover and miss recovery") {
+  test("speculative instruction-array read preserves one-cycle hit turnover and miss recovery") {
     for ((enabled, decoupled) <- Seq((false, false), (true, false), (true, true))) {
       val testConfig = config.copy(
         enableSpeculativeInstructionArrayRead = enabled,
@@ -605,8 +605,10 @@ class L1InstructionCacheSpec extends AnyFunSuite {
 
           val firstAddress = BigInt(0x100)
           val secondAddress = BigInt(0x180)
+          val thirdAddress = BigInt(0x200)
           installLine(dut, firstAddress, 1000)
           installLine(dut, secondAddress, 2000)
+          installLine(dut, thirdAddress, 3000)
           acceptRequest(dut, firstAddress, firstAddress)
 
           dut.io.requestValid #= true
@@ -616,9 +618,21 @@ class L1InstructionCacheSpec extends AnyFunSuite {
           assert(dut.io.requestReady.toBoolean)
           sample(dut)
           assertResponse(dut, firstAddress, 1000)
-          dut.io.requestValid #= false
+
+          // The next accepted hit must use the same registered-response latency.
+          // This remains true whether the array lookup was issued speculatively
+          // or from the confirmed-turnover request path.
+          dut.io.request.virtualAddress #= thirdAddress
+          dut.io.request.physicalAddress #= thirdAddress
+          sleep(1)
+          assert(dut.io.requestReady.toBoolean)
           sample(dut)
           assertResponse(dut, secondAddress, 2000)
+          dut.io.requestValid #= false
+          sample(dut)
+          assertResponse(dut, thirdAddress, 3000)
+          sample(dut)
+          assert(!dut.io.responseValid.toBoolean)
 
           val missAddress = BigInt(0x2c0)
           acceptRequest(dut, firstAddress, firstAddress)
