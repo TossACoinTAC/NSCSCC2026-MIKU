@@ -144,6 +144,9 @@ final case class OooCoreConfig(
     // pending-push top bypass keeps the following synchronous predictor response cycle-equivalent.
     // The direct input path remains available for predictor timing A/B and older configurations.
     enableRegisteredSpeculativeRasUpdate: Boolean = true,
+    // Redirect validity still carries the architectural request. Sample the associated target
+    // every cycle so the ROB commit selector does not fan out onto a 32-bit register CE network.
+    enableUnconditionalPrivilegedRedirectTargetCapture: Boolean = true,
     enableDirectDmwPretranslation: Boolean = true,
     enableLoadCompletionEarlyWakeup: Boolean = true,
     // Preload the data-side micro-TLB probe key while the request stream is ready.  The request

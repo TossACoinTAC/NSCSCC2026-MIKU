@@ -143,12 +143,23 @@ final class OooCoreSystem(
       core.io.tlbFillValid || core.io.tlbInvalidateValid
     val privilegedRedirectPending = RegNext(privilegedRedirectRequest) init (False)
     val privilegedRedirectTarget = Reg(UInt(config.xlen bits))
-    when(privilegedRedirectRequest) {
+    if (config.enableUnconditionalPrivilegedRedirectTargetCapture) {
+      // The target is observed only with the following registered pending bit.
+      // Sampling it unconditionally preserves that edge while removing the
+      // wide target register's request-qualified clock enable.
       privilegedRedirectTarget := Mux(
         core.io.ertnValid,
         csr.io.era_out.asUInt,
         core.io.serialCommitPc + 4
       )
+    } else {
+      when(privilegedRedirectRequest) {
+        privilegedRedirectTarget := Mux(
+          core.io.ertnValid,
+          csr.io.era_out.asUInt,
+          core.io.serialCommitPc + 4
+        )
+      }
     }
     idleController.io.enterValid := core.io.idleValid
     idleController.io.enterPc := core.io.serialCommitPc
