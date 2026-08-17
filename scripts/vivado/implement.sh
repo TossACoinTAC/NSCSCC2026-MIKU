@@ -46,6 +46,45 @@ else
     "$run_dir/perf_clock_generated.txt"
 fi
 
+# The 100 MHz perf closure uses an AggressiveExplore post-route pass after the
+# normal Performance_Explore flow.  Stop the run at route_design, physically
+# optimize and reroute, then write the checked-in direct-full bitstream from
+# that improved result.  Func builds keep the stock single-pass flow; set
+# VIVADO_AGGRESSIVE_POSTROUTE=1 to force the pass there too.
+aggressive_postroute=${VIVADO_AGGRESSIVE_POSTROUTE:-1}
+if [[ $mode == func ]]; then
+  aggressive_postroute=0
+fi
+if (( aggressive_postroute == 1 )); then
+  python3 - "$run_dir/bit.tcl" <<'PY_PATCH_BIT'
+import sys
+
+path = sys.argv[1]
+with open(path) as handle:
+    script = handle.read()
+script = script.replace(
+    "launch_runs impl_1 -to_step write_bitstream",
+    "launch_runs impl_1 -to_step route_design",
+    1,
+)
+insert_before = "open_run impl_1\nreport_timing_summary"
+inserted = (
+    "open_run impl_1\n"
+    "phys_opt_design -directive AggressiveExplore\n"
+    "route_design -directive AggressiveExplore\n"
+    "write_checkpoint -force project/loongson.runs/impl_1/soc_top_routed.dcp\n"
+    "write_bitstream -force project/loongson.runs/impl_1/soc_top.bit\n"
+    "write_debug_probes -force project/loongson.runs/impl_1/soc_top.ltx\n"
+    "report_timing_summary"
+)
+if insert_before not in script:
+    raise SystemExit("bit.tcl report block not found; cannot apply post-route pass")
+script = script.replace(insert_before, inserted, 1)
+with open(path, "w") as handle:
+    handle.write(script)
+PY_PATCH_BIT
+fi
+
 (
   cd "$run_dir"
   "$vivado" -mode batch -source create_project.tcl
