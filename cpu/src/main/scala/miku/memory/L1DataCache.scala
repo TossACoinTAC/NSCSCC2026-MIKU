@@ -156,6 +156,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   )
   val pendingStoreValid = RegInit(False)
   val pendingStoreMshrId = Reg(UInt(mshrIdWidth bits))
+  val pendingStoreOwner = Reg(Bits(config.mshrEntries bits)) init (0)
   val pendingStoreAddress = Reg(UInt(offsetWidth bits))
   val pendingStoreByteMask = Reg(Bits(4 bits))
   val pendingStoreData = Reg(Bits(config.xlen bits))
@@ -271,10 +272,14 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val refillId = io.lineReadBeat.mshrId
   val refillBaseReady = state === L1DataCacheState.normal &&
     misses(refillId).valid && misses(refillId).state === L1DataMshrState.refill
+  val pendingStoreOwnerReady = Bits(config.mshrEntries bits)
+  for (entry <- 0 until config.mshrEntries) {
+    pendingStoreOwnerReady(entry) := pendingStoreOwner(entry) && misses(entry).valid &&
+      misses(entry).state =/= L1DataMshrState.install &&
+      misses(entry).state =/= L1DataMshrState.respond
+  }
   val pendingStoreApply = pendingStoreValid && state === L1DataCacheState.normal &&
-    misses(pendingStoreMshrId).valid &&
-    misses(pendingStoreMshrId).state =/= L1DataMshrState.install &&
-    misses(pendingStoreMshrId).state =/= L1DataMshrState.respond
+    pendingStoreOwnerReady.orR
   val pendingStoreReady = !pendingStoreValid || pendingStoreApply
 
   val commonRequestReady = state === L1DataCacheState.normal && !maintenanceRequest &&
@@ -357,21 +362,25 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
           io.lineReadBeat.beat === refillBeatIndex(io.request.physicalAddress))
   }
   when(pendingStoreApply) {
-    misses(pendingStoreMshrId).storeByteMask :=
-      misses(pendingStoreMshrId).storeByteMask |
-        storeLineByteMask(pendingStoreAddress, pendingStoreByteMask)
-    when(
-      misses(pendingStoreMshrId).state === L1DataMshrState.refill &&
-        misses(pendingStoreMshrId).refillMask.andR &&
-        !(mergeStoreFire && lineMatchId === pendingStoreMshrId)
-    ) {
-      misses(pendingStoreMshrId).state := L1DataMshrState.install
+    for (entry <- 0 until config.mshrEntries) {
+      when(pendingStoreOwnerReady(entry)) {
+        misses(entry).storeByteMask := misses(entry).storeByteMask |
+          storeLineByteMask(pendingStoreAddress, pendingStoreByteMask)
+        when(
+          misses(entry).state === L1DataMshrState.refill &&
+            misses(entry).refillMask.andR &&
+            !(mergeStoreFire && lineMatchGrant(entry))
+        ) {
+          misses(entry).state := L1DataMshrState.install
+        }
+      }
     }
     pendingStoreValid := False
   }
   when(mergeStoreFire) {
     pendingStoreValid := True
     pendingStoreMshrId := lineMatchId
+    pendingStoreOwner := lineMatchGrant
     pendingStoreAddress := io.request.physicalAddress(offsetWidth - 1 downto 0)
     pendingStoreByteMask := io.request.byteMask
     pendingStoreData := io.request.writeData
@@ -428,6 +437,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       when(lookupRequest.isWrite) {
         pendingStoreValid := True
         pendingStoreMshrId := lookupMshrId
+        pendingStoreOwner := UIntToOh(lookupMshrId, config.mshrEntries)
         pendingStoreAddress := lookupRequest.physicalAddress(offsetWidth - 1 downto 0)
         pendingStoreByteMask := lookupRequest.byteMask
         pendingStoreData := lookupRequest.writeData
