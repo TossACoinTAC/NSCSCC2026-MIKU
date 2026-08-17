@@ -3,9 +3,35 @@ package miku.frontend
 import miku.core._
 import miku.predict._
 import org.scalatest.funsuite.AnyFunSuite
+import spinal.core._
 import spinal.core.sim._
 
 import scala.language.reflectiveCalls
+
+private final class La32rDecoderValidityProbe(config: OooCoreConfig) extends Component {
+  val io = new Bundle {
+    val instruction = in Bits (32 bits)
+    val exceptionValid = out Bool ()
+    val exceptionCode = out UInt (6 bits)
+    val isTlbInvalidate = out Bool ()
+  }
+  noIoPrefix()
+
+  val decoder = new La32rDecoder(config)
+  decoder.io.pc := U(config.resetVector, config.xlen bits)
+  decoder.io.instruction := io.instruction
+  decoder.io.fetchSlot := 0
+  decoder.io.predictedTaken := False
+  decoder.io.predictedTarget := U(config.resetVector + 4, config.xlen bits)
+  decoder.io.predictorMetadata := 0
+  decoder.io.fetchException.assignFromBits(B(0, decoder.io.fetchException.getBitsWidth bits))
+  decoder.io.privilege := 0
+  decoder.io.interruptPending := False
+
+  io.exceptionValid := decoder.io.decoded.exception.valid
+  io.exceptionCode := decoder.io.decoded.exception.ecode
+  io.isTlbInvalidate := decoder.io.decoded.isTlbInvalidate
+}
 
 class OooFrontendSpec extends AnyFunSuite {
   private val config = OooCoreConfig.FourIssueThreeCommit
@@ -135,6 +161,40 @@ class OooFrontendSpec extends AnyFunSuite {
     dut.io.cacheResponse.error #= false
     sample(dut)
     dut.io.cacheResponseValid #= false
+  }
+
+  test("balanced decode reductions preserve valid-list endpoints and illegal boundaries") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-la32r-decoder-validity"
+      )
+      .compile(new La32rDecoderValidityProbe(config))
+      .doSim("la32r-decoder-validity", 0xdec01) { dut =>
+        def expectLegal(instruction: BigInt): Unit = {
+          dut.io.instruction #= instruction
+          sleep(1)
+          assert(!dut.io.exceptionValid.toBoolean)
+        }
+
+        expectLegal(BigInt("00100000", 16)) // ADD.W: first instructionValid term
+        expectLegal(BigInt("14000000", 16)) // LU12I.W: middle of the reduction
+
+        val invTlbBase =
+          (BigInt(1) << 26) | (BigInt(9) << 22) | (BigInt(0x13) << 15)
+        expectLegal(invTlbBase | 6) // INVTLB op 6: final instructionValid term
+        assert(dut.io.isTlbInvalidate.toBoolean)
+
+        dut.io.instruction #= invTlbBase | 7
+        sleep(1)
+        assert(dut.io.exceptionValid.toBoolean)
+        assert(dut.io.exceptionCode.toBigInt == 0x0d)
+
+        dut.io.instruction #= BigInt("ffffffff", 16)
+        sleep(1)
+        assert(dut.io.exceptionValid.toBoolean)
+        assert(dut.io.exceptionCode.toBigInt == 0x0d)
+      }
   }
 
   test("a cancelled translation releases the fetch owner and retries the same PC") {
