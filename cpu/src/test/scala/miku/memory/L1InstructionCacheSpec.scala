@@ -337,7 +337,8 @@ class L1InstructionCacheSpec extends AnyFunSuite {
   private def assertResponse(
       dut: L1InstructionCacheProbe,
       virtualAddress: BigInt,
-      firstInstruction: Int
+      firstInstruction: Int,
+      expectedDirectBranchTarget: Option[BigInt] = None
   ): Unit = {
     assert(dut.io.responseValid.toBoolean)
     assert(dut.io.response.virtualAddress.toBigInt == virtualAddress)
@@ -345,6 +346,69 @@ class L1InstructionCacheSpec extends AnyFunSuite {
     for (lane <- 0 until config.fetchWidth) {
       assert(dut.io.response.instructions(lane).toBigInt == firstInstruction + lane)
     }
+    expectedDirectBranchTarget match {
+      case Some(target) =>
+        assert(dut.io.response.predecode(0).valid.toBoolean)
+        assert(dut.io.response.predecode(0).branchType.toBigInt == 1)
+        assert(dut.io.response.predecode(0).target.toBigInt == target)
+        assert(dut.io.response.predecode(0).staticTaken.toBoolean)
+        assert(!dut.io.response.predecode(0).indirect.toBoolean)
+      case None =>
+        assert(!dut.io.response.predecode(0).valid.toBoolean)
+    }
+  }
+
+  test("L1I predecode remains aligned with each registered turnover response") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-l1i-registered-predecode"
+      )
+      .compile(new L1InstructionCacheProbe(config))
+      .doSim("ooo-l1i-registered-predecode", 0x4c93) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling(config.instructionCache.sets + 8)
+
+        val branchAddress = BigInt(0x100)
+        val plainAddress = BigInt(0x180)
+        val branchInstruction = encodeDirectBranch(16).toInt
+        installLine(dut, branchAddress, branchInstruction)
+        installLine(dut, plainAddress, 1000)
+        acceptRequest(dut, branchAddress, branchAddress)
+
+        dut.io.requestValid #= true
+        dut.io.request.virtualAddress #= plainAddress
+        dut.io.request.physicalAddress #= plainAddress
+        sleep(1)
+        assert(dut.io.requestReady.toBoolean)
+        sample(dut)
+        assertResponse(
+          dut,
+          branchAddress,
+          branchInstruction,
+          expectedDirectBranchTarget = Some(branchAddress + 16)
+        )
+
+        dut.io.request.virtualAddress #= branchAddress
+        dut.io.request.physicalAddress #= branchAddress
+        sleep(1)
+        assert(dut.io.requestReady.toBoolean)
+        sample(dut)
+        assertResponse(dut, plainAddress, 1000)
+
+        dut.io.requestValid #= false
+        sample(dut)
+        assertResponse(
+          dut,
+          branchAddress,
+          branchInstruction,
+          expectedDirectBranchTarget = Some(branchAddress + 16)
+        )
+      }
   }
 
   test("confirmed warm L1I hits turn the frontend owner over before registered data delivery") {
