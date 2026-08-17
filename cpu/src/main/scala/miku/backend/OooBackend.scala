@@ -98,11 +98,10 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   }
   val storeDataQueue = new StoreDataQueue(config)
 
-  // The ROB and PRF consume the same incoming completion on the same edge.  Keep the destination
-  // and data together beside the PRF so the next-cycle epoch-qualified write does not route either
-  // staged payload field back across the ROB/PRF boundary.  Capturing every cycle keeps
-  // completionValid out of these register enables; ROB completionWakeupValid remains the only
-  // write qualification.
+  // The ROB and backend consumers observe the same incoming completion on the same edge. Keep
+  // the destination and data beside the PRF so next-cycle, ROB-qualified consumers do not route
+  // either staged payload field back across the ROB/backend boundary. Capturing every cycle keeps
+  // completionValid out of these register enables; ROB qualification remains the only authority.
   val localPrfCompletionPdst = Vec.fill(config.writebackWidth)(
     Reg(UInt(config.physicalRegIndexWidth bits))
   )
@@ -110,6 +109,14 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   for (lane <- 0 until config.writebackWidth) {
     localPrfCompletionPdst(lane) := io.completion(lane).pdst
     localPrfCompletionData(lane) := io.completion(lane).data
+  }
+  val backendCompletionWakeupPdst = Vec(UInt(config.physicalRegIndexWidth bits), config.writebackWidth)
+  for (lane <- 0 until config.writebackWidth) {
+    backendCompletionWakeupPdst(lane) := (if (config.enableLocalPrfCompletionDataCapture) {
+      localPrfCompletionPdst(lane)
+    } else {
+      rob.io.completionWakeupPdst(lane)
+    })
   }
 
   val issueOperandValid = RegInit(B(0, config.executionWidth bits))
@@ -197,13 +204,13 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     for (write <- 0 until config.writebackWidth) {
       when(
         rob.io.completionWakeupCandidateValid(write) &&
-          rob.io.completionWakeupPdst(write) === dispatchWindow.io.output(lane).psrc1
+          backendCompletionWakeupPdst(write) === dispatchWindow.io.output(lane).psrc1
       ) {
         dispatchSource1Ready := True
       }
       when(
         rob.io.completionWakeupCandidateValid(write) &&
-          rob.io.completionWakeupPdst(write) === dispatchWindow.io.output(lane).psrc2
+          backendCompletionWakeupPdst(write) === dispatchWindow.io.output(lane).psrc2
       ) {
         dispatchSource2Ready := True
       }
@@ -425,7 +432,7 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
       earlyWakeupValid(write) := directWake || selectedRegisteredWake
       earlyWakeupPdst(write) := Mux(
         selectedRegisteredWake,
-        rob.io.completionWakeupPdst(write),
+        backendCompletionWakeupPdst(write),
         io.directWakeupPdst(write)
       )
     } else if (write == loadStorePort) {
@@ -459,7 +466,7 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
       earlyWakeupValid(write) := loadWake || selectedRegisteredWake
       earlyWakeupPdst(write) := Mux(
         selectedRegisteredWake,
-        rob.io.completionWakeupPdst(write),
+        backendCompletionWakeupPdst(write),
         io.loadWakeupPdst
       )
     } else if (
@@ -472,7 +479,7 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
       earlyWakeupPdst(write) := 0
     } else {
       earlyWakeupValid(write) := rob.io.completionWakeupCandidateValid(write)
-      earlyWakeupPdst(write) := rob.io.completionWakeupPdst(write)
+      earlyWakeupPdst(write) := backendCompletionWakeupPdst(write)
       fastSelectWakeupValid(write) := False
       fastSelectWakeupPdst(write) := 0
     }
@@ -504,7 +511,7 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   } else {
     storeDataQueue.io.wakeupValid := rob.io.completionWakeupValid
     for (write <- 0 until config.writebackWidth) {
-      storeDataQueue.io.wakeupPdst(write) := rob.io.completionWakeupPdst(write)
+      storeDataQueue.io.wakeupPdst(write) := backendCompletionWakeupPdst(write)
     }
   }
 
@@ -642,7 +649,7 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     })
     registerMap.io.writebackValid(write) :=
       rob.io.completionWakeupValid(write)
-    registerMap.io.writebackPdst(write) := rob.io.completionWakeupPdst(write)
+    registerMap.io.writebackPdst(write) := backendCompletionWakeupPdst(write)
   }
   prf.io.debugReadAddress := registerMap.io.architecturalMappings(io.debugReadAddress)
   io.debugReadData := prf.io.debugReadData
