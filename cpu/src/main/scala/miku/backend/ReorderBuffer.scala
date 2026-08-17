@@ -12,7 +12,6 @@ final case class ReorderBufferPayload(config: OooCoreConfig) extends Bundle {
   val pdst = UInt(config.physicalRegIndexWidth bits)
   val oldPdst = UInt(config.physicalRegIndexWidth bits)
   val writesGpr = Bool()
-  val writesArchitecturalGpr = Bool()
   val predictorMetadata = Bits(16 bits)
   val decodedException = ExceptionMetadata()
 }
@@ -156,7 +155,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
 
     val commitValid = out Bits (config.commitWidth bits)
     val commit = out Vec (CommitRecord(config), config.commitWidth)
-    val commitDestinationValid = out Bits (config.commitWidth bits)
     val recoveryValid = out Bool ()
     val recovery = out(RecoveryRequest(config))
 
@@ -248,8 +246,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     allocationPayload(lane).pdst := io.allocate(lane).uop.pdst
     allocationPayload(lane).oldPdst := io.allocate(lane).uop.oldPdst
     allocationPayload(lane).writesGpr := io.allocate(lane).uop.decoded.writesGpr
-    allocationPayload(lane).writesArchitecturalGpr :=
-      io.allocate(lane).uop.decoded.writesGpr && io.allocate(lane).uop.decoded.rd =/= 0
     val instruction = io.allocate(lane).uop.decoded.instruction
     val opcode = instruction(31 downto 26).asUInt
     val isJirl = opcode === U(0x13, 6 bits)
@@ -697,7 +693,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     io.commit(lane).pdst := candidates(lane).payload.pdst
     io.commit(lane).oldPdst := candidates(lane).payload.oldPdst
     io.commit(lane).writesGpr := candidates(lane).payload.writesGpr
-    io.commitDestinationValid(lane) := candidates(lane).payload.writesArchitecturalGpr
     if (lane == 0) {
       io.commit(lane).result := Mux(
         headBranchBypass,
