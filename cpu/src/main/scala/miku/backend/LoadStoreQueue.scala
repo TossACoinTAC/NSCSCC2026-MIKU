@@ -363,43 +363,136 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     when(scheduledLoadReselect) {
       loadHead := selectedLoadHead
       youngerRetryOwnerRobPointer := selectedLoad.robPointer
-      scheduledLoadOwner.robPointer := selectedLoad.robPointer
-      scheduledLoadOwner.recoveryEpoch := selectedLoad.recoveryEpoch
-      scheduledLoadOwner.memoryEpoch := selectedLoad.memoryEpoch
-      scheduledLoadPayload.pdst := selectedLoad.pdst
-      scheduledLoadPayload.writesPdst := selectedLoad.writesPdst
-      scheduledLoadPayload.virtualAddress := selectedLoad.virtualAddress
-      scheduledLoadTranslation.physicalAddress := selectedLoad.physicalAddress
-      scheduledLoadTranslation.done := selectedLoad.translationDone
-      scheduledLoadTranslation.uncached := selectedLoad.uncached
-      scheduledLoadPayload.size := selectedLoad.size
-      scheduledLoadPayload.byteMask := selectedLoad.byteMask
-      scheduledLoadPayload.signExtend := selectedLoad.signExtend
-      scheduledLoadPayload.isLl := selectedLoad.isLl
     }
-
-    // AGU and scheduler can target the same newly-ready entry on one edge.
-    // Keep this independent path at higher priority than a head reselect so
-    // the optimization does not add a cycle to address generation.
     when(scheduledLoadAguMatch) {
       youngerRetryOwnerRobPointer := io.agu.uop.robPointer
-      scheduledLoadOwner.robPointer := io.agu.uop.robPointer
-      scheduledLoadOwner.recoveryEpoch := io.agu.uop.recoveryEpoch
-      scheduledLoadOwner.memoryEpoch := selectedLoad.memoryEpoch
-      scheduledLoadPayload.pdst := io.agu.uop.pdst
-      scheduledLoadPayload.writesPdst := io.agu.uop.pdst =/= 0
-      scheduledLoadPayload.virtualAddress := io.agu.virtualAddress
-      scheduledLoadTranslation.physicalAddress := Mux(
-        aguTranslationBypass,
-        io.translationBypass.physicalAddress,
-        U(0, config.xlen bits)
+    }
+    if (config.enableScheduledLoadDataMux) {
+      // Keep the payload register boundary, but use explicit D-side hold muxes
+      // instead of a 16-entry pending-map signal as the CE of every wide field.
+      // AGU recapture remains higher priority than a simultaneous head reselect.
+      val payloadCapture = scheduledLoadReselect || scheduledLoadAguMatch
+      val captureFromAgu = scheduledLoadAguMatch
+      scheduledLoadOwner.robPointer := Mux(
+        payloadCapture,
+        Mux(captureFromAgu, io.agu.uop.robPointer, selectedLoad.robPointer),
+        scheduledLoadOwner.robPointer
       )
-      scheduledLoadTranslation.done := aguTranslationBypass
-      scheduledLoadTranslation.uncached := aguTranslationBypass && io.translationBypass.uncached
-      scheduledLoadPayload.size := io.agu.size
-      scheduledLoadPayload.byteMask := io.agu.byteMask
-      scheduledLoadPayload.signExtend := io.agu.uop.decoded.memorySignExtend
-      scheduledLoadPayload.isLl := io.agu.uop.decoded.isLl
+      scheduledLoadOwner.recoveryEpoch := Mux(
+        payloadCapture,
+        Mux(captureFromAgu, io.agu.uop.recoveryEpoch, selectedLoad.recoveryEpoch),
+        scheduledLoadOwner.recoveryEpoch
+      )
+      scheduledLoadOwner.memoryEpoch := Mux(
+        payloadCapture,
+        selectedLoad.memoryEpoch,
+        scheduledLoadOwner.memoryEpoch
+      )
+      scheduledLoadPayload.pdst := Mux(
+        payloadCapture,
+        Mux(captureFromAgu, io.agu.uop.pdst, selectedLoad.pdst),
+        scheduledLoadPayload.pdst
+      )
+      scheduledLoadPayload.writesPdst := Mux(
+        payloadCapture,
+        Mux(captureFromAgu, io.agu.uop.pdst =/= 0, selectedLoad.writesPdst),
+        scheduledLoadPayload.writesPdst
+      )
+      scheduledLoadPayload.virtualAddress := Mux(
+        payloadCapture,
+        Mux(captureFromAgu, io.agu.virtualAddress, selectedLoad.virtualAddress),
+        scheduledLoadPayload.virtualAddress
+      )
+      scheduledLoadTranslation.physicalAddress := Mux(
+        payloadCapture,
+        Mux(
+          captureFromAgu,
+          Mux(
+            aguTranslationBypass,
+            io.translationBypass.physicalAddress,
+            U(0, config.xlen bits)
+          ),
+          selectedLoad.physicalAddress
+        ),
+        scheduledLoadTranslation.physicalAddress
+      )
+      scheduledLoadTranslation.done := Mux(
+        payloadCapture,
+        Mux(captureFromAgu, aguTranslationBypass, selectedLoad.translationDone),
+        scheduledLoadTranslation.done
+      )
+      scheduledLoadTranslation.uncached := Mux(
+        payloadCapture,
+        Mux(
+          captureFromAgu,
+          aguTranslationBypass && io.translationBypass.uncached,
+          selectedLoad.uncached
+        ),
+        scheduledLoadTranslation.uncached
+      )
+      scheduledLoadPayload.size := Mux(
+        payloadCapture,
+        Mux(captureFromAgu, io.agu.size, selectedLoad.size),
+        scheduledLoadPayload.size
+      )
+      scheduledLoadPayload.byteMask := Mux(
+        payloadCapture,
+        Mux(captureFromAgu, io.agu.byteMask, selectedLoad.byteMask),
+        scheduledLoadPayload.byteMask
+      )
+      scheduledLoadPayload.signExtend := Mux(
+        payloadCapture,
+        Mux(
+          captureFromAgu,
+          io.agu.uop.decoded.memorySignExtend,
+          selectedLoad.signExtend
+        ),
+        scheduledLoadPayload.signExtend
+      )
+      scheduledLoadPayload.isLl := Mux(
+        payloadCapture,
+        Mux(captureFromAgu, io.agu.uop.decoded.isLl, selectedLoad.isLl),
+        scheduledLoadPayload.isLl
+      )
+    } else {
+      when(scheduledLoadReselect) {
+        scheduledLoadOwner.robPointer := selectedLoad.robPointer
+        scheduledLoadOwner.recoveryEpoch := selectedLoad.recoveryEpoch
+        scheduledLoadOwner.memoryEpoch := selectedLoad.memoryEpoch
+        scheduledLoadPayload.pdst := selectedLoad.pdst
+        scheduledLoadPayload.writesPdst := selectedLoad.writesPdst
+        scheduledLoadPayload.virtualAddress := selectedLoad.virtualAddress
+        scheduledLoadTranslation.physicalAddress := selectedLoad.physicalAddress
+        scheduledLoadTranslation.done := selectedLoad.translationDone
+        scheduledLoadTranslation.uncached := selectedLoad.uncached
+        scheduledLoadPayload.size := selectedLoad.size
+        scheduledLoadPayload.byteMask := selectedLoad.byteMask
+        scheduledLoadPayload.signExtend := selectedLoad.signExtend
+        scheduledLoadPayload.isLl := selectedLoad.isLl
+      }
+
+      // AGU and scheduler can target the same newly-ready entry on one edge.
+      // Keep this independent path at higher priority than a head reselect so
+      // the optimization does not add a cycle to address generation.
+      when(scheduledLoadAguMatch) {
+        scheduledLoadOwner.robPointer := io.agu.uop.robPointer
+        scheduledLoadOwner.recoveryEpoch := io.agu.uop.recoveryEpoch
+        scheduledLoadOwner.memoryEpoch := selectedLoad.memoryEpoch
+        scheduledLoadPayload.pdst := io.agu.uop.pdst
+        scheduledLoadPayload.writesPdst := io.agu.uop.pdst =/= 0
+        scheduledLoadPayload.virtualAddress := io.agu.virtualAddress
+        scheduledLoadTranslation.physicalAddress := Mux(
+          aguTranslationBypass,
+          io.translationBypass.physicalAddress,
+          U(0, config.xlen bits)
+        )
+        scheduledLoadTranslation.done := aguTranslationBypass
+        scheduledLoadTranslation.uncached := aguTranslationBypass && io.translationBypass.uncached
+        scheduledLoadPayload.size := io.agu.size
+        scheduledLoadPayload.byteMask := io.agu.byteMask
+        scheduledLoadPayload.signExtend := io.agu.uop.decoded.memorySignExtend
+        scheduledLoadPayload.isLl := io.agu.uop.decoded.isLl
+      }
     }
   }
 
