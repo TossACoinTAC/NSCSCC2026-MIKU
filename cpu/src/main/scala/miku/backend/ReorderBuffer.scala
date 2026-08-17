@@ -60,7 +60,11 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   // generation is resident state needed to reject a stale completion.
   val generation = Bool()
   val completionExceptionValid = Bool()
-  val completionSource = UInt(log2Up(config.writebackWidth + 2) bits)
+  // A normal completion is owned by exactly one producer lane.  Store and
+  // decoded-exception completions have no completion-memory payload and use
+  // the all-zero encoding.  Keeping this one-hot avoids a binary decode and
+  // serial producer mux on the three-wide retirement path.
+  val completionProducer = Bits(config.writebackWidth bits)
 }
 
 final case class ReorderBufferEntry(config: OooCoreConfig) extends Bundle {
@@ -77,6 +81,16 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       when(mask(index)) { selected := U(index, width bits) }
     }
     selected
+  }
+
+  private def balancedOr(values: Seq[Bits]): Bits = {
+    require(values.nonEmpty)
+    if (values.size == 1) {
+      values.head
+    } else {
+      val (lower, upper) = values.splitAt(values.size / 2)
+      balancedOr(lower) | balancedOr(upper)
+    }
   }
 
   val io = new Bundle {
@@ -132,8 +146,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   private val retirementMetadataWidth = ReorderBufferRetirementMetadata(config).getBitsWidth
   private val completionPayloadWidth = ReorderBufferCompletionPayload(config).getBitsWidth
   private val completionControlWidth = ReorderBufferCompletionControl(config).getBitsWidth
-  private val storeCompletionSource = config.writebackWidth
-  private val decodedCompletionSource = config.writebackWidth + 1
   require(config.robEntries % payloadBankCount == 0)
   require(config.renameWidth < payloadBankCount)
   require(config.commitWidth < payloadBankCount)
@@ -273,8 +285,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         entries(entryIndex).decodedExceptionValid := io.allocate(lane).uop.decoded.exception.valid
         entries(entryIndex).generation := allocationDestination(lane).msb
         entries(entryIndex).completionExceptionValid := False
-        entries(entryIndex).completionSource :=
-          U(decodedCompletionSource, log2Up(config.writebackWidth + 2) bits)
+        entries(entryIndex).completionProducer := B(0, config.writebackWidth bits)
       }
     }
   }
@@ -457,25 +468,37 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     candidateRetirementMetadata(lane).assignFromBits(retirementMetadataBankRead(bank))
     val selectedCompletionPayload = Bits(completionPayloadWidth bits)
     val selectedCompletionControl = Bits(completionControlWidth bits)
-    selectedCompletionPayload := 0
-    selectedCompletionControl := 0
-    for (producerLane <- 0 until config.writebackWidth) {
-      when(candidates(lane).state.completionSource === producerLane) {
-        selectedCompletionPayload := completionPayloadBankRead(producerLane)(bank)
-        selectedCompletionControl := completionControlBankRead(producerLane)(bank)
-      }
+    val completionPayloadOptions = (0 until config.writebackWidth).map { producerLane =>
       // A completion can make lane 1 or 2 eligible on the same edge that its
       // synchronous memory is written.  Define that case explicitly instead
       // of relying on the RAM primitive's read-during-write mode.
-      when(
-        candidates(lane).state.completionSource === producerLane &&
-          appliedCompletionValid(producerLane) &&
-          appliedCompletionPointer(producerLane) === pointer
-      ) {
-        selectedCompletionPayload := appliedCompletionPayload(producerLane)
-        selectedCompletionControl := appliedCompletionControl(producerLane)
-      }
+      val payload = Mux(
+        appliedCompletionValid(producerLane) &&
+          appliedCompletionPointer(producerLane) === pointer,
+        appliedCompletionPayload(producerLane),
+        completionPayloadBankRead(producerLane)(bank)
+      )
+      Mux(
+        candidates(lane).state.completionProducer(producerLane),
+        payload,
+        B(0, completionPayloadWidth bits)
+      )
     }
+    val completionControlOptions = (0 until config.writebackWidth).map { producerLane =>
+      val control = Mux(
+        appliedCompletionValid(producerLane) &&
+          appliedCompletionPointer(producerLane) === pointer,
+        appliedCompletionControl(producerLane),
+        completionControlBankRead(producerLane)(bank)
+      )
+      Mux(
+        candidates(lane).state.completionProducer(producerLane),
+        control,
+        B(0, completionControlWidth bits)
+      )
+    }
+    selectedCompletionPayload := balancedOr(completionPayloadOptions)
+    selectedCompletionControl := balancedOr(completionControlOptions)
     candidateCompletionPayload(lane).assignFromBits(selectedCompletionPayload)
     candidateCompletionControl(lane).assignFromBits(selectedCompletionControl)
     // Exception validity is retirement-control state.  Keeping that hot bit beside valid/complete
@@ -894,13 +917,13 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       when(!io.flush && stagedCompletionMatches(entryIndex)(lane)) {
         entries(entryIndex).complete := True
         entries(entryIndex).completionExceptionValid := stagedException(lane).valid
-        entries(entryIndex).completionSource := lane
+        entries(entryIndex).completionProducer := UIntToOh(lane, config.writebackWidth)
       }
     }
     when(!io.flush && stagedStoreCompletionMatches(entryIndex)) {
       entries(entryIndex).complete := True
       entries(entryIndex).completionExceptionValid := False
-      entries(entryIndex).completionSource := storeCompletionSource
+      entries(entryIndex).completionProducer := B(0, config.writebackWidth bits)
     }
   }
 
