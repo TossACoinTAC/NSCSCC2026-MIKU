@@ -875,10 +875,18 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val generatedCompletionValid = responseAccepted ||
     (if (config.enableBankedLoadForwardCompletion) False else forwardFire) ||
     storeCompletionFire || translationCompletionFire || aguExceptionCompletionReady
+  // The default banked-forward path publishes its own completion. Therefore a
+  // registered wake token can only come from a successful cache response; do
+  // not recover that fact from the full completion arbitration/data bundle.
+  val generatedLoadWakeup = responseLoadAccepted && !io.dataResponse.error &&
+    responseLoadWritesPdst && responseLoadPdst =/= 0 ||
+    (if (config.enableBankedLoadForwardCompletion) {
+       False
+     } else {
+       forwardFire && scheduledLoadPayload.writesPdst && scheduledLoadPayload.pdst =/= 0
+     })
   val generatedCompletion = Completion(config)
-  val generatedCompletionIsLoad = Bool()
   clearCompletion(generatedCompletion)
-  generatedCompletionIsLoad := False
   when(responseStoreArchitectural) {
     generatedCompletion.robPointer := headStore.robPointer
     generatedCompletion.recoveryEpoch := headStore.recoveryEpoch
@@ -893,7 +901,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       generatedCompletion.exception.badVAddr := headStore.virtualAddress
     }
   }.elsewhen(responseLoadAccepted) {
-    generatedCompletionIsLoad := True
     generatedCompletion.robPointer := responseLoadRobPointer
     generatedCompletion.recoveryEpoch := responseLoadRecoveryEpoch
     generatedCompletion.pdst := responseLoadPdst
@@ -913,7 +920,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     }
   }.elsewhen(forwardFire) {
     if (!config.enableBankedLoadForwardCompletion) {
-      generatedCompletionIsLoad := True
       generatedCompletion.robPointer := scheduledLoadOwner.robPointer
       generatedCompletion.recoveryEpoch := scheduledLoadOwner.recoveryEpoch
       generatedCompletion.pdst := scheduledLoadPayload.pdst
@@ -942,7 +948,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   }.elsewhen(translationCompletionFire) {
     val store = stores(translationOwnerStoreIndex)
     val load = loads(translationOwnerLoadIndex)
-    generatedCompletionIsLoad := !translationOwnerStore
     generatedCompletion.robPointer := translationOwnerRobPointer
     generatedCompletion.recoveryEpoch := translationOwnerRecoveryEpoch
     generatedCompletion.pdst := Mux(
@@ -1130,9 +1135,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     // responseLoadAccepted and forwardFire already include live LQ identity
     // checks. Register that qualification before the wakeup network so the
     // completion-to-IQ path does not asynchronously read the LQ again.
-    completionLoadWakeup := generatedCompletionValid && !fastStoreCompletionValid &&
-      generatedCompletionIsLoad && !generatedCompletion.exception.valid &&
-      generatedCompletion.writesPdst && generatedCompletion.pdst =/= 0
+    completionLoadWakeup := generatedLoadWakeup && !fastStoreCompletionValid
     // Qualify the epoch on the same existing LSQ completion boundary. Backend
     // broadcasts this registered Boolean instead of placing the global epoch
     // comparator on every IQ select path.
