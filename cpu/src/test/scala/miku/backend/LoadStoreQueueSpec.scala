@@ -1162,6 +1162,7 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         dut.io.allocate(0).recoveryEpoch #= 3
         dut.io.allocate(0).isLoad #= true
         dut.io.allocate(0).loadQueueIndex #= 0
+        dut.io.currentRecoveryEpoch #= 3
         sample(dut)
         dut.io.allocateValid #= 0
 
@@ -1191,6 +1192,7 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         dut.io.allocate(0).recoveryEpoch #= 4
         dut.io.allocate(0).isLoad #= true
         dut.io.allocate(0).loadQueueIndex #= 0
+        dut.io.currentRecoveryEpoch #= 4
         sample(dut)
         dut.io.allocateValid #= 0
 
