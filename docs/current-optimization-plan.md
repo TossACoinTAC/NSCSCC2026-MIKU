@@ -522,6 +522,40 @@ R17 top-50 统计为 LSQ 37、ROB/CSR 9、IQ 2、predictor 2，frontend 和 cach
 `build/reports/timing/R17-five-timing-direct-top50.json`、归档内 `route-health.json` 和
 `timing_summary.rpt`。
 
+### R18：LSQ wake/owner 锥收窄与 main 全量筛选
+
+R18 仍使用 default `32 ROB / 64 PRF`。本轮重新遍历 `origin/main @ 67d5cfb` 的 RTL 提交：
+L02/L03、per-MSHR victim ownership、system-operation 预解码、scheduled-load recapture、
+registered correction、LUT-tree equality 均已由当前分支等价或更完整地覆盖；旧 16-bit
+predictor/reset-sweep、custom-instruction 框架和 post-route `AggressiveExplore` 流程不优于当前
+正确性、预测器或正式实现合同，因此不引入。唯一未覆盖且有效的 branch-head payload no-CE
+增量已经在 R17 选择性适配为 `RT28 @ f8e3a31`。至此 main 的有效 RTL 候选已全部筛选，
+没有遗留待 cherry-pick 项。
+
+R17 direct top-50 中 37 条 LSQ 路径由 `registeredPendingLoads` 驱动 scheduled-load 宽 payload
+寄存器 CE，另有两条 IQ 路径来自已关闭 fast wake 仍传播的 banked-forward payload，八条
+ROB/CSR 路径终止在 privileged redirect target CE。R18 以五个独立提交处理这些结构：
+`LST03 @ 5411a38` 把 scheduled-load owner/payload 保持改为显式 D 侧 mux；
+`IQT05 @ f6fc9a3` 在 fast wake 关闭时彻底剪掉无效 banked-forward wake payload；
+`SRT01 @ 91fe641` 每拍采样仅由 pending-valid 资格化的 privileged redirect target，移除其宽 CE；
+`LWT01 @ a3bc94e` 从 cache-response/legacy-forward 源事件直接形成注册 load-wake token；
+`LWT02 @ 729e7c5` 同样在源端形成 recovery-epoch 资格，避免从完整 completion mux 反推。
+五项都保持现有寄存边界，没有增加可观察拍数。
+
+最终 source commit 为 `729e7c5`，source tree SHA-256 为
+`3507e9180a105222bcbb4970dcffe1538925fb5c3a91cd47691717559e217564`，发布 RTL SHA-256 为
+`3e2deeabe1569d208d7f10d584951ca580ae4aeda94f463b15794327436ce18a`。完整 `cpu-check`
+为 40 suites / 265 tests，Python contracts 95/95；func58 random-AXI seeds `240/255/141`
+均退出码 0。clean ideal perf20 为 20/20，R17 到 R18 的 20 项 cycles 逐项精确相等，总周期
+保持 `3,896,626`、几何平均 `1.000000000x`，比较见
+`build/reports/comparisons/R17-vs-R18-five-timing.json`。
+
+Yosys 相对 R17 的全核 cells 为 `57,850 -> 57,827`、word bits 为
+`397,114 -> 397,034`、post-flat cells 为 `51,823 -> 51,805`；LSQ cells
+`7,552 -> 7,530`，LSQ local LTP 从 51 降至 47。比较见
+`build/reports/yosys/R17-vs-R18-five-timing-candidates.json`。这些是结构筛选证据；R18 的
+100 MHz matching direct full 必须使用上述 identity 重新执行，不能继承 R17 `-0.230 ns`。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。

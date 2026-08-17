@@ -531,7 +531,32 @@ top-50 为 LSQ 37、ROB/CSR 9、IQ 2、predictor 2；最差路径是
 因此本轮候选的物理结论是“全局拥挤下降、LSQ CE 未解决”，不能把 `waiterResponseBuffer` 或
 PRF gate pruning 单独包装成时序闭合。
 
-## 12. 当前优先级与下一步
+## 12. R18：LSQ source-token 与宽 CE 收窄
+
+| ID | 机制与目标 | 状态 | 当前效果与证据 |
+| --- | --- | --- | --- |
+| LST03 | scheduled-load owner、地址和翻译 payload 保持现有寄存边界，以显式 D 侧 hold mux 代替 pending-map 到所有宽寄存器 CE 的传播 | 已实现并进入 R18 | `5411a38`；LSQ 36/36、Backend 26/26、ROB 20/20，独立 perf20 相对 R17 20 项逐项精确相等。直接针对 R17 rank 1-26 等 `registeredPendingLoads -> scheduledLoadPayload/Translation CE` 路径。 |
+| IQT05 | fast banked-forward wake 默认关闭时，不再让无效的 pdst/epoch payload 随 banked completion valid 选择进 Backend/IQ | 已实现并进入 R18 | `f6fc9a3`；测试改为只在 valid 时检查 payload，并保留 invalid 不得形成 wake 的负向合同。Yosys 组合中 LSQ 下降 6 cells；目标是 R17 两条 banked-forward-valid 到 IQ issue payload 路径。 |
+| SRT01 | privileged redirect target 每拍采样同一 next-target，仍只由下一拍 pending-valid 资格化可见性，移除 32-bit target 的 request CE | 已实现并进入 R18 | `91fe641`；OooCoreSystem 集成测试通过，pending 延迟、ERTN/refetch target 和 flush 边界不变；Yosys OooCoreSystem `398 -> 397` cells。 |
+| LWT01 | 注册 load wake 直接由成功 cache response 或 legacy 非 banked forward 事件形成，不再从完整 completion data/exception 仲裁反推 | 已实现并进入 R18 | `a3bc94e`；LSQ 36/36。单项 Yosys LSQ `7,546 -> 7,529` cells，local LTP `51 -> 48`。 |
+| LWT02 | load-wake recovery epoch 在同一源事件资格化，不再经过完整 completion recovery-epoch mux | 已实现并进入 R18 | `729e7c5`；LSQ 36/36。最终 LSQ local LTP 降至 47；组合软件周期透明。 |
+
+`origin/main @ 67d5cfb` 已再次逐提交筛选。当前分支已覆盖其 L02/L03、per-MSHR victim、
+system-operation predecode、scheduled-load recapture、registered correction 和 LUT equality；
+R17 已引入唯一缺失的 branch-head no-CE 增量。16-bit reset-sweep predictor、custom-instruction
+框架和 post-route 物理优化不满足当前预测器/验证/正式产物边界，未引入。main 没有剩余的
+有效 RTL 候选等待迁移。
+
+最终 identity 为 source commit `729e7c5`、source tree SHA-256
+`3507e9180a105222bcbb4970dcffe1538925fb5c3a91cd47691717559e217564`、发布 RTL SHA-256
+`3e2deeabe1569d208d7f10d584951ca580ae4aeda94f463b15794327436ce18a`。完整 `cpu-check`
+40 suites / 265 tests、Python contracts 95/95、func58 seeds `240/255/141` 均通过。perf20
+20/20 相对 R17 逐项精确相等，总周期 `3,896,626`。Yosys 相对 R17 为 cells
+`57,850 -> 57,827`、word bits `397,114 -> 397,034`、post-flat cells
+`51,823 -> 51,805`，LSQ `7,552 -> 7,530`；matching direct full 尚待本身份运行，
+不继承任何旧 WNS。
+
+## 13. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
