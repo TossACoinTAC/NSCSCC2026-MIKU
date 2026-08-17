@@ -718,8 +718,13 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     )
   )
   for (lane <- 0 until config.commitWidth) {
-    val commitsDestination = rob.io.commitValid(lane) && rob.io.commit(lane).retired &&
+    val commitWritesArchitecturalGpr = if (config.enableRobCommitDestinationPredecode) {
+      rob.io.commitDestinationValid(lane)
+    } else {
       rob.io.commit(lane).writesGpr && rob.io.commit(lane).rd =/= 0
+    }
+    val commitsDestination = rob.io.commitValid(lane) && rob.io.commit(lane).retired &&
+      commitWritesArchitecturalGpr
     registerMap.io.commitValid(lane) := commitsDestination
     registerMap.io.commitArch(lane) := rob.io.commit(lane).rd
     registerMap.io.commitPdst(lane) := rob.io.commit(lane).pdst
