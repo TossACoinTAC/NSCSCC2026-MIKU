@@ -346,6 +346,29 @@ source tree、RTL 和实验 manifest 下，routed setup/hold WNS 为 `-0.816/+0.
 待验证的中间点，不预设为默认或回退；任何容量配置必须重新完成 matching software、Yosys 与
 direct full。
 
+### R14：main 里程碑选择性引入
+
+`origin/main @ 8f33144` 已完成按当前实现边界的审计。当前分支已有 L02、L03、per-MSHR
+victim ownership 和 system-operation 预解码；main 的 16-bit predictor 在现有 matched A/B 中
+劣于当前 10-bit 配置，旧 ROB bypass 已由 RT26 覆盖，post-route `AggressiveExplore` 也不属于
+正式 direct full 流程。因此不 merge 整个 main，只适配三项互相可隔离的 RTL 时序候选：
+
+1. `EQ01 @ 03e8e25`：LUT-tree identity equality，覆盖前端、cache/L1I 与 predictor；
+2. `MT20 @ 9f06f44`：scheduled Load 只在 ownership 变化时重捕获宽 payload；
+3. `FT12 @ c9af20c`：在已有 response 边界注册 correction decision 与窄 drain 资格。
+
+三项累积节点均完成受影响定向测试、完整 `cpu-check` 和 perf20；最终为 40 suites / 263 tests、
+Python contracts 95/95，perf20 20/20 逐项精确等于 `3,879,728`，func58 random-AXI seeds
+`240/255/141` 均为 58/58。最终发布 RTL SHA-256 为
+`26009f15961b1f350baa639589353cb5ae851f5fc8bfda49a8b415dad0223ac8`。
+
+Yosys 不给 EQ01/MT20 的物理收益背书：EQ01 全核 cells 增加 30，MT20 再增加 6；FT12 相对
+MT20 将 OooFrontend 和全核 cells 各减少 8。它们的目标分别是 FPGA equality mapping、宽 CE/
+fanout 和 correction 跨区控制，最终保留必须由一次 matching 100 MHz direct full 的 top-N、
+拥挤、WNS/TNS 与资源交叉验证。当前仅形成软件稳定候选 baseline，尚未形成新的物理里程碑；
+不得继承 main 的 closure 或 `e04edc8` 的旧 WNS。若组合实现没有更优，将按三个提交边界和
+当前 top-N 路径隔离，而不是继续叠加未知收益候选。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。

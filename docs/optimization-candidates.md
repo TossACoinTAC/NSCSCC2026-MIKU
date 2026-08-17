@@ -389,7 +389,35 @@ bitstream 成功。最终无残留 overlap，峰值为 42,344；routed resources
 ROB/CSR 为 16 条（最差 `-0.587 ns`），因此后续优先从 IQ/LSQ/前端跨区网络与 ROB 的结构性重构
 取候选，而不是继续堆叠小范围 ROB 布尔重写。
 
-## 9. 当前优先级与下一步
+## 9. R14：main 里程碑选择性引入
+
+本轮审计 `origin/main @ 8f33144`，不做整分支 merge。当前分支已经拥有 main 中的 L02、L03、
+per-MSHR victim ownership 和 system-operation 预解码；这些内容不重复引入。main 的 16-bit GHR、
+`4 x 4096` predictor 相对当前 10-bit 配置的 matching 软件 A/B 更差，因此继续保留当前 10-bit
+配置。`12c3597` 的 ROB head-bypass 也已由当前 `RT26 @ e04edc8` 覆盖。main 中基于
+`AggressiveExplore` 的 post-route 实现流程仅能作为探索信息，未引入正式实现入口，也不继承其
+WNS、资源、DCP 或 bitstream 结论。
+
+| ID | 来源与适配 | 状态 | 当前效果与下一门禁 |
+| --- | --- | --- | --- |
+| EQ01 | 从 `c60dadd` 选择性适配前端 owner/correction、cache tag、L1I refill line 和 BTB tag 的 LUT-tree equality；同时由 `c1c00c3` 补齐共享 CacheArray 的 test-impact 映射 | 已实现；软件门禁通过 | `03e8e25`；完整 `cpu-check` 40 suites / 263 tests、Python contracts 95/95，perf20 20/20 逐项等于 `3,879,728`。Yosys 全核 cells `57,205 -> 57,235`，不把该代理当作 FPGA LUT/CARRY4 物理结论；由 matching direct top-N 和 WNS 决定保留。 |
+| MT20 | 从 `4c233b2` 适配到当前拆分后的 scheduled-load owner/payload/translation：相同 head 不重复写宽 payload，head 变化、owner invalid、AGU 或 translation response 仍按原优先级更新 | 已实现；软件门禁通过 | `9f06f44`；LSQ 36/36、完整门禁通过，perf20 20/20 逐项等于 `3,879,728`。相对 EQ01 的 Yosys 为 cells `57,235 -> 57,241`、word bits `+16`，目标是减少物理 CE/fanout，需 matching route 裁决。 |
+| FT12 | 从 `06ca492` 仅适配 registered correction decision 的 RTL，不引入其 Vivado post-route 策略；legacy cleanup 保持可选，deferred cleanup 使用已注册的窄 owner/drain 资格 | 已实现；软件门禁通过 | `c9af20c`；OooFrontend 26/26、L1I 11/11、完整门禁通过。相对 MT20 的 Yosys 全核 cells/word bits/post-flat 均 `-8`，OooFrontend `4,051 -> 4,043`；perf20 20/20 逐项等于 `3,879,728`，func58 seeds `240/255/141` 均为 58/58。matching direct implementation 待运行。 |
+
+R14 当前发布 RTL SHA-256 为
+`26009f15961b1f350baa639589353cb5ae851f5fc8bfda49a8b415dad0223ac8`。最终 perf20 与 func58
+矩阵分别为：
+
+- `build/sim/runs/cpu_248c9cb56a1d_chiplab_c398d274812f/clean-perf20_model_dd944bd53fde_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`
+- `build/sim/runs/cpu_248c9cb56a1d_chiplab_c398d274812f/clean-func58_model_baff0ccbeb0c_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`
+
+结构对比为 `build/reports/yosys/MT20-vs-FT12-registered-correction.json`。这组证据只建立
+“正确且周期透明”的候选 baseline；只有当前 RTL 的 100 MHz direct full 自身满足 setup/hold、
+fully routed、DRC 和 bitstream 门禁后，才可晋级新的物理稳定里程碑。若结果没有优于
+`e04edc8` 的 matching direct，将按 `EQ01 -> MT20 -> FT12` 的提交边界结合 top-N 路径隔离，
+不以 main 的历史 closure 替代当前 A/B。
+
+## 10. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
@@ -411,11 +439,11 @@ ROB/CSR 为 16 条（最差 `-0.587 ns`），因此后续优先从 IQ/LSQ/前端
 7. 当前阶段以 CT05 的 isolated perf20、最终组合通过的 func58 三 seed 和 B02-F 的完整软件门禁为准。任何
    post-route physopt 仅用于路径探索，不是 matching direct full，不能作为正式时序、资源、组合收益或板测归因证据。
 
-## 10. 详细说明的维护边界
+## 11. 详细说明的维护边界
 
 上表保存每个候选的完整机制、风险、决策指标、当前状态和效果。涉及流水级行为、示例和理论推导的长篇说明继续保留在 [architecture.md](architecture.md) 对应的十二阶段章节，以免把教学主线拆碎；这些章节不再维护第二份状态列。候选状态发生变化时只更新本文，并把不可变的 cycles、RTL hash、工具版本、WNS/资源和报告路径写入对应实验 manifest。
 
-## 11. 证据入口
+## 12. 证据入口
 
 - 当前 RTL：`build/rtl/generation-manifest.json`。
 - R6 L11 perf20：`build/sim/runs/cpu_1548f170c573_chiplab_c398d274812f/clean-perf20_model_858465589681_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`；逐项比较为 `build/reports/comparisons/R6-L11.json`。
