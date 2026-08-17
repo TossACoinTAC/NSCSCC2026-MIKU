@@ -132,7 +132,7 @@ final case class OooCoreConfig(
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     // Capture tokenized issue source tags through the existing one-hot selected-slot mask rather
     // than a second binary physical-slot read at the operand boundary.
-    enableOneHotTokenPsrcCapture: Boolean = true,
+    enableOneHotTokenPsrcCapture: Boolean = false,
     enableBalancedIssueSelection: Boolean = true,
     enableBankedLoadForwardCompletion: Boolean = true,
     // Store-forwarded Loads retain their normal completion, but their consumers
