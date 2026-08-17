@@ -165,6 +165,7 @@ class CandidateManifestTest(unittest.TestCase):
             (root / "build/rtl").mkdir(parents=True)
             generation_path = root / "build/rtl/generation-manifest.json"
             generation = {
+                "custom_profile": "disabled",
                 "source_tree_sha256": "a" * 64,
                 "raw_rtl_sha256": "b" * 64,
                 "published_rtl_sha256": "c" * 64,

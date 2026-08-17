@@ -159,17 +159,48 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       (isJirl && instruction(4 downto 0) === 1)
     val allocationPredictorType = UInt(PredictedBranchType.Width bits)
     allocationPredictorType := PredictedBranchType.direct
-    when(
-      io.allocate(lane).uop.decoded.branchKind >= 1 &&
-        io.allocate(lane).uop.decoded.branchKind <= 6
-    ) {
-      allocationPredictorType := PredictedBranchType.conditional
-    }.elsewhen(isReturn) {
-      allocationPredictorType := PredictedBranchType.ret
-    }.elsewhen(isCall) {
-      allocationPredictorType := PredictedBranchType.call
-    }.elsewhen(isJirl) {
-      allocationPredictorType := PredictedBranchType.indirect
+    val conditionalBranch = io.allocate(lane).uop.decoded.branchKind >= 1 &&
+      io.allocate(lane).uop.decoded.branchKind <= 6
+    val customBranches = config.customInstructionProfile.specifications.filter(
+      _.kind == CustomInstructionKind.Branch
+    )
+    if (customBranches.nonEmpty) {
+      val customMatches = customBranches.map { specification =>
+        (instruction.asUInt & U(specification.matchMask, 32 bits)) ===
+          U(specification.matchValue, 32 bits)
+      }
+      val customBranch = customMatches.reduce(_ || _) && io.allocate(lane).uop.decoded.isBranch
+      val customPredicate = customBranches.zip(customMatches).map { case (specification, matched) =>
+        matched && (if (specification.branchEvaluator.nonEmpty) True else False)
+      }.reduce(_ || _)
+      when(
+        customBranch &&
+          io.allocate(lane).uop.decoded.branchKind === CustomBranchKind.RegisterIndirect
+      ) {
+        allocationPredictorType := PredictedBranchType.indirect
+      }.elsewhen(customBranch && (conditionalBranch || customPredicate)) {
+        allocationPredictorType := PredictedBranchType.conditional
+      }.elsewhen(customBranch) {
+        allocationPredictorType := PredictedBranchType.direct
+      }.elsewhen(conditionalBranch) {
+        allocationPredictorType := PredictedBranchType.conditional
+      }.elsewhen(isReturn) {
+        allocationPredictorType := PredictedBranchType.ret
+      }.elsewhen(isCall) {
+        allocationPredictorType := PredictedBranchType.call
+      }.elsewhen(isJirl) {
+        allocationPredictorType := PredictedBranchType.indirect
+      }
+    } else {
+      when(conditionalBranch) {
+        allocationPredictorType := PredictedBranchType.conditional
+      }.elsewhen(isReturn) {
+        allocationPredictorType := PredictedBranchType.ret
+      }.elsewhen(isCall) {
+        allocationPredictorType := PredictedBranchType.call
+      }.elsewhen(isJirl) {
+        allocationPredictorType := PredictedBranchType.indirect
+      }
     }
     allocationPayload(lane).predictorMetadata :=
       io.allocate(lane).uop.decoded.predictorMetadata

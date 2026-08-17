@@ -1,10 +1,13 @@
 package miku.compat
 
-import miku.core.{OooCoreConfig, OooCoreSystem}
+import miku.core.{CustomInstructionProfile, OooCoreConfig, OooCoreSystem}
 import spinal.core._
 
 /** Locked compatibility boundary for the chiplab core_top interface. */
-final case class CoreTopCompatConfig(tlbEntries: Int = 32) {
+final case class CoreTopCompatConfig(
+    tlbEntries: Int = 32,
+    customInstructionProfile: CustomInstructionProfile = CustomInstructionProfile.Disabled
+) {
   require(tlbEntries == 32, "only the locked TLBNUM=32 configuration is currently verified")
 }
 
@@ -96,7 +99,11 @@ final class CoreTopCompat(config: CoreTopCompatConfig = CoreTopCompatConfig()) e
   )
 
   val backendArea = new ClockingArea(coreClockDomain) {
-    val core = new OooCoreSystem(OooCoreConfig.FourIssueThreeCommit)
+    val core = new OooCoreSystem(
+      OooCoreConfig.FourIssueThreeCommit.copy(customInstructionProfile =
+        config.customInstructionProfile
+      )
+    )
   }
   val core = backendArea.core
 

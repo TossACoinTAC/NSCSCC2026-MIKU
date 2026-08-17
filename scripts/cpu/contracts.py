@@ -102,7 +102,10 @@ def validate_rtl(text: str, contract: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def validate_generation_manifest(document: dict[str, Any]) -> None:
-    required = {"schema_version", "source_tree_sha256", "raw_rtl_sha256", "published_rtl_sha256", "toolchain"}
+    required = {
+        "schema_version", "source_tree_sha256", "raw_rtl_sha256",
+        "published_rtl_sha256", "custom_profile", "toolchain",
+    }
     if not required.issubset(document):
         raise ContractError(f"生成清单缺少字段: {sorted(required - set(document))}")
     for key in ("source_tree_sha256", "raw_rtl_sha256", "published_rtl_sha256"):
@@ -110,6 +113,10 @@ def validate_generation_manifest(document: dict[str, Any]) -> None:
             raise ContractError(f"生成清单哈希错误: {key}")
     if not isinstance(document["toolchain"], dict):
         raise ContractError("生成清单 toolchain 必须是对象")
+    if re.fullmatch(r"[a-z0-9][a-z0-9._-]*", str(document["custom_profile"])) is None:
+        raise ContractError("生成清单 custom_profile 非法")
+    if document["custom_profile"] == "off":
+        raise ContractError("生成清单 custom_profile 必须使用规范名称 disabled")
 
 
 def validate_sim_result(document: dict[str, Any]) -> None:

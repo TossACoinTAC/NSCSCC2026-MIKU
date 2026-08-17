@@ -626,6 +626,18 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
     alu.io.alu_op := decoded.operation
     alu.io.alu_src1 := aluSource1
     alu.io.alu_src2 := aluSource2
+    val customAwareAluResult =
+      if (port == config.customComputePort) {
+        CustomExecution.computeResult(
+          config,
+          decoded,
+          aluSource1,
+          aluSource2,
+          alu.io.alu_result
+        )
+      } else {
+        alu.io.alu_result
+      }
 
     val isMultiply = decoded.fuType === ExecutionUnitType.multiply
     val isDivide = decoded.fuType === ExecutionUnitType.divide
@@ -688,7 +700,11 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
     directCompletion(port).recoveryEpoch := io.issue(port).recoveryEpoch
     directCompletion(port).pdst := io.issue(port).pdst
     directCompletion(port).writesPdst := io.issue(port).pdst =/= 0
-    directCompletion(port).data := Mux(decoded.resultFromCsr, systemReadResult, alu.io.alu_result)
+    directCompletion(port).data := Mux(
+      decoded.resultFromCsr,
+      systemReadResult,
+      customAwareAluResult
+    )
     directCompletion(port).sideEffectData := Mux(decoded.csrMask, csrMaskResult, io.source2(port))
     when(decoded.systemOperation === SystemOperation.invalidateTlb) {
       directCompletion(port).sideEffectData :=
@@ -699,16 +715,23 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
     val equal = io.source1(port) === io.source2(port)
     val lessSigned = io.source1(port).asSInt < io.source2(port).asSInt
     val lessUnsigned = io.source1(port).asUInt < io.source2(port).asUInt
-    val branchTaken = Bool()
-    branchTaken := decoded.branchKind === 0 || decoded.branchKind === 7
+    val standardBranchTaken = Bool()
+    standardBranchTaken := decoded.branchKind === 0 || decoded.branchKind === 7
     switch(decoded.branchKind) {
-      is(U(1, 3 bits)) { branchTaken := equal }
-      is(U(2, 3 bits)) { branchTaken := !equal }
-      is(U(3, 3 bits)) { branchTaken := lessSigned }
-      is(U(4, 3 bits)) { branchTaken := !lessSigned }
-      is(U(5, 3 bits)) { branchTaken := lessUnsigned }
-      is(U(6, 3 bits)) { branchTaken := !lessUnsigned }
+      is(U(1, 3 bits)) { standardBranchTaken := equal }
+      is(U(2, 3 bits)) { standardBranchTaken := !equal }
+      is(U(3, 3 bits)) { standardBranchTaken := lessSigned }
+      is(U(4, 3 bits)) { standardBranchTaken := !lessSigned }
+      is(U(5, 3 bits)) { standardBranchTaken := lessUnsigned }
+      is(U(6, 3 bits)) { standardBranchTaken := !lessUnsigned }
     }
+    val branchTaken = CustomExecution.branchTaken(
+      config,
+      decoded,
+      io.source1(port),
+      io.source2(port),
+      standardBranchTaken
+    )
     val takenTarget = Mux(
       decoded.branchKind === 7,
       io.source1(port).asUInt + decoded.immediate.asUInt,

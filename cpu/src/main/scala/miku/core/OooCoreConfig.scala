@@ -137,7 +137,8 @@ final case class OooCoreConfig(
     instructionCache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 128, lineBytes = 64),
     dataCache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 128, lineBytes = 64),
     level2Cache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 512, lineBytes = 64),
-    executionPorts: Vector[ExecutionPortConfig] = OooCoreConfig.DefaultExecutionPorts
+    executionPorts: Vector[ExecutionPortConfig] = OooCoreConfig.DefaultExecutionPorts,
+    customInstructionProfile: CustomInstructionProfile = CustomInstructionProfile.Disabled
 ) {
   private def isPowerOfTwo(value: Int): Boolean = value > 0 && (value & (value - 1)) == 0
 
@@ -188,8 +189,18 @@ final case class OooCoreConfig(
     executionPorts.exists(_.capabilities.contains(ExecutionUnitKind.Branch)),
     "at least one execution port must resolve branches"
   )
-
+  require(
+    executionPorts
+      .filter(_.capabilities.contains(ExecutionUnitKind.Branch))
+      .forall(_.capabilities.contains(ExecutionUnitKind.Alu)),
+    "every branch execution port must also preserve ALU payload fields"
+  )
+  require(
+    executionPorts.exists(_.capabilities.contains(ExecutionUnitKind.Alu)),
+    "at least one execution port must accept ALU operations"
+  )
   val executionWidth: Int = executionPorts.size
+  val customComputePort: Int = executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Alu))
   val archRegIndexWidth: Int = log2Up(archRegs)
   val physicalRegIndexWidth: Int = log2Up(physicalRegs)
   val robIndexWidth: Int = log2Up(robEntries)

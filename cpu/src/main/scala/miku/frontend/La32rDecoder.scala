@@ -38,6 +38,152 @@ final class La32rDecoder(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCom
   val i26 = instruction(9 downto 0) ## instruction(25 downto 10)
   val csrIndex = instruction(23 downto 10).asUInt
 
+  private def customRegister(
+      field: CustomRegister,
+      rd: UInt,
+      rj: UInt,
+      rk: UInt
+  ): UInt = field match {
+    case CustomRegister.Rd     => rd
+    case CustomRegister.Rj     => rj
+    case CustomRegister.Rk     => rk
+    case CustomRegister.Unused => U(0, config.archRegIndexWidth bits)
+    case CustomRegister.Fixed(index) => U(index, config.archRegIndexWidth bits)
+  }
+
+  private def constantBool(value: Boolean): Bool = if (value) True else False
+
+  private final class CustomDecode(
+      val valid: Bool,
+      val operation: Bits,
+      val rs1: UInt,
+      val rs2: UInt,
+      val destination: UInt,
+      val immediate: Bits,
+      val source1Used: Bool,
+      val source2Used: Bool,
+      val source2IsImmediate: Bool,
+      val writesGpr: Bool,
+      val isLoad: Bool,
+      val isStore: Bool,
+      val isBranch: Bool,
+      val memorySize: Bits,
+      val memorySignExtend: Bool,
+      val branchKind: UInt,
+      val source1IsPc: Bool,
+      val source2IsFour: Bool
+  )
+
+  private val customIndexedSpecifications =
+    config.customInstructionProfile.indexedSpecifications
+  private val customSpecifications = customIndexedSpecifications.map(_._1)
+  private val customDecode: Option[CustomDecode] =
+    if (customSpecifications.isEmpty) None
+    else {
+      val matches = customSpecifications.map { specification =>
+        (instruction.asUInt & U(specification.matchMask, 32 bits)) ===
+          U(specification.matchValue, 32 bits)
+      }
+      val valid = matches.reduce(_ || _)
+      val operation = Bits(14 bits)
+      val rs1 = UInt(config.archRegIndexWidth bits)
+      val rs2 = UInt(config.archRegIndexWidth bits)
+      val destination = UInt(config.archRegIndexWidth bits)
+      val immediate = Bits(config.xlen bits)
+      val source1Used = Bool()
+      val source2Used = Bool()
+      val source2IsImmediate = Bool()
+      val writesGpr = Bool()
+      val isLoad = Bool()
+      val isStore = Bool()
+      val isBranch = Bool()
+      val memorySize = Bits(2 bits)
+      val memorySignExtend = Bool()
+      val branchKind = UInt(3 bits)
+      val source1IsPc = Bool()
+      val source2IsFour = Bool()
+
+      operation := 0
+      rs1 := 0
+      rs2 := 0
+      destination := rd
+      immediate := 0
+      source1Used := False
+      source2Used := False
+      source2IsImmediate := False
+      writesGpr := False
+      isLoad := False
+      isStore := False
+      isBranch := False
+      memorySize := 0
+      memorySignExtend := False
+      branchKind := 0
+      source1IsPc := False
+      source2IsFour := False
+
+      for (((specification, operationCode), matched) <-
+          customIndexedSpecifications.zip(matches)) {
+        when(matched) {
+          if (specification.kind == CustomInstructionKind.Compute) {
+            operation := B(operationCode, 14 bits)
+          } else if (specification.branchLink) {
+            operation := B(1, 14 bits)
+          }
+          rs1 := customRegister(specification.source1, rd, rj, rk)
+          rs2 := customRegister(specification.source2, rd, rj, rk)
+          destination := customRegister(specification.destination, rd, rj, rk)
+          immediate := specification.immediate.decode(instruction, config.xlen)
+          source1Used := constantBool(specification.source1 != CustomRegister.Unused)
+          source2Used := constantBool(specification.source2 != CustomRegister.Unused)
+          source2IsImmediate := constantBool(specification.source2IsImmediate)
+          writesGpr := constantBool(specification.writesGpr)
+          isLoad := constantBool(specification.kind == CustomInstructionKind.Load)
+          isStore := constantBool(specification.kind == CustomInstructionKind.Store)
+          isBranch := constantBool(specification.kind == CustomInstructionKind.Branch)
+          memorySize := B(specification.memorySize, 2 bits)
+          memorySignExtend := constantBool(specification.memorySignExtend)
+          branchKind := U(specification.branchKind, 3 bits)
+          source1IsPc := constantBool(specification.source1IsPc || specification.branchLink)
+          source2IsFour := constantBool(specification.source2IsFour || specification.branchLink)
+        }
+      }
+
+      Some(
+        new CustomDecode(
+          valid,
+          operation,
+          rs1,
+          rs2,
+          destination,
+          immediate,
+          source1Used,
+          source2Used,
+          source2IsImmediate,
+          writesGpr,
+          isLoad,
+          isStore,
+          isBranch,
+          memorySize,
+          memorySignExtend,
+          branchKind,
+          source1IsPc,
+          source2IsFour
+        )
+      )
+    }
+
+  private def customBits(standard: Bits)(custom: CustomDecode => Bits): Bits =
+    customDecode.map(decoded => Mux(decoded.valid, custom(decoded), standard)).getOrElse(standard)
+
+  private def customUInt(standard: UInt)(custom: CustomDecode => UInt): UInt =
+    customDecode.map(decoded => Mux(decoded.valid, custom(decoded), standard)).getOrElse(standard)
+
+  private def customBool(standard: Bool)(custom: CustomDecode => Bool): Bool =
+    customDecode.map(decoded => Mux(decoded.valid, custom(decoded), standard)).getOrElse(standard)
+
+  private def standardOnly(value: Bool): Bool =
+    customDecode.map(decoded => !decoded.valid && value).getOrElse(value)
+
   private def full(op21: Int, op19: Int, op25: Int = 0): Bool =
     eq(op31To26, 0) && eq(op25To22, op25) && eq(op21To20, op21) && eq(op19To15, op19)
 
@@ -117,15 +263,21 @@ final class La32rDecoder(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCom
   val instTlbFill = privilegedBase && rk === 0x0d
   val instCpuCfg = counterBase && rk === 0x1b
 
-  val destination = Mux(instBl, U(1, 5 bits), Mux(instRdCntIdW, rj, rd))
-  val validCacop = instCacop &&
-    (destination(2 downto 0) === 0 || destination(2 downto 0) === 1 ||
-      destination(2 downto 0) === 2) &&
-    destination(4 downto 3) =/= 3
-  val cacopNop = instCacop &&
-    ((destination(2 downto 0) =/= 0 && destination(2 downto 0) =/= 1 &&
-      destination(2 downto 0) =/= 2) ||
-      destination(4 downto 3) === 3)
+  val destination = customUInt(Mux(instBl, U(1, 5 bits), Mux(instRdCntIdW, rj, rd)))(
+    _.destination
+  )
+  val validCacop = standardOnly(
+    instCacop &&
+      (destination(2 downto 0) === 0 || destination(2 downto 0) === 1 ||
+        destination(2 downto 0) === 2) &&
+      destination(4 downto 3) =/= 3
+  )
+  val cacopNop = standardOnly(
+    instCacop &&
+      ((destination(2 downto 0) =/= 0 && destination(2 downto 0) =/= 1 &&
+        destination(2 downto 0) =/= 2) ||
+        destination(4 downto 3) === 3)
+  )
 
   val aluOperation = Bits(14 bits)
   aluOperation := 0
@@ -246,11 +398,13 @@ final class La32rDecoder(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCom
     instPreload
   )
   val source2IsFour = instJirl || instBl
-  val loadOperation = any(instLdB, instLdH, instLdW, instLdBu, instLdHu, instLlW)
-  val storeOperation = any(instStB, instStH, instStW, instScW)
-  val byteMemory = any(instLdB, instLdBu, instStB)
-  val halfMemory = any(instLdH, instLdHu, instStH)
-  val memorySignExtend = instLdB || instLdH
+  val loadOperation = customBool(any(instLdB, instLdH, instLdW, instLdBu, instLdHu, instLlW))(
+    _.isLoad
+  )
+  val storeOperation = customBool(any(instStB, instStH, instStW, instScW))(_.isStore)
+  val byteMemory = standardOnly(any(instLdB, instLdBu, instStB))
+  val halfMemory = standardOnly(any(instLdH, instLdHu, instStH))
+  val memorySignExtend = customBool(instLdB || instLdH)(_.memorySignExtend)
 
   val needRj = any(
     instAddW,
@@ -341,133 +495,145 @@ final class La32rDecoder(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCom
     instInvTlb
   )
 
-  val instructionValid = any(
-    instAddW,
-    instSubW,
-    instSlt,
-    instSltu,
-    instNor,
-    instAnd,
-    instOr,
-    instXor,
-    instOrn,
-    instAndn,
-    instSllW,
-    instSrlW,
-    instSraW,
-    instMulW,
-    instMulhW,
-    instMulhWu,
-    instDivW,
-    instModW,
-    instDivWu,
-    instModWu,
-    instBreak,
-    instSyscall,
-    instSlliW,
-    instSrliW,
-    instSraiW,
-    instIdle,
-    instSlti,
-    instSltui,
-    instAddiW,
-    instAndi,
-    instOri,
-    instXori,
-    instLdB,
-    instLdH,
-    instLdW,
-    instStB,
-    instStH,
-    instStW,
-    instLdBu,
-    instLdHu,
-    instLlW,
-    instScW,
-    instJirl,
-    instB,
-    instBl,
-    instBeq,
-    instBne,
-    instBlt,
-    instBge,
-    instBltu,
-    instBgeu,
-    instLu12iW,
-    instPcaddi,
-    instPcaddu12i,
-    instCsrRead,
-    instCsrWrite,
-    instCsrXchg,
-    instRdCntIdW,
-    instRdCntVhW,
-    instRdCntVlW,
-    instErtn,
-    validCacop,
-    instPreload,
-    instDbar,
-    instIbar,
-    instTlbSearch,
-    instTlbRead,
-    instTlbWrite,
-    instTlbFill,
-    cacopNop,
-    instCpuCfg,
-    instInvTlb && rd <= 6
-  )
-  val kernelInstruction = any(
-    instCsrRead,
-    instCsrWrite,
-    instCsrXchg,
-    validCacop && destination(4 downto 3) =/= 2,
-    instTlbSearch,
-    instTlbRead,
-    instTlbWrite,
-    instTlbFill,
-    instInvTlb,
-    instErtn,
-    instIdle
+  val instructionValid = customBool(
+    any(
+      instAddW,
+      instSubW,
+      instSlt,
+      instSltu,
+      instNor,
+      instAnd,
+      instOr,
+      instXor,
+      instOrn,
+      instAndn,
+      instSllW,
+      instSrlW,
+      instSraW,
+      instMulW,
+      instMulhW,
+      instMulhWu,
+      instDivW,
+      instModW,
+      instDivWu,
+      instModWu,
+      instBreak,
+      instSyscall,
+      instSlliW,
+      instSrliW,
+      instSraiW,
+      instIdle,
+      instSlti,
+      instSltui,
+      instAddiW,
+      instAndi,
+      instOri,
+      instXori,
+      instLdB,
+      instLdH,
+      instLdW,
+      instStB,
+      instStH,
+      instStW,
+      instLdBu,
+      instLdHu,
+      instLlW,
+      instScW,
+      instJirl,
+      instB,
+      instBl,
+      instBeq,
+      instBne,
+      instBlt,
+      instBge,
+      instBltu,
+      instBgeu,
+      instLu12iW,
+      instPcaddi,
+      instPcaddu12i,
+      instCsrRead,
+      instCsrWrite,
+      instCsrXchg,
+      instRdCntIdW,
+      instRdCntVhW,
+      instRdCntVlW,
+      instErtn,
+      validCacop,
+      instPreload,
+      instDbar,
+      instIbar,
+      instTlbSearch,
+      instTlbRead,
+      instTlbWrite,
+      instTlbFill,
+      cacopNop,
+      instCpuCfg,
+      instInvTlb && rd <= 6
+    )
+  )(_ => True)
+  val kernelInstruction = standardOnly(
+    any(
+      instCsrRead,
+      instCsrWrite,
+      instCsrXchg,
+      validCacop && destination(4 downto 3) =/= 2,
+      instTlbSearch,
+      instTlbRead,
+      instTlbWrite,
+      instTlbFill,
+      instInvTlb,
+      instErtn,
+      instIdle
+    )
   )
   val privilegeException = kernelInstruction && io.privilege === B"11"
   val illegalInstruction = !instructionValid
-  val branchInstruction = any(
-    instBeq,
-    instBne,
-    instBlt,
-    instBge,
-    instBltu,
-    instBgeu,
-    instJirl,
-    instBl,
-    instB
+  val branchInstruction = customBool(
+    any(
+      instBeq,
+      instBne,
+      instBlt,
+      instBge,
+      instBltu,
+      instBgeu,
+      instJirl,
+      instBl,
+      instB
+    )
+  )(_.isBranch)
+  val csrInstruction = standardOnly(
+    any(
+      instCsrRead,
+      instCsrWrite,
+      instCsrXchg,
+      instRdCntIdW,
+      instRdCntVlW,
+      instRdCntVhW,
+      instCpuCfg
+    )
   )
-  val csrInstruction = any(
-    instCsrRead,
-    instCsrWrite,
-    instCsrXchg,
-    instRdCntIdW,
-    instRdCntVlW,
-    instRdCntVhW,
-    instCpuCfg
+  val privilegedInstruction = standardOnly(
+    any(
+      instErtn,
+      instTlbSearch,
+      instTlbRead,
+      instTlbWrite,
+      instTlbFill,
+      instInvTlb,
+      instDbar,
+      instIbar,
+      instIdle
+    )
   )
-  val privilegedInstruction = any(
-    instErtn,
-    instTlbSearch,
-    instTlbRead,
-    instTlbWrite,
-    instTlbFill,
-    instInvTlb,
-    instDbar,
-    instIbar,
-    instIdle
-  )
-  val serializing = any(
-    csrInstruction,
-    privilegedInstruction,
-    validCacop,
-    instPreload,
-    instLlW,
-    instScW
+  val serializing = standardOnly(
+    any(
+      csrInstruction,
+      privilegedInstruction,
+      validCacop,
+      instPreload,
+      instLlW,
+      instScW
+    )
   )
 
   val systemOperation = UInt(SystemOperation.Width bits)
@@ -493,36 +659,42 @@ final class La32rDecoder(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCom
   when(instLlW) { systemOperation := SystemOperation.loadLinked }
   when(instScW) { systemOperation := SystemOperation.storeConditional }
 
-  val gprWrite = instructionValid && !any(
-    storeOperation && !instScW,
-    instBeq,
-    instBne,
-    instBlt,
-    instBge,
-    instBltu,
-    instBgeu,
-    instB,
-    instSyscall,
-    instBreak,
-    instTlbSearch,
-    instTlbRead,
-    instTlbWrite,
-    instTlbFill,
-    instInvTlb,
-    validCacop,
-    instPreload,
-    instDbar,
-    instIbar,
-    instIdle,
-    cacopNop,
-    instErtn
-  )
+  val gprWrite = customBool(
+    instructionValid && !any(
+      storeOperation && !instScW,
+      instBeq,
+      instBne,
+      instBlt,
+      instBge,
+      instBltu,
+      instBgeu,
+      instB,
+      instSyscall,
+      instBreak,
+      instTlbSearch,
+      instTlbRead,
+      instTlbWrite,
+      instTlbFill,
+      instInvTlb,
+      validCacop,
+      instPreload,
+      instDbar,
+      instIbar,
+      instIdle,
+      cacopNop,
+      instErtn
+    )
+  )(_.writesGpr)
 
   val fuType = UInt(ExecutionUnitType.Width bits)
   fuType := ExecutionUnitType.alu
   when(branchInstruction) { fuType := ExecutionUnitType.branch }
-  when(any(instMulW, instMulhW, instMulhWu)) { fuType := ExecutionUnitType.multiply }
-  when(any(instDivW, instDivWu, instModW, instModWu)) { fuType := ExecutionUnitType.divide }
+  when(standardOnly(any(instMulW, instMulhW, instMulhWu))) {
+    fuType := ExecutionUnitType.multiply
+  }
+  when(standardOnly(any(instDivW, instDivWu, instModW, instModWu))) {
+    fuType := ExecutionUnitType.divide
+  }
   when(csrInstruction) { fuType := ExecutionUnitType.csr }
   // PRELD is currently an architectural no-op completed at retirement. Route
   // it through an ALU lane so the dedicated LSU lane never needs to arbitrate
@@ -531,26 +703,27 @@ final class La32rDecoder(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCom
     fuType := ExecutionUnitType.loadStore
   }
   when(privilegedInstruction) { fuType := ExecutionUnitType.serial }
-  when(any(instDbar, instIbar, validCacop)) { fuType := ExecutionUnitType.barrier }
-
+  when(standardOnly(any(instDbar, instIbar, validCacop))) {
+    fuType := ExecutionUnitType.barrier
+  }
   io.decoded.pc := io.pc
   io.decoded.instruction := instruction
   io.decoded.fetchSlot := io.fetchSlot
   io.decoded.rd := destination
-  io.decoded.rs1 := rj
-  io.decoded.rs2 := Mux(sourceRegisterIsRd, rd, rk)
-  io.decoded.immediate := immediate
-  io.decoded.source1Used := needRj
-  io.decoded.source2Used := needRkd
-  io.decoded.source1IsPc := source1IsPc
-  io.decoded.source2IsImmediate := source2IsImmediate
+  io.decoded.rs1 := customUInt(rj)(_.rs1)
+  io.decoded.rs2 := customUInt(Mux(sourceRegisterIsRd, rd, rk))(_.rs2)
+  io.decoded.immediate := customBits(immediate)(_.immediate)
+  io.decoded.source1Used := customBool(needRj)(_.source1Used)
+  io.decoded.source2Used := customBool(needRkd)(_.source2Used)
+  io.decoded.source1IsPc := customBool(source1IsPc)(_.source1IsPc)
+  io.decoded.source2IsImmediate := customBool(source2IsImmediate)(_.source2IsImmediate)
   io.decoded.fuType := fuType
-  io.decoded.operation := aluOperation
+  io.decoded.operation := customBits(aluOperation)(_.operation)
   io.decoded.mulDivOperation := mulDivOperation
   io.decoded.mulDivSigned := mulDivSigned
-  io.decoded.memorySize := halfMemory.asBits ## byteMemory.asBits
-  io.decoded.memorySignExtend := memorySignExtend
-  io.decoded.source2IsFour := source2IsFour
+  io.decoded.memorySize := customBits(halfMemory.asBits ## byteMemory.asBits)(_.memorySize)
+  io.decoded.memorySignExtend := customBool(memorySignExtend)(_.memorySignExtend)
+  io.decoded.source2IsFour := customBool(source2IsFour)(_.source2IsFour)
   io.decoded.writesGpr := gprWrite
   io.decoded.isLoad := loadOperation
   io.decoded.isStore := storeOperation
@@ -563,24 +736,29 @@ final class La32rDecoder(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCom
   when(instBltu) { io.decoded.branchKind := U(5, 3 bits) }
   when(instBgeu) { io.decoded.branchKind := U(6, 3 bits) }
   when(instJirl) { io.decoded.branchKind := U(7, 3 bits) }
+  customDecode.foreach { decoded =>
+    when(decoded.valid && decoded.isBranch) { io.decoded.branchKind := decoded.branchKind }
+  }
   io.decoded.isCsr := csrInstruction || privilegedInstruction
-  io.decoded.isLl := instLlW
-  io.decoded.isSc := instScW
+  io.decoded.isLl := standardOnly(instLlW)
+  io.decoded.isSc := standardOnly(instScW)
   io.decoded.isCacheOperation := validCacop
-  io.decoded.isPreload := instPreload
-  io.decoded.isErtn := instErtn
-  io.decoded.isTlbSearch := instTlbSearch
-  io.decoded.isTlbWrite := instTlbWrite
-  io.decoded.isTlbFill := instTlbFill
-  io.decoded.isTlbRead := instTlbRead
-  io.decoded.isTlbInvalidate := instInvTlb
-  io.decoded.isRefetch := any(instTlbWrite, instTlbFill, instTlbRead, instInvTlb, instIbar)
+  io.decoded.isPreload := standardOnly(instPreload)
+  io.decoded.isErtn := standardOnly(instErtn)
+  io.decoded.isTlbSearch := standardOnly(instTlbSearch)
+  io.decoded.isTlbWrite := standardOnly(instTlbWrite)
+  io.decoded.isTlbFill := standardOnly(instTlbFill)
+  io.decoded.isTlbRead := standardOnly(instTlbRead)
+  io.decoded.isTlbInvalidate := standardOnly(instInvTlb)
+  io.decoded.isRefetch := standardOnly(
+    any(instTlbWrite, instTlbFill, instTlbRead, instInvTlb, instIbar)
+  )
   io.decoded.csrReadData := B(0, config.xlen bits)
   io.decoded.csrAddress := csrIndex
-  io.decoded.csrWrite := instCsrWrite || instCsrXchg
-  io.decoded.csrMask := instCsrXchg
-  io.decoded.resultFromCsr := csrInstruction || instScW
-  io.decoded.systemOperation := systemOperation
+  io.decoded.csrWrite := standardOnly(instCsrWrite || instCsrXchg)
+  io.decoded.csrMask := standardOnly(instCsrXchg)
+  io.decoded.resultFromCsr := standardOnly(csrInstruction || instScW)
+  io.decoded.systemOperation := customUInt(systemOperation)(_ => SystemOperation.none)
   io.decoded.serializing := serializing
   io.decoded.predictedTaken := io.predictedTaken
   io.decoded.predictedTarget := io.predictedTarget
@@ -597,10 +775,10 @@ final class La32rDecoder(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCom
   }.elsewhen(io.fetchException.valid) {
     // Fetch faults describe the instruction slot itself and therefore take
     // precedence over decoding the placeholder instruction carried with it.
-  }.elsewhen(instSyscall) {
+  }.elsewhen(standardOnly(instSyscall)) {
     io.decoded.exception.valid := True
     io.decoded.exception.ecode := U(0x0b, 6 bits)
-  }.elsewhen(instBreak) {
+  }.elsewhen(standardOnly(instBreak)) {
     io.decoded.exception.valid := True
     io.decoded.exception.ecode := U(0x0c, 6 bits)
   }.elsewhen(illegalInstruction) {

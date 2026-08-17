@@ -21,6 +21,7 @@ VIVADO ?= $(VIVADO_HOME)/bin/vivado
 SURFER ?= /mnt/d/Surfer/surfer.exe
 JOBS ?= 8
 CPU_TEST ?=
+CUSTOM_PROFILE := disabled
 RUN_SOFTWARE ?= func/func_lab19
 TIME_LIMIT ?= 1300000
 AXI_SEED ?= 5570815
@@ -68,7 +69,7 @@ CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 .PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
-  cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
+  cpu-test cpu-test-all cpu-contract-test custom-test custom-check cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
@@ -88,6 +89,8 @@ help:
 		'  make perf-observation-summary 汇总 instrumented perf20 ROI' \
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
 		'  make cpu-contract-test 运行全部轻量 Python 合同测试' \
+		'  make custom-test       运行自定义指令 Scala 与编码工具测试' \
+		'  make custom-check CUSTOM_PROFILE=<name> 生成赛题 profile 并运行 RTL 检查' \
 		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
 		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
 		'  make sim                单个软件仿真（RUN_SOFTWARE 可覆盖）' \
@@ -184,11 +187,24 @@ cpu-contract-test:
 	@$(CONTAINER_RUN) python3 -I -m unittest discover \
 		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
 
+custom-test:
+	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec \
+		'cd "$(CPU_DIR)"; sbt -batch "testOnly miku.compat.CoreTopCompatGeneratorSpec miku.core.CustomInstructionProfileSpec miku.execute.CustomExecutionSpec"'
+	@$(CONTAINER_RUN) python3 -I -m unittest discover \
+		-s "$(CPU_DIR)/tests/python" -p 'test_custom_instruction_word.py'
+
+custom-check: custom-test
+	@profile="$$(printf '%s' "$(CUSTOM_PROFILE)" | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//' | tr '[:upper:]' '[:lower:]')"; \
+		case "$$profile" in ''|disabled|off) \
+			printf 'CUSTOM_PROFILE 必须是已注册的赛题 profile\n' >&2; exit 2 ;; \
+		esac
+	@$(MAKE) cpu-locked-gates CUSTOM_PROFILE="$(CUSTOM_PROFILE)"
+
 cpu-generate:
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@rm -rf "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
-	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw"'
+	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw --custom-profile $(CUSTOM_PROFILE)"'
 	@test -f "$(BUILD_ROOT)/rtl/raw/core_top.v"
 	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" package \
 		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
@@ -197,7 +213,7 @@ cpu-generate:
 	@install -m 0644 "$(BUILD_ROOT)/rtl/package/rtl/mycpu_top.v" "$(BUILD_ROOT)/rtl/mycpu_top.v"
 	@$(CONTAINER_RUN) python3 scripts/cpu/write_generation_manifest.py --root "$(ROOT_DIR)" \
 		--raw "$(BUILD_ROOT)/rtl/raw/core_top.v" --published "$(BUILD_ROOT)/rtl/mycpu_top.v" \
-		--out "$(BUILD_ROOT)/rtl/generation-manifest.json"
+		--custom-profile "$(CUSTOM_PROFILE)" --out "$(BUILD_ROOT)/rtl/generation-manifest.json"
 
 cpu-locked-gates: cpu-generate
 	@rm -rf "$(BUILD_ROOT)/gates/port" "$(BUILD_ROOT)/gates/lint" "$(BUILD_ROOT)/gates/yosys"
