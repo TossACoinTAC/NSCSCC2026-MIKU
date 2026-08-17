@@ -565,12 +565,49 @@ peak overlap `38,386`、最大拥挤 `96.3964%`、route `412 s`；但 setup/hold
 `build/reports/timing/R18-five-timing-direct-top50.json` 和
 `build/reports/timing/R18-five-timing-route-health.json`。
 
-## 13. 当前优先级与下一步
+## 13. R19：筛选后的 commit / IQ / L1I / LSQ 时序批次
+
+R19 的准入来源是 R18 的 ROB/CSR 主导路径：`candidatePointer -> commit eligibility -> RenameMap
+architectural state`。IQ direct-select source-tag 与 L1I data-RAM enable 是同轮独立次级路径。
+所有保留项维持既有寄存边界和外部可观察周期；它们的结构收益必须由 matching direct
+implementation 交叉验证，不能从 R18 的 WNS 推导。
+
+| ID | 机制与不变量 | 状态与提交 | 当前软件/结构证据 |
+| --- | --- | --- | --- |
+| RMT01 | 暂存 RenameMap architectural commit token；flush/recovery 时不得捕获未退休 token，连续 commit 与 flush 后 architectural mapping 保持逐拍正确 | 保留；`235757b`，flush 正确性修复 `5a8f00e` | RegisterStructures 14/14；最终组合完整门禁、perf20、func58 通过 |
+| RMT02 | 将 architectural hold 从跨区 CE 改为本地 data-side hold mux；architectural map、flush 恢复与 commit 可见性不变 | 保留；`e9d5666` | RegisterStructures 14/14；最终组合门禁通过 |
+| RMT03 | 将 architectural commit ownership 预解码为 one-hot，避免每个 map entry 重复 binary decode；公开 CommitRecord 语义不变 | 保留；`f950406` | RegisterStructures 14/14；筛选后 RenameMap 减少 115 cells |
+| IQT06 | 保留 execution 的 qualified-valid 权威，只在 Backend operand register 边界复制普通 direct-select producer 的 destination；multiply、LSU、flush 与共享端口仲裁沿用既有语义 | 保留；`13d9373` | Backend/IssueQueue 定向和最终组合门禁通过；perf20 周期透明 |
+| ICT04 | L1I data array read enable 保持独立于 tag-hit 回授；只有已注册响应的有效/命中结果可被消费，response 周期不变 | 保留；`45bb8a1` | L1I 定向及组合门禁通过；筛选后 CacheArray 减少 4 cells |
+| MT23 | 暂存 load-base release count，避免 release 控制直接进入 load-base 更新；分配、释放和 flush 计数语义不变 | 保留；`c35ec87` | LSQ 定向及组合门禁通过；LSQ 仅增加 3 cells / 5 word bits |
+
+下列候选不在最终组合中：`RCT01 @ 110b48d` 的 ROB candidate-state one-hot sidecar 在
+`2666d40` 默认关闭；IQ one-hot token source capture (`9b5b123`) 在 `b0a5b26` 默认关闭；ROB
+commit destination predecode (`372429d`) 在 `59dbdd1` 默认关闭，随后由 `2f7770f` 完全移除。
+其筛选依据是 R19-seven 相对 R18 cells `+0.074%`、ROB `+111` cells / `+1,512` word bits、local
+LTP `32 -> 36`，且三个 IQ 各 `+17` cells、local LTP 约 `+4`；这类增加在当前 ROB/IQ 拥挤根因下
+不具备继续保留的结构性理由。
+
+最终筛选后的身份为 source commit `2f7770f24d1ab5b703a6bb9f8066949c34ac5cf4`、source tree
+SHA-256 `65d74e776d4f4244613a4c07a4d2aae97c9564ecc9a42b590f4c7df0494c9014`、发布 RTL SHA-256
+`a0e9902b6a7e2befa4956e87a76d8d1202f1a105c2c249427e67448e2a2cdda2`。完整 `cpu-check` 为 40
+suites / 266 tests、Python contracts 95/95；perf20 20/20 与 R18 逐项精确相等、总周期
+`3,896,626`，对照为 `build/reports/comparisons/R18-vs-R19-filtered.json`；func58 random-AXI
+seeds `240/255/141` 均为 58/58。实验冻结见
+`build/reports/experiments/R19-filtered-six-direct-100mhz/experiment-manifest.json`。
+
+Yosys 同配置对照为 `build/reports/yosys/R18-vs-R19-filtered-six.json`：全核 cells
+`57,827 -> 57,711`（`-0.201%`）、word bits `397,034 -> 395,386`（`-0.415%`）、post-flat cells
+`51,805 -> 51,698`（`-0.207%`）。这是结构代理，而非 Vivado 资源或时序结果。matching 100 MHz
+direct full 正在运行、待归档；在其完成前，R19 没有自己的 WNS、TNS、DRC、bitstream、Linux 或
+板测结论，也不能继承 R18 的对应记录。
+
+## 14. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
 
-当前 P1 正确性 gate（含 C10）已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。R18 的下一轮主攻是 ROB `candidatePointer` / commit eligibility 到 RenameMap `architectural` CE 的高路由广播，必须保持 commit 可见性、异常/flush 与 RenameMap architectural state 的逐拍语义不变；IQ 与 L1I 是次级路径族。R4 matching direct full 的 setup/hold 为 `-0.106/+0.051 ns`，前端路径已退出 top-50，剩余路径墙集中在 IQ/ROB、cache/L2 和少量 LSQ；这些是历史网表证据，不能直接继承给 A01。R5 已将 WT05、CT02、RT02、MT08、CT03、RT03 纳入软件验证；top-N 用于排序但不限制候选准入，能证明不增加拍数或具有受控小代价的候选可进入同一线性验证批次。
+当前 P1 正确性 gate（含 C10）已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。R19 已将 R18 的 ROB `candidatePointer` / commit eligibility 到 RenameMap `architectural` CE 广播转为六项筛选后候选，并以 IQ、L1I 和 LSQ 的独立局部化补充批次。其 matching direct full 仍在运行；在结果归档前，R18 的 WNS、资源、DRC、bitstream 和 top-50 均只作为候选来源。后续候选仍以不增加拍数、减少跨区控制/宽 CE/扇出为优先，并在定向测试、完整门禁、Yosys 和 perf20 后进入 matching implementation。
 
 1. 历史 R4 组合从 `5,543,953` 降至 `5,014,546`，并将 setup 从 R3 的 `-0.440 ns` 改善到
    `-0.106 ns`，但未闭合。当前 R8 A01 软件基线为 `4,215,442` cycles，相对 SD01

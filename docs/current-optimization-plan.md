@@ -7,6 +7,12 @@
 
 ## 当前基线与目标
 
+- 当前待判定组合为 R19 filtered-six：`2f7770f`，source tree
+  `65d74e776d4f4244613a4c07a4d2aae97c9564ecc9a42b590f4c7df0494c9014`，发布 RTL
+  `a0e9902b6a7e2befa4956e87a76d8d1202f1a105c2c249427e67448e2a2cdda2`。其 100 MHz matching
+  direct full implementation 正在运行，尚未生成可归档的 R19 WNS、资源、DRC 或 bitstream 结论；
+  R18 的实现数据仅为候选来源，不能继承。
+
 - CPU 开发分支：`dev/ECHO`；最近稳定 100 MHz 里程碑的开发分支证据提交为
   `fbc9634`，已 squash 发布到 `main @ 6b559ec`。R6 `L11+L13` matching 源码身份为
   `6bbf9ed`；它已经完成新的 direct full implementation，但 setup 未闭合，因此仍是候选，
@@ -572,6 +578,44 @@ R18 top-50 为 ROB/CSR 47 条（最差 `-0.320 ns`、平均 route `81.206%`）�
 与完整门禁下形成独立候选时再进入批次。top-50 与 route health 分别为
 `build/reports/timing/R18-five-timing-direct-top50.json` 和
 `build/reports/timing/R18-five-timing-route-health.json`。
+
+### R19：commit/RenameMap、IQ、L1I 与 LSQ 的筛选后组合
+
+R19 从 R18 的 matching direct 路径出发，目标是削弱 `ROB candidatePointer -> commit
+eligibility -> RenameMap architectural state` 的跨区控制广播，同时处理两个 IQ direct-select
+source-tag 路径和 L1I data-RAM enable 路径。最终保留六个保持可观察拍数的候选：`RMT01 @
+235757b` 将 architectural commit token 暂存于 RenameMap（其中 `5a8f00e` 保证 recovery/flush
+不捕获旧 token）；`RMT02 @ e9d5666` 将 architectural hold 移入本地 data mux；`RMT03 @
+f950406` 预解码 architectural commit ownership；`IQT06 @ 13d9373` 把普通 direct-select 的
+destination token 保持在本地；`ICT04 @ 45bb8a1` 使 L1I data read enable 不再由 tag-hit 回授；
+`MT23 @ c35ec87` 暂存 load-base release count。六项均不改变 commit、flush、issue、L1I
+response 或 load release 的可见周期。
+
+三项结构尝试经同配置 Yosys 筛选后未进入最终 RTL：`RCT01 @ 110b48d` 的 ROB candidate-state
+one-hot sidecar 在 `2666d40` 默认关闭；IQ one-hot token source capture (`9b5b123`) 在 `b0a5b26`
+默认关闭；ROB commit destination predecode (`372429d`) 在 `59dbdd1` 默认关闭，并由 `2f7770f`
+彻底移除。R19-seven 的中间结构相对 R18 cells 增加 `0.074%`，ROB 增加 111 cells、1,512 word
+bits，local LTP 从 32 升到 36；三个 IQ 各增加 17 cells、local LTP 约增加 4。因此这些候选不以
+“已实现”计入最终批次。
+
+最终筛选后源码冻结于 `2f7770f24d1ab5b703a6bb9f8066949c34ac5cf4`，source tree SHA-256 为
+`65d74e776d4f4244613a4c07a4d2aae97c9564ecc9a42b590f4c7df0494c9014`，发布 RTL SHA-256 为
+`a0e9902b6a7e2befa4956e87a76d8d1202f1a105c2c249427e67448e2a2cdda2`。完整 `cpu-check` 为
+40 suites / 266 tests，Python contracts 95/95；ideal perf20 20/20 相对 R18 逐项精确相等，
+总周期均为 `3,896,626`，比较见 `build/reports/comparisons/R18-vs-R19-filtered.json`；func58
+random-AXI seeds `240/255/141` 均为 58/58。实验冻结 manifest 为
+`build/reports/experiments/R19-filtered-six-direct-100mhz/experiment-manifest.json`。
+
+筛选后 Yosys 相对 R18 的全核 cells `57,827 -> 57,711`（`-0.201%`）、word bits
+`397,034 -> 395,386`（`-0.415%`）、post-flat cells `51,805 -> 51,698`（`-0.207%`）。局部
+RenameMap `-115` cells、CacheArray `-4` cells，LSQ 仅 `+3` cells / `+5` word bits；对照为
+`build/reports/yosys/R18-vs-R19-filtered-six.json`。这些是综合前结构代理，不构成 WNS 或
+资源结论。
+
+matching 100 MHz direct full implementation 已以此冻结身份启动，当前仍在运行、待归档。R18
+的 `-0.320/+0.011 ns` 与任何历史 bitstream、资源或 top-50 都不得继承给 R19；只有该 run
+自身完成 route、DRC、bitstream、setup/hold 和 manifest 归档后，才能判定本批是否达到正 WNS
+里程碑。
 
 ## R0：实验合同
 
