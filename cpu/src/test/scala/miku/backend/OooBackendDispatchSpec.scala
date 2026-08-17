@@ -1543,11 +1543,11 @@ class OooBackendDispatchSpec extends AnyFunSuite {
     }
   }
 
-  test("qualified LSQ load wakeup reaches a dependent through the PRF write-through") {
-    for ((earlyWake, name, seed, wakeEpoch) <- Seq(
-        (false, "registered", 0x4c70, 0),
-        (true, "early", 0x4c71, 0),
-        (true, "stale-epoch", 0x4c72, 1)
+  test("source-qualified LSQ load wakeup reaches a dependent through the PRF write-through") {
+    for ((earlyWake, name, seed, sourceWakeupValid, wakeEpoch) <- Seq(
+        (false, "registered", 0x4c70, false, 0),
+        (true, "early", 0x4c71, true, 0),
+        (true, "stale-source", 0x4c72, false, 1)
       )) {
       val testConfig = config.copy(
         enableLoadCompletionEarlyWakeup = earlyWake,
@@ -1600,7 +1600,7 @@ class OooBackendDispatchSpec extends AnyFunSuite {
           dut.io.completionPdst #= producerPdst
           dut.io.completionWritesPdst #= true
           dut.io.completionData #= BigInt("12345678", 16)
-          dut.io.loadWakeupValid #= true
+          dut.io.loadWakeupValid #= sourceWakeupValid
           dut.io.loadWakeupPdst #= producerPdst
           dut.io.loadWakeupRecoveryEpoch #= wakeEpoch
           dut.io.loadWakeupEpochCurrent #= (wakeEpoch == 0)

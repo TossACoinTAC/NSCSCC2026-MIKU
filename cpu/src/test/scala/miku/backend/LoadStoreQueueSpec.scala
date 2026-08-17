@@ -929,17 +929,22 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         sample(dut)
         dut.io.dataResponseValid #= true
         dut.io.dataResponse.loadQueueIndex #= 1
+        // The architectural completion remains valid for its owner, but the
+        // source-qualified early-wakeup signal must not escape a stale epoch.
+        dut.io.currentRecoveryEpoch #= 1
         sample(dut)
         assert(dut.io.completionValid.toBoolean)
         assert(dut.io.completion.robPointer.toBigInt == 1)
         assert(dut.io.completion.pdst.toBigInt == 9)
-        assert(dut.io.loadWakeupValid.toBoolean)
+        assert(!dut.io.loadWakeupValid.toBoolean)
         assert(dut.io.loadWakeupPdst.toBigInt == 9)
         assert(dut.io.loadWakeupRecoveryEpoch.toBigInt == 0)
+        assert(!dut.io.loadWakeupEpochCurrent.toBoolean)
 
         dut.io.dataResponse.robPointer #= 0
         dut.io.dataResponse.loadQueueIndex #= 0
         dut.io.dataResponse.data #= BigInt("01010101", 16)
+        dut.io.currentRecoveryEpoch #= 0
         sample(dut)
         assert(dut.io.completionValid.toBoolean)
         assert(dut.io.completion.robPointer.toBigInt == 0)

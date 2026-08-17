@@ -1007,9 +1007,16 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   io.storeCompletionBypassValid := fastStoreCompletionValid
   io.storeCompletionBypass.robPointer := fastStoreCompletionRobPointer
   io.storeCompletionBypass.recoveryEpoch := fastStoreCompletionRecoveryEpoch
-  io.loadWakeupValid := (completionValid && completionLoadWakeup) ||
-    (bankedForwardCompletionValid && bankedForwardCompletion.writesPdst &&
-      bankedForwardCompletion.pdst =/= 0)
+  // The completion boundary already registers both the load identity and its
+  // epoch qualification. Fold that narrow qualification into the source-valid
+  // signal before it fans out through Backend/IQ wakeup logic. Keep the epoch
+  // output below for tracing, but consumers need not rebuild this predicate.
+  val registeredLoadWakeupValid = completionValid && completionLoadWakeup &&
+    completionLoadWakeupEpochCurrent
+  val bankedLoadWakeupValid = bankedForwardCompletionValid &&
+    bankedForwardCompletion.writesPdst && bankedForwardCompletion.pdst =/= 0 &&
+    bankedForwardWakeupEpochCurrent
+  io.loadWakeupValid := registeredLoadWakeupValid || bankedLoadWakeupValid
   io.loadWakeupPdst := completion.pdst
   io.loadWakeupRecoveryEpoch := completion.recoveryEpoch
   io.loadWakeupEpochCurrent := completionLoadWakeupEpochCurrent

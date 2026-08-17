@@ -431,8 +431,10 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     } else if (write == loadStorePort) {
       val registeredWake = rob.io.completionWakeupCandidateValid(write)
       val loadWake = if (config.enableLoadCompletionEarlyWakeup) {
-        // LSQ qualifies recoveryEpoch while registering this completion.
-        io.loadWakeupValid && io.loadWakeupEpochCurrent && io.loadWakeupPdst =/= 0
+        // LSQ registers recovery-epoch qualification into source valid. This
+        // keeps the global IQ fanout to a narrow valid/tag pair; retain the
+        // epoch input as an observable LSQ contract signal.
+        io.loadWakeupValid && io.loadWakeupPdst =/= 0
       } else {
         False
       }
