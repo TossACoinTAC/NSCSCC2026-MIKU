@@ -175,7 +175,6 @@ Slack (MET) : 0.100ns
             [
                 "evidence/index.json",
                 "evidence/current/local-verification.json",
-                ".github/workflows/docs.yml",
                 "CONTRIBUTING.md",
                 "scripts/common/run_python_contracts.py",
                 "scripts/common/write_local_evidence.py",

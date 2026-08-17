@@ -10,7 +10,7 @@
     "published_rtl_sha256": "6a08b0dc21d16f9b9b2c2aa6136bd6973ed28184f58345928dda5fd1a47326ec",
     "local_evidence": {
       "path": "evidence/current/local-verification.json",
-      "sha256": "45eb8be030e1b1cb02a016ceb3707570cf0f6339394e8ac422162a2e22fc3836"
+      "sha256": "a4b8698a3b46139f7d357401bb33414307d754e71b74e10ce11e2ce580d0a472"
     },
     "verification": {
       "local": "passed",

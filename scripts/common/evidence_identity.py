@@ -14,7 +14,6 @@ import xml.etree.ElementTree as ET
 
 TREE_HASH_ALGORITHM = "git-tracked-path-payload-sha256-v1"
 PYTHON_CONTRACT_INPUT_SCOPE = (
-    ".github/workflows",
     ".gitignore",
     ".gitmodules",
     "CONTRIBUTING.md",

@@ -27,9 +27,6 @@ make docs-check
 git diff --check
 ```
 
-GitHub Actions 会使用完整 Git 历史在 Python 3.9 下重复运行
-`make docs-check`，但远程结果不代替提交前的本地检查。
-
 脚本或合同修改：
 
 ```text
