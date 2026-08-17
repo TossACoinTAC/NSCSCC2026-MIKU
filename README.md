@@ -16,7 +16,7 @@ Chiplab 快照。
 
 | 项目 | 状态 |
 | --- | --- |
-| CPU 源码 | SpinalHDL，四发射乱序核 |
+| CPU 源码 | SpinalHDL，四取指、三译码／重命名／派发／提交，四执行端口 |
 | 默认自定义指令 profile | `disabled`，不生成自定义指令电路 |
 | Scala／Verilator | 42 suites，256 tests passed，0 skipped |
 | Python contract | 73 passed，0 skipped |
