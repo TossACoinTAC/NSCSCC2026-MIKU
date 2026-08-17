@@ -263,6 +263,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // bitmap instead of comparing every load ROB pointer against every other
   // load on every cycle.
   val loadBase = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
+  val registeredLoadReleaseCount = Reg(UInt(log2Up(config.commitWidth + 1) bits)) init (0)
   val drainAfterFlush = RegInit(False)
   val scheduledLoadValid = RegInit(False)
   val loadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
@@ -564,13 +565,25 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   )
   val initialLoadIndex = OHToUInt(initialLoadSelect)
   val liveLoads = loads.map(_.valid).reduce(_ || _)
+  val loadBaseReleaseCount = if (config.enableRegisteredLoadBaseReleaseCount) {
+    registeredLoadReleaseCount
+  } else {
+    CountOne(loadReleaseValid).resized
+  }
+  if (config.enableRegisteredLoadBaseReleaseCount) {
+    registeredLoadReleaseCount := Mux(
+      io.flush,
+      U(0, registeredLoadReleaseCount.getWidth bits),
+      CountOne(loadReleaseValid).resized
+    )
+  }
   when(io.flush) {
     loadBase := U(0, config.loadQueueIndexWidth bits)
   }.otherwise {
     when(!liveLoads && allocationLoads.orR) {
       loadBase := io.allocate(initialLoadIndex).loadQueueIndex
-    }.elsewhen(loadReleaseValid.orR) {
-      loadBase := (loadBase + CountOne(loadReleaseValid)).resized
+    }.elsewhen(loadBaseReleaseCount =/= 0) {
+      loadBase := (loadBase + loadBaseReleaseCount).resized
     }
   }
 

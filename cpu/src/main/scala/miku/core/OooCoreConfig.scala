@@ -142,6 +142,10 @@ final case class OooCoreConfig(
     // Select the scheduled Load payload with its binary queue index.  The legacy one-hot decode
     // followed by conditional bundle overrides forms a wide priority mux after the age selector.
     enableIndexedScheduledLoadSelection: Boolean = true,
+    // Retired-load validity clears immediately.  Carry only its compact count across a local
+    // register before advancing the scheduler base, cutting ROB commit qualification from the
+    // load-base arithmetic without making a released entry visible again.
+    enableRegisteredLoadBaseReleaseCount: Boolean = true,
     // Keep the scheduled-load owner/payload registers clock-enabled only in the legacy path.
     // The D-mux variant preserves the registered boundary while moving the reselect qualifier
     // out of the high-fanout CE network.
