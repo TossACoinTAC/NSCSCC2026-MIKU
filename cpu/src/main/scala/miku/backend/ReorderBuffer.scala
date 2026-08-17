@@ -957,24 +957,25 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       )
       if (config.enableBranchHeadCompletionBypass) {
         stagedHeadBranchBypassValid := incomingHeadBranchBypassMask.orR
-        when(incomingHeadBranchBypassMask.orR) {
-          stagedHeadBranchBypassResult := selectHighestPriority(
-            (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
-            (0 until config.writebackWidth).map(io.completion(_).data)
-          )
-          stagedHeadBranchBypassTaken := selectHighestPriority(
-            (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
-            (0 until config.writebackWidth).map(lane => io.completion(lane).branchTaken.asBits)
-          ).asBool
-          stagedHeadBranchBypassTarget := selectHighestPriority(
-            (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
-            (0 until config.writebackWidth).map(lane => io.completion(lane).branchTarget.asBits)
-          ).asUInt
-          stagedHeadBranchBypassMispredict := selectHighestPriority(
-            (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
-            (0 until config.writebackWidth).map(lane => io.completion(lane).branchMispredict.asBits)
-          ).asBool
-        }
+        // The valid bit is the only observability qualifier. Updating the
+        // payload every cycle keeps the head/lane comparator tree off the CE
+        // of these wide registers while preserving the balanced selector.
+        stagedHeadBranchBypassResult := selectHighestPriority(
+          (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
+          (0 until config.writebackWidth).map(io.completion(_).data)
+        )
+        stagedHeadBranchBypassTaken := selectHighestPriority(
+          (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
+          (0 until config.writebackWidth).map(lane => io.completion(lane).branchTaken.asBits)
+        ).asBool
+        stagedHeadBranchBypassTarget := selectHighestPriority(
+          (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
+          (0 until config.writebackWidth).map(lane => io.completion(lane).branchTarget.asBits)
+        ).asUInt
+        stagedHeadBranchBypassMispredict := selectHighestPriority(
+          (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
+          (0 until config.writebackWidth).map(lane => io.completion(lane).branchMispredict.asBits)
+        ).asBool
       } else {
         stagedHeadBranchBypassValid := False
         stagedHeadBranchBypassResult := 0
