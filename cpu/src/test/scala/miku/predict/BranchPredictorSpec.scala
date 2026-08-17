@@ -395,6 +395,33 @@ class BranchPredictorSpec extends AnyFunSuite {
         val fallbackTarget = BigInt("1c008000", 16)
         val olderReturnAddress = BigInt("1c00a004", 16)
         val recoveryReturnAddress = BigInt("1c00c004", 16)
+        def commitRas(pushMask: Int, popMask: Int, returnAddresses: Seq[BigInt]): Unit = {
+          require(returnAddresses.length == config.commitWidth)
+          for (lane <- 0 until config.commitWidth) {
+            dut.io.architecturalReturnAddress(lane) #= returnAddresses(lane)
+          }
+          dut.io.architecturalRasPush #= pushMask
+          dut.io.architecturalRasPop #= popMask
+          dut.io.flush #= true
+          dut.clockDomain.waitSampling()
+          dut.io.architecturalRasPush #= 0
+          dut.io.architecturalRasPop #= 0
+          dut.io.flush #= false
+        }
+        def expectReturnTarget(target: BigInt): Unit = {
+          dut.io.lookupPc #= returnPc
+          dut.io.lookupValid #= true
+          dut.clockDomain.waitSampling()
+          dut.io.lookupValid #= false
+          sleep(1)
+          assert(dut.io.responseValid.toBoolean)
+          assert(dut.io.prediction(0).hit.toBoolean)
+          assert(dut.io.prediction(0).target.toBigInt == target)
+          dut.io.lookupPc #= returnPc + 0x1000
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          assert(!dut.io.responseValid.toBoolean)
+        }
         dut.io.btbUpdatePc #= returnPc
         dut.io.btbUpdateTarget #= fallbackTarget
         dut.io.btbUpdateType #= 3
@@ -410,13 +437,7 @@ class BranchPredictorSpec extends AnyFunSuite {
           dut.io.btbUpdateValid #= false
         }
 
-        dut.io.architecturalRasPush #= 3
-        dut.io.architecturalReturnAddress(0) #= olderReturnAddress
-        dut.io.architecturalReturnAddress(1) #= recoveryReturnAddress
-        dut.io.flush #= true
-        dut.clockDomain.waitSampling()
-        dut.io.architecturalRasPush #= 0
-        dut.io.flush #= false
+        commitRas(3, 0, Seq(olderReturnAddress, recoveryReturnAddress, BigInt(0)))
 
         dut.io.lookupPc #= returnPc
         dut.io.lookupValid #= true
@@ -432,6 +453,31 @@ class BranchPredictorSpec extends AnyFunSuite {
         dut.clockDomain.waitSampling()
         sleep(1)
         assert(!dut.io.responseValid.toBoolean)
+
+        val discardedReturnAddress = BigInt("1c00d004", 16)
+        val replacementReturnAddress = BigInt("1c00e004", 16)
+        commitRas(5, 2, Seq(discardedReturnAddress, BigInt(0), replacementReturnAddress))
+        expectReturnTarget(replacementReturnAddress)
+
+        val fillAddresses = Seq(
+          BigInt("1c010004", 16),
+          BigInt("1c020004", 16),
+          BigInt("1c030004", 16),
+          BigInt("1c040004", 16),
+          BigInt("1c050004", 16)
+        )
+        commitRas(7, 0, fillAddresses.take(3))
+        commitRas(7, 0, fillAddresses.drop(3) :+ BigInt("1c060004", 16))
+        expectReturnTarget(fillAddresses(4))
+
+        val fullReplacementReturnAddress = BigInt("1c070004", 16)
+        commitRas(5, 2, Seq(BigInt(0), BigInt(0), fullReplacementReturnAddress))
+        expectReturnTarget(fullReplacementReturnAddress)
+
+        for (_ <- 0 until 3) {
+          commitRas(0, 7, Seq(BigInt(0), BigInt(0), BigInt(0)))
+        }
+        expectReturnTarget(fallbackTarget)
 
         // Three conditional branches retire oldest-to-youngest with outcomes T,N,T. The flush
         // must restore speculative history to binary 101 in the same cycle as the batch update.
