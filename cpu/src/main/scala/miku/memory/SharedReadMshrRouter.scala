@@ -108,29 +108,45 @@ final class SharedReadMshrRouter(
     is(B"01") { requestCount := requestCount - 1 }
   }
 
+  // Capture the global response and its restored local identity at the shared
+  // hierarchy boundary. This skid stage accepts one beat per cycle while
+  // cutting L2 hit/MSHR selection away from all L1 refill RAM controls.
+  val responseBufferValid = RegInit(False)
+  val responseBufferOwnerData = Reg(Bool())
+  val responseBuffer = Reg(LineReadBeat(config))
   val responseId = io.lowerReadBeat.mshrId
   val responseKnown = valid(responseId)
-  val responseOwnerData = ownerData(responseId)
-  io.dataReadBeatValid := io.lowerReadBeatValid && responseKnown && responseOwnerData
-  io.instructionReadBeatValid := io.lowerReadBeatValid && responseKnown && !responseOwnerData
-  for (beat <- Seq(io.dataReadBeat, io.instructionReadBeat)) {
-    beat.mshrId := localId(responseId)
-    beat.beat := io.lowerReadBeat.beat
-    beat.data := io.lowerReadBeat.data
-    beat.last := io.lowerReadBeat.last
-    beat.error := io.lowerReadBeat.error
-  }
-  io.lowerReadBeatReady := responseKnown && Mux(
-    responseOwnerData,
+  val responseOutputReady = Mux(
+    responseBufferOwnerData,
     io.dataReadBeatReady,
     io.instructionReadBeatReady
   )
+  val responseOutputFire = responseBufferValid && responseOutputReady
+  io.lowerReadBeatReady := responseKnown && (!responseBufferValid || responseOutputFire)
+  val responseInputFire = io.lowerReadBeatValid && io.lowerReadBeatReady
 
-  val responseFire = io.lowerReadBeatValid && io.lowerReadBeatReady
-  when(responseFire && io.lowerReadBeat.last) { valid(responseId) := False }
+  io.dataReadBeatValid := responseBufferValid && responseBufferOwnerData
+  io.instructionReadBeatValid := responseBufferValid && !responseBufferOwnerData
+  io.dataReadBeat := responseBuffer
+  io.instructionReadBeat := responseBuffer
+
+  when(responseInputFire) {
+    responseBufferOwnerData := ownerData(responseId)
+    responseBuffer.mshrId := localId(responseId)
+    responseBuffer.beat := io.lowerReadBeat.beat
+    responseBuffer.data := io.lowerReadBeat.data
+    responseBuffer.last := io.lowerReadBeat.last
+    responseBuffer.error := io.lowerReadBeat.error
+  }
+  switch(responseInputFire ## responseOutputFire) {
+    is(B"10") { responseBufferValid := True }
+    is(B"01") { responseBufferValid := False }
+  }
+
+  when(responseInputFire && io.lowerReadBeat.last) { valid(responseId) := False }
 
   io.activeCount := CountOne(valid.asBits)
-  val idleNow = !valid.asBits.orR && requestCount === 0 &&
+  val idleNow = !valid.asBits.orR && requestCount === 0 && !responseBufferValid &&
     !io.lowerReadBeatValid && !io.instructionReadValid && !io.dataReadValid
   io.idle := RegNext(idleNow) init (False)
 }

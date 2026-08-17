@@ -139,15 +139,17 @@ class SharedReadMshrRouterSpec extends AnyFunSuite {
         dut.io.lowerReadBeat.data #= BigInt("1122334455667788", 16)
         dut.io.lowerReadBeat.last #= false
         sleep(1)
+        assert(dut.io.lowerReadBeatReady.toBoolean)
+        sample(dut)
+        dut.io.lowerReadBeatValid #= false
         assert(dut.io.dataReadBeatValid.toBoolean)
         assert(!dut.io.instructionReadBeatValid.toBoolean)
         assert(dut.io.dataReadBeat.mshrId.toBigInt == 2)
         assert(!dut.io.lowerReadBeatReady.toBoolean)
+        assert(dut.io.activeCount.toBigInt == 4)
         dut.io.dataReadBeatReady #= true
         sample(dut)
-        assert(dut.io.activeCount.toBigInt == 4)
 
-        dut.io.lowerReadBeatValid #= false
         val releaseOrder = Seq(2, 0, 3, 1)
         releaseOrder.zipWithIndex.foreach { case (globalId, released) =>
           dut.io.lowerReadBeatValid #= true
@@ -157,6 +159,10 @@ class SharedReadMshrRouterSpec extends AnyFunSuite {
           dut.io.lowerReadBeat.last #= true
           sleep(1)
           assert(dut.io.lowerReadBeatReady.toBoolean)
+          assert(!dut.io.dataReadBeatValid.toBoolean)
+          assert(!dut.io.instructionReadBeatValid.toBoolean)
+          sample(dut)
+          dut.io.lowerReadBeatValid #= false
           if (ownersData(globalId)) {
             assert(dut.io.dataReadBeatValid.toBoolean)
             assert(!dut.io.instructionReadBeatValid.toBoolean)
@@ -166,8 +172,8 @@ class SharedReadMshrRouterSpec extends AnyFunSuite {
             assert(!dut.io.dataReadBeatValid.toBoolean)
             assert(dut.io.instructionReadBeat.mshrId.toBigInt == localIds(globalId))
           }
-          sample(dut)
           assert(dut.io.activeCount.toBigInt == config.mshrEntries - released - 1)
+          sample(dut)
         }
         dut.io.lowerReadBeatValid #= false
       }
@@ -226,6 +232,58 @@ class SharedReadMshrRouterSpec extends AnyFunSuite {
         assert(dut.io.lowerReadValid.toBoolean)
         assert(dut.io.lowerRead.lineAddress.toBigInt == 0x6000)
         assert(dut.io.lowerRead.mshrId.toBigInt == 2)
+      }
+  }
+
+  test("registered response boundary sustains one accepted beat per cycle") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-shared-read-response-skid"
+      )
+      .compile(new SharedReadMshrRouterProbe(config))
+      .doSim("ooo-shared-read-response-skid", 0x72e1) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        for (localId <- Seq(1, 2)) {
+          dut.io.dataReadValid #= true
+          dut.io.dataRead.lineAddress #= 0x8000 + localId * 0x40
+          dut.io.dataRead.mshrId #= localId
+          sleep(1)
+          assert(dut.io.dataReadReady.toBoolean)
+          sample(dut)
+          dut.io.dataReadValid #= false
+        }
+        sample(dut)
+        assert(dut.io.activeCount.toBigInt == 2)
+
+        dut.io.lowerReadBeatValid #= true
+        dut.io.lowerReadBeat.mshrId #= 0
+        dut.io.lowerReadBeat.beat #= 7
+        dut.io.lowerReadBeat.data #= BigInt("1111222233334444", 16)
+        dut.io.lowerReadBeat.last #= true
+        sleep(1)
+        assert(dut.io.lowerReadBeatReady.toBoolean)
+        sample(dut)
+        assert(dut.io.dataReadBeatValid.toBoolean)
+        assert(dut.io.dataReadBeat.mshrId.toBigInt == 1)
+        assert(dut.io.dataReadBeat.data.toBigInt == BigInt("1111222233334444", 16))
+
+        dut.io.lowerReadBeat.mshrId #= 1
+        dut.io.lowerReadBeat.data #= BigInt("aaaabbbbccccdddd", 16)
+        sleep(1)
+        assert(dut.io.lowerReadBeatReady.toBoolean)
+        sample(dut)
+        dut.io.lowerReadBeatValid #= false
+        assert(dut.io.dataReadBeatValid.toBoolean)
+        assert(dut.io.dataReadBeat.mshrId.toBigInt == 2)
+        assert(dut.io.dataReadBeat.data.toBigInt == BigInt("aaaabbbbccccdddd", 16))
+        assert(dut.io.activeCount.toBigInt == 0)
       }
   }
 }
