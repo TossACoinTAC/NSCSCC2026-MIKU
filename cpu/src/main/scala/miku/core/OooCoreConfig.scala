@@ -126,6 +126,9 @@ final case class OooCoreConfig(
     // execution-cluster wake tag back across the backend. Persistent source-ready state continues
     // to use the qualified execution/ROB wakeup network.
     enableLocalFixedPortSelectWakeup: Boolean = true,
+    // Ordinary direct producers already sit behind the Backend operand register.  Keep the
+    // execution cluster's qualified valid, but replicate the select-only destination locally.
+    enableLocalOrdinaryDirectSelectWakeup: Boolean = true,
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     // Capture tokenized issue source tags through the existing one-hot selected-slot mask rather
     // than a second binary physical-slot read at the operand boundary.

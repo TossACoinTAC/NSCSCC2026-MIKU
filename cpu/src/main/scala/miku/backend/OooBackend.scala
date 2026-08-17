@@ -124,6 +124,18 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val issueOperandUop = Vec.fill(config.executionWidth)(Reg(RenamedMicroOp(config)))
   val issueOperandSource1 = Vec.fill(config.executionWidth)(Reg(Bits(config.xlen bits)))
   val issueOperandSource2 = Vec.fill(config.executionWidth)(Reg(Bits(config.xlen bits)))
+  val localOrdinaryDirectSelectWakeupValid = Bits(config.executionWidth bits)
+  val localOrdinaryDirectSelectWakeupPdst = Vec(
+    UInt(config.physicalRegIndexWidth bits),
+    config.executionWidth
+  )
+  for (port <- 0 until config.executionWidth) {
+    // The execution cluster remains the acceptance and direct-capability authority.  Only the
+    // destination identity is replicated locally, which removes the pdst round trip without
+    // predicting a wake from issueReady or from a second FU decode.
+    localOrdinaryDirectSelectWakeupValid(port) := io.directWakeupValid(port)
+    localOrdinaryDirectSelectWakeupPdst(port) := issueOperandUop(port).pdst
+  }
   // The fixed port is always execution-ready and every physical-register producer routed to it
   // emits a direct wake on the cycle after IQ acceptance. Replicate that narrow identity at the
   // consumer boundary; the execution wake still owns persistent ready-state mutation.
@@ -636,6 +648,14 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
           issueQueues(port).io.selectWakeupValid(write) :=
             localFixedPortSelectWakeupValid(port)
           issueQueues(port).io.selectWakeupPdst(write) := localFixedPortSelectWakeupPdst(port)
+        } else if (
+          config.enableLocalOrdinaryDirectSelectWakeup && write < config.executionWidth &&
+            write != loadStorePort
+        ) {
+          issueQueues(port).io.selectWakeupValid(write) :=
+            localOrdinaryDirectSelectWakeupValid(write)
+          issueQueues(port).io.selectWakeupPdst(write) :=
+            localOrdinaryDirectSelectWakeupPdst(write)
         } else {
           issueQueues(port).io.selectWakeupValid(write) := fastSelectWakeupValid(write)
           issueQueues(port).io.selectWakeupPdst(write) := fastSelectWakeupPdst(write)
