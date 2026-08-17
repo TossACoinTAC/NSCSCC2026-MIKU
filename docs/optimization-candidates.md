@@ -400,9 +400,9 @@ WNS、资源、DCP 或 bitstream 结论。
 
 | ID | 来源与适配 | 状态 | 当前效果与下一门禁 |
 | --- | --- | --- | --- |
-| EQ01 | 从 `c60dadd` 选择性适配前端 owner/correction、cache tag、L1I refill line 和 BTB tag 的 LUT-tree equality；同时由 `c1c00c3` 补齐共享 CacheArray 的 test-impact 映射 | 已实现；软件门禁通过 | `03e8e25`；完整 `cpu-check` 40 suites / 263 tests、Python contracts 95/95，perf20 20/20 逐项等于 `3,879,728`。Yosys 全核 cells `57,205 -> 57,235`，不把该代理当作 FPGA LUT/CARRY4 物理结论；由 matching direct top-N 和 WNS 决定保留。 |
-| MT20 | 从 `4c233b2` 适配到当前拆分后的 scheduled-load owner/payload/translation：相同 head 不重复写宽 payload，head 变化、owner invalid、AGU 或 translation response 仍按原优先级更新 | 已实现；软件门禁通过 | `9f06f44`；LSQ 36/36、完整门禁通过，perf20 20/20 逐项等于 `3,879,728`。相对 EQ01 的 Yosys 为 cells `57,235 -> 57,241`、word bits `+16`，目标是减少物理 CE/fanout，需 matching route 裁决。 |
-| FT12 | 从 `06ca492` 仅适配 registered correction decision 的 RTL，不引入其 Vivado post-route 策略；legacy cleanup 保持可选，deferred cleanup 使用已注册的窄 owner/drain 资格 | 已实现；软件门禁通过 | `c9af20c`；OooFrontend 26/26、L1I 11/11、完整门禁通过。相对 MT20 的 Yosys 全核 cells/word bits/post-flat 均 `-8`，OooFrontend `4,051 -> 4,043`；perf20 20/20 逐项等于 `3,879,728`，func58 seeds `240/255/141` 均为 58/58。matching direct implementation 待运行。 |
+| EQ01 | 从 `c60dadd` 选择性适配前端 owner/correction、cache tag、L1I refill line 和 BTB tag 的 LUT-tree equality；同时由 `c1c00c3` 补齐共享 CacheArray 的 test-impact 映射 | 已实现并进入 R14 baseline | `03e8e25`；完整 `cpu-check` 40 suites / 263 tests、Python contracts 95/95，perf20 20/20 逐项等于 `3,879,728`。Yosys 全核 cells `57,205 -> 57,235`，但 matching 组合中 predictor/cache 最差路径分别从 `-0.544/-0.686 ns` 改善到 `-0.376/-0.344 ns`；单次组合 run 不作精确单项归因。 |
+| MT20 | 从 `4c233b2` 适配到当前拆分后的 scheduled-load owner/payload/translation：相同 head 不重复写宽 payload，head 变化、owner invalid、AGU 或 translation response 仍按原优先级更新 | 已实现并进入 R14 baseline | `9f06f44`；LSQ 36/36、完整门禁通过，perf20 20/20 逐项等于 `3,879,728`。相对 EQ01 的 Yosys 为 cells `57,235 -> 57,241`、word bits `+16`；matching 组合中 LSQ 最差路径从 `-0.639` 改善到 `-0.397 ns`，但不把组合变化完全归因给 MT20。 |
+| FT12 | 从 `06ca492` 仅适配 registered correction decision 的 RTL，不引入其 Vivado post-route 策略；legacy cleanup 保持可选，deferred cleanup 使用已注册的窄 owner/drain 资格 | 已实现并进入 R14 baseline | `c9af20c`；OooFrontend 26/26、L1I 11/11、完整门禁通过。相对 MT20 的 Yosys 全核 cells/word bits/post-flat 均 `-8`，OooFrontend `4,051 -> 4,043`；perf20 20/20 逐项等于 `3,879,728`，func58 seeds `240/255/141` 均为 58/58。matching top-50 中旧 frontend correction 路径由 3 条降为 0 条。 |
 
 R14 当前发布 RTL SHA-256 为
 `26009f15961b1f350baa639589353cb5ae851f5fc8bfda49a8b415dad0223ac8`。最终 perf20 与 func58
@@ -411,11 +411,19 @@ R14 当前发布 RTL SHA-256 为
 - `build/sim/runs/cpu_248c9cb56a1d_chiplab_c398d274812f/clean-perf20_model_dd944bd53fde_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`
 - `build/sim/runs/cpu_248c9cb56a1d_chiplab_c398d274812f/clean-func58_model_baff0ccbeb0c_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`
 
-结构对比为 `build/reports/yosys/MT20-vs-FT12-registered-correction.json`。这组证据只建立
-“正确且周期透明”的候选 baseline；只有当前 RTL 的 100 MHz direct full 自身满足 setup/hold、
-fully routed、DRC 和 bitstream 门禁后，才可晋级新的物理稳定里程碑。若结果没有优于
-`e04edc8` 的 matching direct，将按 `EQ01 -> MT20 -> FT12` 的提交边界结合 top-N 路径隔离，
-不以 main 的历史 closure 替代当前 A/B。
+结构对比为 `build/reports/yosys/MT20-vs-FT12-registered-correction.json`。matching 100 MHz
+direct full 已归档为
+`Post_Impl_Bundles/cpu_a8cd1c560d87_chiplab_c398d274812f_perf_100mhz_20260817-173219/`：setup/hold
+WNS 为 `-0.673/+0.018 ns`、setup TNS 为 `-107.284 ns`，fully routed、DRC 0 error、bitstream
+成功。相对 `e04edc8` direct 的 `-0.816/+0.049 ns` 和 `-167.447 ns`，setup WNS 改善
+`0.143 ns`、TNS 改善约 `60.2 ns`。Slice LUT 增加 `765`，但实际占用 slice 从 `26,800`
+降到 `26,139`，最大局部拥挤从 `97.0588%` 降到 `91.4414%`；peak overlap 从 `42,344`
+小幅增至 `44,182`，最终仍为 0。
+
+新 top-50 为 IQ 35、predictor 9、LSQ 4、cache/L2 2；frontend 与 ROB/CSR 均为 0。三项
+目标路径族同步改善，支持保留该组合为后续候选 baseline，但 setup 仍为负，因此它不是 100 MHz
+物理里程碑，也没有竞争产物资格。下一轮直接针对 IQ 35/50 的 source-tag/payload 跨区网络，
+并保留 `EQ01 -> MT20 -> FT12` 的提交边界供后续回归隔离。
 
 ## 10. 当前优先级与下一步
 

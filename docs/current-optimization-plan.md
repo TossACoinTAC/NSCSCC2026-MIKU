@@ -364,10 +364,22 @@ Python contracts 95/95，perf20 20/20 逐项精确等于 `3,879,728`，func58 ra
 
 Yosys 不给 EQ01/MT20 的物理收益背书：EQ01 全核 cells 增加 30，MT20 再增加 6；FT12 相对
 MT20 将 OooFrontend 和全核 cells 各减少 8。它们的目标分别是 FPGA equality mapping、宽 CE/
-fanout 和 correction 跨区控制，最终保留必须由一次 matching 100 MHz direct full 的 top-N、
-拥挤、WNS/TNS 与资源交叉验证。当前仅形成软件稳定候选 baseline，尚未形成新的物理里程碑；
-不得继承 main 的 closure 或 `e04edc8` 的旧 WNS。若组合实现没有更优，将按三个提交边界和
-当前 top-N 路径隔离，而不是继续叠加未知收益候选。
+fanout 和 correction 跨区控制，保留决策由 matching 100 MHz direct full 交叉验证。
+
+该 direct full 已完成并归档为
+`Post_Impl_Bundles/cpu_a8cd1c560d87_chiplab_c398d274812f_perf_100mhz_20260817-173219/`。
+setup/hold WNS 为 `-0.673/+0.018 ns`、setup TNS 为 `-107.284 ns`，fully routed、DRC 0 error、
+bitstream 成功；相对 `e04edc8` direct 的 setup WNS 改善 `0.143 ns`，TNS 改善约 `60.2 ns`。
+Slice LUT `85,010 -> 85,775`，但实际 slice `26,800 -> 26,139`，最大局部拥挤
+`97.0588% -> 91.4414%`，peak overlap `42,344 -> 44,182` 后归零。top-50 从 IQ 20、
+ROB/CSR 16、cache/L2 6、frontend 3、predictor 1、LSQ 4，变为 IQ 35、predictor 9、LSQ 4、
+cache/L2 2；对应最差路径中 LSQ `-0.639 -> -0.397 ns`、predictor `-0.544 -> -0.376 ns`、
+cache/L2 `-0.686 -> -0.344 ns`，frontend 与 ROB/CSR 均退出 top-50。
+
+这些组合变化与三项候选的目标一致，支持把 R14 作为后续软件稳定、物理表现更优的候选 baseline；
+单次组合实现仍不能精确拆出每项的独立 WNS。setup 尚未闭合，所以 R14 不是 100 MHz 物理里程碑，
+不得晋级正式产物。下一轮优先解决 IQ 35/50 的 source-tag 到 payload 跨区路径，同时保留三个
+提交边界供后续隔离。
 
 ## R0：实验合同
 
