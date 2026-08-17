@@ -382,6 +382,29 @@ class AddressTranslationUnitSpec extends AnyFunSuite {
         sample(dut)
         dut.io.tlbSearchValid #= false
 
+        val highIndexAddress = BigInt(0x00034000)
+        writeTlb(
+          dut,
+          index = 31,
+          virtualAddress = highIndexAddress,
+          ppn0 = 0x44000,
+          ppn1 = 0x44001,
+          asid = 0xaa
+        )
+        dut.io.tlbSearchVppn #= (highIndexAddress >> 13)
+        dut.io.tlbSearchValid #= true
+        sleep(1)
+        assert(dut.io.tlbSearchResponseValid.toBoolean)
+        assert(dut.io.tlbSearchFound.toBoolean)
+        assert(dut.io.tlbSearchIndex.toBigInt == 31)
+
+        dut.io.tlbSearchVppn #= (BigInt(0x00054000) >> 13)
+        sleep(1)
+        assert(dut.io.tlbSearchResponseValid.toBoolean)
+        assert(!dut.io.tlbSearchFound.toBoolean)
+        assert(dut.io.tlbSearchIndex.toBigInt == 0)
+        dut.io.tlbSearchValid #= false
+
         dut.io.csrDmw0 #= 0
         dut.io.tlbInvalidateValid #= true
         dut.io.tlbInvalidateOperation #= 0
