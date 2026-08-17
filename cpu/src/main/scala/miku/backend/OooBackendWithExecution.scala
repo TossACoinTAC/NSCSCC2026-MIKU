@@ -129,6 +129,8 @@ final class OooBackendWithExecution(
   execution.io.aguReady := loadStoreQueue.io.aguReady
   execution.io.loadStoreCompletionValid := loadStoreQueue.io.completionValid
   execution.io.loadStoreCompletion := loadStoreQueue.io.completion
+  execution.io.loadStoreCompletionHeadBypassEligible :=
+    loadStoreQueue.io.completionHeadBypassEligible
   execution.io.systemReadData := io.systemReadData
   execution.io.timer := io.timer
   execution.io.timerId := io.timerId
@@ -201,6 +203,7 @@ final class OooBackendWithExecution(
 
   backend.io.completionValid := execution.io.completionValid
   backend.io.completion := execution.io.completion
+  backend.io.completionHeadBypassEligible := execution.io.completionHeadBypassEligible
   backend.io.storeCompletionBypassValid := loadStoreQueue.io.storeCompletionBypassValid
   backend.io.storeCompletionBypass := loadStoreQueue.io.storeCompletionBypass
   backend.io.directWakeupValid := execution.io.directWakeupValid

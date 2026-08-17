@@ -80,6 +80,7 @@ private final class OooExecutionClusterProbe(config: OooCoreConfig) extends Comp
   execution.io.loadStoreCompletion.assignFromBits(
     B(0, execution.io.loadStoreCompletion.getBitsWidth bits)
   )
+  execution.io.loadStoreCompletionHeadBypassEligible := True
   execution.io.olderStorePending := False
   execution.io.memorySubsystemIdle := True
   execution.io.instructionBarrierMaintenanceReady := True
@@ -184,6 +185,7 @@ private final class OooDivideCompletionCollisionProbe(config: OooCoreConfig) ext
   execution.io.loadStoreCompletion.assignFromBits(
     B(0, execution.io.loadStoreCompletion.getBitsWidth bits)
   )
+  execution.io.loadStoreCompletionHeadBypassEligible := True
   execution.io.olderStorePending := False
   execution.io.memorySubsystemIdle := True
   execution.io.instructionBarrierMaintenanceReady := True
@@ -271,6 +273,7 @@ private final class OooMultiplyWakeupProbe(config: OooCoreConfig) extends Compon
   execution.io.loadStoreCompletion.assignFromBits(
     B(0, execution.io.loadStoreCompletion.getBitsWidth bits)
   )
+  execution.io.loadStoreCompletionHeadBypassEligible := True
   execution.io.olderStorePending := False
   execution.io.memorySubsystemIdle := True
   execution.io.instructionBarrierMaintenanceReady := True
@@ -359,6 +362,7 @@ private final class OooBarrierExecutionProbe(config: OooCoreConfig) extends Comp
   execution.io.loadStoreCompletion.assignFromBits(
     B(0, execution.io.loadStoreCompletion.getBitsWidth bits)
   )
+  execution.io.loadStoreCompletionHeadBypassEligible := True
   execution.io.olderStorePending := io.olderStorePending
   execution.io.memorySubsystemIdle := io.memorySubsystemIdle
   execution.io.instructionBarrierMaintenanceReady := io.maintenanceReady
@@ -463,6 +467,7 @@ private final class OooCacopExecutionProbe(config: OooCoreConfig) extends Compon
   execution.io.loadStoreCompletion.assignFromBits(
     B(0, execution.io.loadStoreCompletion.getBitsWidth bits)
   )
+  execution.io.loadStoreCompletionHeadBypassEligible := True
   execution.io.olderStorePending := io.olderStorePending
   execution.io.memorySubsystemIdle := io.memorySubsystemIdle
   execution.io.instructionBarrierMaintenanceReady := True
@@ -551,6 +556,7 @@ private final class OooCpuCfgExecutionProbe(config: OooCoreConfig) extends Compo
   execution.io.loadStoreCompletion.assignFromBits(
     B(0, execution.io.loadStoreCompletion.getBitsWidth bits)
   )
+  execution.io.loadStoreCompletionHeadBypassEligible := True
   execution.io.olderStorePending := False
   execution.io.memorySubsystemIdle := True
   execution.io.instructionBarrierMaintenanceReady := True

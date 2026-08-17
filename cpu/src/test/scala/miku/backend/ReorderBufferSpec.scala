@@ -25,6 +25,7 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     val allocateReady = out Bool ()
     val allocatedPointer = out Vec (UInt(config.robPointerWidth bits), config.renameWidth)
     val completionValid = in Bits (config.writebackWidth bits)
+    val completionHeadBypassEligible = in Bits (config.writebackWidth bits)
     val completionWritesPdst = in Bits (config.writebackWidth bits)
     val completionRobPointer = in Vec (UInt(config.robPointerWidth bits), config.writebackWidth)
     val completionRecoveryEpoch =
@@ -115,6 +116,7 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
   rob.io.predictorUpdateCapacity := io.predictorUpdateCapacity
   rob.io.observationRenameAdmission := 0
   rob.io.completionValid := io.completionValid
+  rob.io.completionHeadBypassEligible := io.completionHeadBypassEligible
   rob.io.storeCompletionBypassValid := io.storeCompletionBypassValid
   rob.io.storeCompletionBypass.robPointer := io.storeCompletionBypassRobPointer
   rob.io.storeCompletionBypass.recoveryEpoch := io.storeCompletionBypassRecoveryEpoch
@@ -183,6 +185,7 @@ class ReorderBufferSpec extends AnyFunSuite {
     dut.io.allocateAccept #= false
     dut.io.flush #= false
     dut.io.completionValid #= 0
+    dut.io.completionHeadBypassEligible #= (BigInt(1) << config.writebackWidth) - 1
     dut.io.completionWritesPdst #= 0
     for (lane <- 0 until config.writebackWidth) {
       dut.io.completionData(lane) #= BigInt(0x100 + lane)

@@ -141,6 +141,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
 
     val completionValid = in Bits (config.writebackWidth bits)
     val completion = in Vec (Completion(config), config.writebackWidth)
+    val completionHeadBypassEligible = in Bits (config.writebackWidth bits)
     val storeCompletionBypassValid = in Bool ()
     val storeCompletionBypass = in(StoreCompletionIdentity(config))
     val completionWakeupValid = out Bits (config.writebackWidth bits)
@@ -929,10 +930,12 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       io.storeCompletionBypass.robPointer === payloadReadPointer(0)
     for (lane <- 0 until config.writebackWidth) {
       incomingHeadCompletionBypassMask(lane) := io.completionValid(lane) &&
+        io.completionHeadBypassEligible(lane) &&
         io.completion(lane).recoveryEpoch === io.currentEpoch &&
         io.completion(lane).robPointer === payloadReadPointer(0) &&
         !io.completion(lane).exception.valid && !io.completion(lane).branchResolved
       incomingHeadBranchBypassMask(lane) := io.completionValid(lane) &&
+        io.completionHeadBypassEligible(lane) &&
         io.completion(lane).recoveryEpoch === io.currentEpoch &&
         io.completion(lane).robPointer === payloadReadPointer(0) &&
         !io.completion(lane).exception.valid && io.completion(lane).branchResolved

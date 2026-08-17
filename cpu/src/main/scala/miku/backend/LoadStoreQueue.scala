@@ -194,6 +194,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     val dataResponse = in(CacheResponse(config))
     val completionValid = out Bool ()
     val completion = out(Completion(config))
+    val completionHeadBypassEligible = out Bool ()
     val storeCompletionBypassValid = out Bool ()
     val storeCompletionBypass = out(StoreCompletionIdentity(config))
     val loadWakeupValid = out Bool ()
@@ -1051,6 +1052,11 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   }
   io.completionValid := completionValid || bankedForwardCompletionValid
   io.completion := completion
+  // Banked store-forwarded Loads still complete and wake through the normal
+  // ROB path, but avoid the wide same-cycle ROB-head bypass cone.  A head
+  // Load can therefore retire on the following cycle without changing its
+  // completion or register-wakeup identity.
+  io.completionHeadBypassEligible := !bankedForwardCompletionValid
   when(bankedForwardCompletionValid) {
     io.completion := bankedForwardCompletion
   }

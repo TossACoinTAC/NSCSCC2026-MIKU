@@ -241,6 +241,7 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
     val aguReady = in Bool ()
     val loadStoreCompletionValid = in Bool ()
     val loadStoreCompletion = in(Completion(config))
+    val loadStoreCompletionHeadBypassEligible = in Bool ()
     val olderStorePending = in Bool ()
     val memorySubsystemIdle = in Bool ()
     val barrierActive = out Bool ()
@@ -254,6 +255,7 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
     val cacheTranslationResponse = slave(Stream(TranslationResponse(config)))
     val completionValid = out Bits (config.writebackWidth bits)
     val completion = out Vec (Completion(config), config.writebackWidth)
+    val completionHeadBypassEligible = out Bits (config.writebackWidth bits)
     val directWakeupValid = out Bits (config.executionWidth bits)
     val directWakeupPdst =
       out Vec (UInt(config.physicalRegIndexWidth bits), config.executionWidth)
@@ -793,25 +795,34 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
   for (port <- 0 until config.executionWidth) {
     if (port == loadStorePort) {
       io.completionValid(port) := io.loadStoreCompletionValid || directCompletionValid(port)
+      io.completionHeadBypassEligible(port) := True
       io.completion(port) := directCompletion(port)
-      when(io.loadStoreCompletionValid) { io.completion(port) := io.loadStoreCompletion }
+      when(io.loadStoreCompletionValid) {
+        io.completion(port) := io.loadStoreCompletion
+        io.completionHeadBypassEligible(port) := io.loadStoreCompletionHeadBypassEligible
+      }
     } else if (port == dividePort) {
       io.completionValid(port) := directCompletionValid(port) || divider.io.completionValid
+      io.completionHeadBypassEligible(port) := True
       io.completion(port) := directCompletion(port)
       when(divider.io.completionValid) { io.completion(port) := divider.io.completion }
     } else if (port == csrPort) {
       io.completionValid(port) := directCompletionValid(port) || barrierCompletionValid
+      io.completionHeadBypassEligible(port) := True
       io.completion(port) := directCompletion(port)
       when(barrierCompletionValid) { io.completion(port) := barrierCompletion }
     } else {
       io.completionValid(port) := directCompletionValid(port)
+      io.completionHeadBypassEligible(port) := True
       io.completion(port) := directCompletion(port)
     }
   }
   io.completionValid(config.executionWidth) := multiplier.io.completionValid
+  io.completionHeadBypassEligible(config.executionWidth) := True
   io.completion(config.executionWidth) := multiplier.io.completion
   for (lane <- config.executionWidth + 1 until config.writebackWidth) {
     io.completionValid(lane) := False
+    io.completionHeadBypassEligible(lane) := False
     clearCompletion(io.completion(lane))
   }
 }
