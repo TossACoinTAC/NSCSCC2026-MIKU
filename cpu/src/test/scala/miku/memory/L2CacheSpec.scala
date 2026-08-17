@@ -551,6 +551,7 @@ class L2CacheSpec extends AnyFunSuite {
           assert(dut.io.readBeat.beat.toBigInt == beat)
           assert(dut.io.readBeat.data.toBigInt == beats(beat))
           dut.clockDomain.waitSampling()
+          sleep(1)
         }
       }
   }
