@@ -208,6 +208,89 @@ matching 100 MHz direct Vivado 尚待运行。因此没有可继承的 R11 WNS�
 源码、生成 RTL、软件、工具和 Chiplab 身份后的完整 direct implementation 才能产生正式实现结论。若
 任一组合门禁失败或发生不能接受的回退，按提交边界拆分并重新形成 R11 候选集。
 
+### R12 拥挤根因批次
+
+R12 不再只按上一轮 top-50 的表面模块名选项，而是联合 placed DCP、partial-route health、
+层次拥挤和全局 Yosys LTP 做根因审计。历史 DCP 仍只用于选择候选，不给当前 RTL 继承 WNS。
+审计得到的主要物理压力为：东侧 global level-4 区域 CLBLM 占用约 `132%`，其中 PRF/ROB
+分别约占 `64%/33%`；北侧 short level-3 区域约 `110%`，backend/LSQ/ROB 分别约占
+`86%/8%/5%`；另两个 short 热区中 ROB 分别约占 `78%/87%`。对应路径族包括
+scheduled-load owner 资格、ROB completion 到 PRF/CSR/redirect、L2 hit MSHR 身份到 L1D，
+以及 predictor RAS 动态选择。R12 将这些报告结论转成实际候选，而不是只保留文字建议。
+
+本批次当前包含 13 项：
+
+| 候选 | 提交 | 报告根因与结构动作 | 当前证据边界 |
+| --- | --- | --- | --- |
+| CT07 | `b74821f` | 去除 L1I speculative turnover 已拥有 array read 时重复的 request-fire lookup 写入 | L1I 定向与组合门禁通过 |
+| IFT01 | `20878e9` | predecode 移到既有 L1I response register 之后，消除逐 way 的宽组合复制 | L1I 定向与组合门禁通过 |
+| RF04 | `7956bd5` | PRF 在 completion 边界本地捕获 destination，缩短 ROB 到 PRF 的跨区资格网络 | backend/PRF 定向与组合门禁通过 |
+| DEC01 | `97c16d6` | decoder instruction-valid 线性 OR 改为平衡归约 | frontend 定向与组合门禁通过 |
+| AT02 | `cef4853` | 32 项 TLBSRCH index OR 改为平衡归约 | ATU 定向与组合门禁通过 |
+| MT22 | `f617bc5` | Store data 与 recovery metadata 更新域分离，减少 LSQ 宽 payload 的全局 CE | LSQ 定向与组合门禁通过 |
+| L1T04 | `00aae66` | pending Store owner 以局部 one-hot 更新 | L1D 定向与组合门禁通过 |
+| HRT02 | `7ce70a2` | 在 shared refill router 建立 registered response boundary，切断 L2 MSHR ID 到 L1D 的跨区路径 | router 定向与组合门禁通过；增加一拍响应边界，须由周期与实现收益共同裁决 |
+| MT19 | `9ad638d` | 在 LSQ 源头完成 load wakeup epoch 资格化，backend 只消费窄 valid/pDst | LSQ/backend 定向与组合门禁通过 |
+| BPT02 | `4a7fd93` | 四 lane 共享 speculative RAS top 动态读取 | predictor 定向与组合门禁通过 |
+| BPT03 | `5eeceb8`、`c0b2bd6` | architectural RAS 三宽更新改为局部 one-hot transition，并修复初版组合环 | predictor 定向与组合门禁通过 |
+| L2T03 | `eadb3dc` | L2 hit response 在既有边界保持 one-hot grant，只在接口编码 MSHR ID | L2 定向与组合门禁通过 |
+| RT17 | `27b4cef` | ROB completion result/control 分 bank，使 redirect/exception 不依赖 result payload | ROB 定向与组合门禁通过；ROB 局部 cells 增长，列为高风险物理权衡 |
+
+测试 fixture 的时钟边界、CSR pin 和 recovery epoch 合同分别由 `333cf05`、`a8a68ff`、
+`8356465` 修正；这些是面向公开时序语义的向前兼容修复，没有删除断言或放宽 DUT 合同。
+当前 expanded-window 组合的完整 `cpu-check` 已通过：40 suites、262 tests，Python contracts
+94/94，generation、strict lint、Yosys gate 和 docs contract 均通过；matching RTL SHA-256 为
+`f46d711ef65bcb828ac7ec43abcbb4b455ac14e5bbc954456e8e1946bdba5fd1`。
+
+同配置 Yosys 相对 R11 history10 baseline：全核 cells `64,844 -> 64,260`（`-0.901%`）、
+word bits `442,002 -> 432,290`（`-2.197%`）、post-flat cells `58,765 -> 58,178`
+（`-0.999%`）。局部主要减少来自 L1I `-818` cells 与 predictor `-129` cells；ROB
+`+250` cells（`+2.23%`）及 `+230` word bits 是必须由 matching physical evidence 裁决的反向
+信号。因为 ROB 本身位于最大拥挤区，不能用全核净减少替代局部判断；RT17 只有在 ROB/PRF、
+commit/redirect top-N 和局部拥挤明确改善时才保留。
+
+完整 perf20 20/20 为 `3,798,148 -> 3,798,085`，总周期改善 63 cycles；归一化几何平均为
+`0.999128484x`，即约 `0.0872%` 性能回退，低于时序批次允许的 `0.5%`。最大分项退化为
+fireye_A0 `+2.33517%`，最大改善为 loop_induction `-3.80876%`，没有项目超过 `3%` 退化门槛。
+该组合结果不能拆分为 HRT02 或任一候选的单项收益；matching implementation 若没有明确切断
+对应路径族，优先移除 HRT02 和 RT17。比较证据为
+`build/reports/comparisons/R12-13cand-vs-R11.json`。func58、Linux 和 matching 100 MHz direct
+full 仍须使用同一 RTL 身份完成；此前 DCP 和 WNS 不得继承。
+
+### R13：扩容 ROB/PRF 的本地化访问批次
+
+R12 的结构筛选表明，ROB 的 cells 从 `11,193` 增至 `11,443`，而历史 routed congestion 又将
+PRF/ROB 指向最大的东侧与两个短程热点。因此 R13 不扩大任何容量，也不改变提交、完成、旁路或
+恢复的架构拍数；它只将 expanded-window 的扁平地址/one-hot 网络拆为四个物理 bank 和 bank-local
+row token。`RF05 @ fedb3a2` 将 128-entry PRF 的 8R5W 存储和写回译码分为 4 x 32；`RT18`
+将 ROB 五路 completion 及 Store completion 的 64-bit one-hot target 变为 4 x 16 局部 token；
+`RT19` 将 allocation 与 payload-ready 的动态写入局部化；`RT20` 将 commit invalidation
+局部化；`RT21` 将 commit state read 改为 4 个 16:1 后再作 4:1 选择。RT21 的初版曾形成
+commit-count 到 candidate state 的组合环，已在定向 ROB 测试中发现并改为使用既有的 registered
+candidate pointer；该修复不改变预取边界。
+
+最终组合的完整 `cpu-check` 为 41 suites、264 tests，Python contracts 94/94，generation、strict
+lint、Yosys gate 与 docs contract 均通过。matching RTL SHA-256 为
+`78596cd45e599abe706a482599761ac5d2e6c6119298945d5546b24ca83f096f`。相对 R12，Yosys 显示
+全核 cells `64,260 -> 63,164`（`-1.706%`）、word bits `432,290 -> 420,628`（`-2.698%`）、
+post-flat cells `58,178 -> 57,078`（`-1.891%`）；ROB 为 `11,443 -> 10,291` cells（`-10.067%`）
+和 `41,718 -> 31,311` word bits（`-24.946%`），PRF word bits `37,256 -> 36,001`
+（`-3.369%`），但 PRF cells 小幅 `+56`。这些数字支持对布局网络的针对性尝试，仍不是器件资源或
+WNS 结论。
+
+完整 clean perf20 20/20 相对 R12 逐项精确相等，总周期均为 `3,798,085`、几何平均
+`1.000000000x`，比较为 `build/reports/comparisons/R13-capacity-local-vs-R12.json`。func58
+random-AXI seeds `240/255/141` 均为 `58/58 pass`，matrix 为
+`build/sim/runs/cpu_bbd36ac2be82_chiplab_c398d274812f/clean-func58_model_f960bd9f5f6a_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`；
+Linux random-AXI seed `5570815` 在 50 ms 窗口以 `linux-time-window-complete` 完成，运行
+`24,999,995` cycles，结果为
+`build/sim/runs/cpu_bbd36ac2be82_chiplab_c398d274812f/clean_model_706227055ff2_software_d3ce90aca67c/random/linux/seed_5570815/limit_50000000ns/sim-result.json`。
+
+下一步只运行一次 matching 100 MHz direct full implementation，并重新读取 local congestion、
+ROB/PRF top-N 与 WNS。若该运行仍由容量区域主导且未闭合，则保持 R13 的完整证据，切换到
+`CPU_VARIANT=default` 做同一软件合同下的正式 A/B；default 不是本轮的预设回退，也不从历史
+WNS 推断其当前表现。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。

@@ -281,7 +281,76 @@ fold 固定测试 fixture 合同，`e0b5626` 将 Makefile/OooCoreConfig 默认�
 减少 1 cell。这只是综合前结构筛选信息。matching 100 MHz direct Vivado 仍待运行，故尚未形成该
 最终组合的 Vivado WNS/资源、DRC、bitstream、Linux 或板测结论。
 
-## 6. 当前优先级与下一步
+## 6. R12 拥挤根因候选与组合证据
+
+R12 把历史 placed DCP、partial-route health 与层次拥挤报告中的根因直接转成候选。东侧
+global level-4 热区约 `132%`，PRF/ROB 占比约 `64%/33%`；北侧 short level-3 热区约
+`110%`，backend/LSQ/ROB 占比约 `86%/8%/5%`；另两个 short 热区由 ROB 占约
+`78%/87%`。这些百分比只属于历史探索 DCP，用于决定本轮 RTL 动作，不是当前 RTL 的
+资源或时序结论。
+
+| 候选 | 实现与目标路径族 | 状态 | 已测效果与保留门槛 |
+| --- | --- | --- | --- |
+| CT07 | L1I speculative turnover 已持有 array read 时不再重复以 request-fire 写 lookup state | 已实现并进入 R12 | `b74821f`；组合门禁通过，独立物理收益待 matching top-N |
+| IFT01 | 在 registered L1I response 之后统一生成四 lane predecode，去除逐 way 宽复制 | 已实现并进入 R12 | `20878e9`；组合 Yosys 中 L1I cells 减少是有利代理，不能当作独立 WNS |
+| RF04 | PRF 本地捕获 completion destination，缩短 ROB/PRF 跨区资格路径 | 已实现并进入 R12 | `7956bd5`；matching ROB-to-PRF top-N 和局部拥挤决定保留 |
+| DEC01 | instruction-valid 归约改为平衡 OR 树 | 已实现并进入 R12 | `97c16d6`；周期透明，独立 Vivado 收益待测 |
+| AT02 | 32-entry TLBSRCH index 归约改为平衡 OR 树 | 已实现并进入 R12 | `cef4853`；周期透明，独立 Vivado 收益待测 |
+| MT22 | Store data bank 与 recovery metadata 更新域分离 | 已实现并进入 R12 | `f617bc5`；LSQ 定向与组合门禁通过 |
+| L1T04 | pending Store owner 更新局部 one-hot 化 | 已实现并进入 R12 | `00aae66`；L1D 定向与组合门禁通过 |
+| HRT02 | shared refill response 增加 registered skid，切断 L2 MSHR ID 到 L1D 跨区路径 | 条件保留 | `7ce70a2`；增加一拍响应边界。组合几何平均性能回退约 `0.0872%`，仍须以 matching 路径/拥挤改善证明值得 |
+| MT19 | LSQ 源头完成 load wakeup epoch qualification，仅输出窄 valid/pDst | 已实现并进入 R12 | `9ad638d`；LSQ/backend 定向与组合门禁通过 |
+| BPT02 | 四 lane 共享 speculative RAS top 动态读取 | 已实现并进入 R12 | `4a7fd93`；组合 Yosys 中 predictor cells 减少是有利代理 |
+| BPT03 | architectural RAS 三宽 count/payload 更新改为局部 one-hot transition | 已实现并进入 R12 | `5eeceb8`、`c0b2bd6`；初版组合环已修复，predictor 定向通过 |
+| L2T03 | L2 hit response 在注册边界保持 one-hot grant，只在接口编码 ID | 已实现并进入 R12 | `eadb3dc`；L2 backpressure/stability 定向通过，matching top-N 决定收益 |
+| RT17 | completion result/control 分 bank，使 redirect/exception 避开 result payload | 高风险条件保留 | `27b4cef`；组合 Yosys 中 ROB cells `11,193 -> 11,443`（`+2.23%`）、word bits `+230`。ROB 正处拥挤核心，只有 matching ROB/PRF 与 commit top-N 明显改善才保留 |
+
+最终组合源码身份为 `8356465`，matching RTL SHA-256 为
+`f46d711ef65bcb828ac7ec43abcbb4b455ac14e5bbc954456e8e1946bdba5fd1`。完整 CPU 门禁为
+40 suites、262 tests，Python contracts 94/94，generation、strict lint、Yosys gate 与 docs
+contract 均通过。同配置 Yosys 相对 R11 为全核 cells `-0.901%`、word bits `-2.197%`、
+post-flat cells `-0.999%`；局部 L1I/predictor 分别为 `-818/-129` cells，ROB 为 `+250`。
+这些只是结构筛选，不能替代 Vivado。
+
+完整 perf20 20/20 总周期为 `3,798,148 -> 3,798,085`（`-0.001659%`），归一化几何
+平均为 `0.999128484x`，约 `0.0872%` 性能回退，低于本阶段时序候选允许的 `0.5%`。
+fireye_A0 退化 `2.33517%`，loop_induction 改善 `3.80876%`，其余分项均未触发 `3%`
+退化门槛；比较见 `build/reports/comparisons/R12-13cand-vs-R11.json`。该结果只证明组合可接受，
+不证明 HRT02 的单项因果。当前组合尚无 matching Vivado WNS、资源、DRC 或 bitstream，任何旧 DCP
+只作候选来源。
+
+## 7. R13 容量区域本地化
+
+R13 直接针对 historical routed congestion 中的 PRF/ROB 主热点实施五项周期透明候选，不改变
+64-entry ROB 或 128-entry PRF 的容量：`RF05 @ fedb3a2` 将 PRF 划分为 4 x 32 bank 并局部化 5
+路写回译码；`RT18` 将 ROB completion/store-completion 的 64-bit target 分解为 4 x 16 token；
+`RT19` 局部化 allocation/payload-ready 写入；`RT20` 局部化 commit invalidation；`RT21 @ e0f9753`
+将 commit state read 拆为 4 个 bank-local 16:1 read 再选择 bank。RT21 初版的组合环由
+ReorderBufferSpec 检出，修复后以既有 registered candidate pointer 作为读地址。
+
+| 候选 | 状态 | 当前效果与下一门禁 |
+| --- | --- | --- |
+| RF05 | 已实现 | PRF 8R5W、bypass、flush 和 write priority 定向测试通过；word bits `-3.369%`，cells `+56`，由 matching route 裁决 |
+| RT18 | 已实现 | completion/store-completion 的 epoch/generation/once-only 合同不变；纳入最终 41 suites / 264 tests |
+| RT19 | 已实现 | allocation、payload-ready、wrap/flush 行为保持；纳入最终 41 suites / 264 tests |
+| RT20 | 已实现 | 连续三宽 retirement 的 valid invalidation 改为 bank-local；纳入最终 41 suites / 264 tests |
+| RT21 | 已实现 | commit state 读选择局部化；初版组合环已被测试拦截并修复；纳入最终 41 suites / 264 tests |
+
+最终 RTL SHA-256 为 `78596cd45e599abe706a482599761ac5d2e6c6119298945d5546b24ca83f096f`。相对 R12，
+全核 Yosys cells `64,260 -> 63,164`（`-1.706%`）、word bits `432,290 -> 420,628`
+（`-2.698%`）、post-flat cells `58,178 -> 57,078`（`-1.891%`）；ROB cells/word bits 为
+`11,443 -> 10,291`（`-10.067%`）和 `41,718 -> 31,311`（`-24.946%`）。这组结构代理与
+historical congestion 的模块归属相符，但不能取代 matching Vivado 的局部拥挤、资源或 WNS。
+
+R13 完整 `cpu-check` 为 41 suites / 264 tests，Python contracts 94/94。clean perf20 20/20 相对
+R12 的 `3,798,085` cycles 逐项精确相等，几何平均 `1.000000000x`，比较见
+`build/reports/comparisons/R13-capacity-local-vs-R12.json`；func58 random-AXI seeds
+`240/255/141` 均为 58/58，Linux random-AXI seed `5570815` 在 50 ms 内以
+`linux-time-window-complete` 完成。当前唯一未完成门禁是同一 RTL 的 100 MHz direct full。
+若其仍由 ROB/PRF capacity region 主导且 setup 不能闭合，才启动 `CPU_VARIANT=default` 的完整
+software/implementation A/B；在此之前 default 不是候选的默认结论。
+
+## 8. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
@@ -303,11 +372,11 @@ fold 固定测试 fixture 合同，`e0b5626` 将 Makefile/OooCoreConfig 默认�
 7. 当前阶段以 CT05 的 isolated perf20、最终组合通过的 func58 三 seed 和 B02-F 的完整软件门禁为准。任何
    post-route physopt 仅用于路径探索，不是 matching direct full，不能作为正式时序、资源、组合收益或板测归因证据。
 
-## 7. 详细说明的维护边界
+## 9. 详细说明的维护边界
 
 上表保存每个候选的完整机制、风险、决策指标、当前状态和效果。涉及流水级行为、示例和理论推导的长篇说明继续保留在 [architecture.md](architecture.md) 对应的十二阶段章节，以免把教学主线拆碎；这些章节不再维护第二份状态列。候选状态发生变化时只更新本文，并把不可变的 cycles、RTL hash、工具版本、WNS/资源和报告路径写入对应实验 manifest。
 
-## 8. 证据入口
+## 10. 证据入口
 
 - 当前 RTL：`build/rtl/generation-manifest.json`。
 - R6 L11 perf20：`build/sim/runs/cpu_1548f170c573_chiplab_c398d274812f/clean-perf20_model_858465589681_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`；逐项比较为 `build/reports/comparisons/R6-L11.json`。
