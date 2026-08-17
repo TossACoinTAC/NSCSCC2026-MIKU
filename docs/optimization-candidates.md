@@ -394,7 +394,8 @@ ROB/CSR 为 16 条（最差 `-0.587 ns`），因此后续优先从 IQ/LSQ/前端
 本轮审计 `origin/main @ 8f33144`，不做整分支 merge。当前分支已经拥有 main 中的 L02、L03、
 per-MSHR victim ownership 和 system-operation 预解码；这些内容不重复引入。main 的 16-bit GHR、
 `4 x 4096` predictor 相对当前 10-bit 配置的 matching 软件 A/B 更差，因此继续保留当前 10-bit
-配置。`12c3597` 的 ROB head-bypass 也已由当前 `RT26 @ e04edc8` 覆盖。main 中基于
+配置。`12c3597` 的 balanced priority selection 已由 `RT26 @ e04edc8` 覆盖，但其移除宽
+branch-bypass payload CE 的增量当时尚未覆盖，后续已选择性适配为 R17 的 `RT28 @ f8e3a31`。main 中基于
 `AggressiveExplore` 的 post-route 实现流程仅能作为探索信息，未引入正式实现入口，也不继承其
 WNS、资源、DCP 或 bitstream 结论。
 
@@ -494,14 +495,33 @@ matching direct full 的 setup/hold WNS 为 `-0.334/+0.051 ns`、TNS `-14.756 ns
 `build/reports/timing/R16-six-timing-direct-route-health.json`；DCP 拥挤/复杂度审计见
 `build/reports/vivado/R16-six-timing-congestion/`。
 
-R17 开放候选：`IQT04`（把 LSQ forwarding completion 对 IQ issue payload 的宽 CE/metadata
-影响收敛到本地 forwarding-accept 边界）、`RBT02`（ROB candidate pointer 到 privileged redirect
-payload 的局部捕获）、`L1DT04`（L1D waiter beat 到 response data 的 one-hot/局部 data capture）、
-`MRT01`（shared MSHR response ID/ADDRD 的消费者侧局部身份）和 `RBT03`（ROB allocation 与
-completion-payload memory 的 high-fanout 结构拆分）。这五项均须先补针对性等价性测试；不采用
-`max_fanout` 或 forced replication 作为 RTL 设计替代品。
+## 11. R17：五项时序候选与 main 完整筛选
 
-## 11. 当前优先级与下一步
+| ID | 机制与目标 | 状态 | 当前效果与证据 |
+| --- | --- | --- | --- |
+| IQT04 | banked Store-forward Load 保留正常 completion/registered wake，只从同拍 IQ select fast path 移除其跨后端 valid 控制 | 已实现并进入 R17 | `1afc5b0`；LSQ 定向覆盖 fast/registered 两种语义。最终组合完整门禁通过；单项周期和物理收益不从组合拆分。 |
+| L1DT04 | L1D refill-waiter 的仲裁、beat 和 data 在 cache 内进入一项 response buffer，普通 hit 仍保持原 response 拍数 | 已实现并进入 R17 | `04869ad`；L1D 定向覆盖 refill、backpressure、payload stability。最终 Yosys L1D 相对 R16 `-14` cells；matching route 决定 waiter-data 路径是否退出 top-N。 |
+| RT27 | 对 banked forwarding completion 形成窄 head-bypass eligibility；normal ROB completion/wakeup 不变，仅避免其组合 data/identity 进入 same-cycle head bypass | 已实现并进入 R17 | `e403cc9`；LSQ、execution、backend 和 ROB 合同同步覆盖。允许该类 Load 最多晚一拍 retire，是本轮小幅性能回退的可能来源之一，不能在无独立 A/B 时精确拆分。 |
+| RT28 | branch-head bypass payload 保持 RT26 的 balanced highest-lane selector，但每拍写入 payload register，valid 是唯一可见性资格，移除 head/lane compare 到宽 CE | 已从 main `12c3597` 选择性适配并进入 R17 | `f8e3a31`；ROB 20/20。只引入当前实现未覆盖的 no-CE 增量，没有带入旧 predictor、harness 或 post-route 流程。 |
+| RF08 | PRF row target 已包含 write-valid/bank/row 资格，删除重复的 per-bank gated write data，直接在目标 row 条件内消费原 write data；p0 仍无条件归零 | 已实现并进入 R17 | `2d19091`；RegisterStructures 13/13。最终 Yosys PRF `1,314 -> 1,294` cells，全核 word bits `-621`，正式 route 判断 completion-data fanout 和 placement。 |
+| RBT02 | 在 privileged redirect context 上增加 pipeline stage | 已实验并撤回 | `1fc46fa` 在 func58 稳定产生 `0x3a00003c/LED2`；它相对已有边界实际增加一拍并改变恢复语义，`03a0d90` 撤回。此失败是 DUT 回归，不作为时序候选保留。 |
+| RF09 | 将 PRF bank storage 直接改成 async-read memory | 已实验并撤回 | `10b7e36` 产生确定性 func58 失败，多写优先级和同拍读写语义未被安全保留；`a7059b4` 撤回。后续若重做必须先定义显式 multiwrite/bypass 合同。 |
+
+最终身份为 source commit `2d19091`、source tree SHA-256
+`6a21a0d787cc63ac8cbeb75e431c65cc4a8cfc124cd44106ca414eceb1c4a062`、发布 RTL SHA-256
+`36890b1f77853df90c9b890333cc0691c3932a61dc31cbceae66261d8c5b954d`。完整 `cpu-check` 为
+40 suites / 265 tests，Python contracts 95/95；func58 random-AXI seeds `240/255/141` 均通过。
+perf20 20/20 为 `3,879,728 -> 3,896,626`，总周期回退 `0.435546%`、几何平均回退
+`0.223161%`，低于时序轮允许的平均 `0.5%`，但已明确记为性能代价。分项最大回退是
+`coremark +2.494%`，最大改善是 `stream_copy -2.176%`；比较见
+`build/reports/comparisons/R16-vs-R17-five-timing.json`。
+
+Yosys 相对 R16 为 cells `57,882 -> 57,850`、word bits `397,735 -> 397,114`、post-flat cells
+`51,860 -> 51,823`；比较见 `build/reports/yosys/R16-vs-R17-five-timing-candidates.json`。
+这些结果只证明没有明显结构膨胀。R17 是否保留，取决于 matching 100 MHz direct full 能否闭合，
+或至少提供足以抵偿上述周期回退的物理改善；不继承 R16 `-0.334 ns` 作为当前结论。
+
+## 12. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。

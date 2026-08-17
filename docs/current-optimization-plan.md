@@ -471,6 +471,41 @@ custom-instruction 框架，不是独立时序候选且会扩大 ISA/验证面�
 正 WNS 使用了 route 后 `AggressiveExplore phys_opt`，仅可作探索信息，不取代本仓库的 direct
 full 里程碑。
 
+### R17：R16 路径定向与 main 候选筛选批次
+
+R17 继续使用 default `32 ROB / 64 PRF`。对 `origin/main @ 67d5cfb` 的 RTL 提交逐项复核后，
+L02/L03、per-MSHR victim ownership、system-operation 预解码、scheduled-load recapture、
+registered correction 和 LUT-tree equality 均已被当前实现覆盖；旧 16-bit predictor/reset sweep
+弱于当前 B02-F 10-bit row-valid 方案，custom-instruction 框架也不属于本轮时序目标。main 的
+`12c3597` 包含一个 RT26 尚未覆盖的有效增量：保留当前 balanced highest-lane payload select，
+但让 branch-head bypass 的宽 payload 每拍更新，只以 valid 资格化可见性，从而移除 head/lane
+比较器到宽寄存器 CE 的路径。该增量已选择性适配为 `RT28 @ f8e3a31`；没有整分支 merge。
+
+最终进入实现的五项候选为：`IQT04 @ 1afc5b0` 延迟 banked Store-forward Load 的 IQ fast wake，
+`L1DT04 @ 04869ad` 在 L1D 内注册 refill-waiter response，`RT27 @ e403cc9` 禁止该 banked forwarding
+completion 进入宽 ROB-head same-cycle bypass，`RT28 @ f8e3a31` 去除 branch-head bypass payload
+CE，以及 `RF08 @ 2d19091` 删除 PRF 中重复的 per-bank write-data gate。两项尝试没有保留：
+`RBT02 @ 1fc46fa` 实际多加了一拍 privileged redirect，在 func58 稳定产生 `0x3a00003c/LED2`，
+由 `03a0d90` 撤回；`RF09 @ 10b7e36` 把 PRF bank storage 改为 async-read memory 后也产生确定性
+func58 错误，且多写/读写冲突语义不足以由原测试证明，由 `a7059b4` 撤回。撤回后的 seed 240
+复核通过，最终组合的完整 `cpu-check` 为 40 suites / 265 tests，Python contracts 95/95；
+func58 random-AXI seeds `240/255/141` 均退出码 0。
+
+最终 clean ideal perf20 为 20/20，`3,879,728 -> 3,896,626` cycles，总周期回退
+`0.435546%`，几何平均回退 `0.223161%`，仍处在时序轮允许的平均 `<0.5%` 边界内。主要回退为
+`coremark +2.494%`、`loop_induction +1.524%` 和 `bitcount +1.297%`；改善为
+`stream_copy -2.176%`、`minmax_sequence -0.619%`。该代价必须与 matching WNS 交叉判断，
+不能包装成周期透明。比较证据为
+`build/reports/comparisons/R16-vs-R17-five-timing.json`。
+
+R17 source commit 为 `2d19091`，source tree SHA-256 为
+`6a21a0d787cc63ac8cbeb75e431c65cc4a8cfc124cd44106ca414eceb1c4a062`，发布 RTL SHA-256 为
+`36890b1f77853df90c9b890333cc0691c3932a61dc31cbceae66261d8c5b954d`。Yosys 相对 R16 的
+全核 cells 为 `57,882 -> 57,850`（`-0.055%`）、word bits 为 `397,735 -> 397,114`
+（`-0.156%`）、post-flat cells 为 `51,860 -> 51,823`（`-0.071%`）；PRF `-20`、L1D
+`-14`、ROB `+5` cells。结构代理排除了明显规模膨胀，但是否足以换回至少 `0.435546%` 的周期
+代价，只能由本身份的 100 MHz matching direct full 判断；R16 的 WNS 不继承。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。
