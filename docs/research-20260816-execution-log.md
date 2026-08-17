@@ -112,3 +112,50 @@ Vivado setup WNS `-0.506 ns`、hold `+0.024 ns`。`cpu_setup_top50.rpt` 显示�
 - macOS `sbt test`：39 suites / 233 tests pass（删除 2 个 byte-lane 特定测试）。
 - EPYC2 锁定容器 `cpu-generate cpu-locked-gates` 全部 pass。
 - 完整 SoC perf 100 MHz Vivado direct full 正在 /dev/shm 重新实现，结果待记录。
+
+## 2026-08-17 100 MHz 时序闭合（dev/research-20260816-four-closure）
+
+目标：把 4c233b2 的 perf 100 MHz direct-full setup WNS 从 -0.120 ns 闭合到
+非负，同时不允许明显性能回退。
+
+### 关键实测
+
+- 基线 `4c233b2` direct-full perf 100 MHz：setup WNS `-0.120`，hold WNS
+  `+0.050`；首要路径是 L1I responseValid → frontend
+  `predictionCorrectionUncachedDrainPending/D`。
+- 仅注册 correction decision（06ca492）后 direct-full setup WNS 变为
+  `-0.137`：原路径消失，但 BTB→TLB search/probe 和 LSQ scheduledLoad CE
+  成为新的负 slack 族；AggressiveExplore 后处理可到 `+0.008`，但板上 perf20
+  从第 10 项开始 timeout，说明 0.008 ns 余量不够。
+- 继续加入 LUT-tree 相等比较（frontend response owner、BTB tag、L1I refill
+  same-line、CacheArray tag）并保留 `scripts/vivado/implement.sh` 的
+  AggressiveExplore post-route 流程后：
+  - direct-full perf 100 MHz：**setup WNS `+0.018`，hold WNS `+0.050`**，
+    TNS 0，DRC 0 Error，bitstream 在标准 impl_1 产物路径生成；
+  - 源码提交：`c60dadd4fdc1c2ae3f7eb61a345a515e907ba93a`；
+  - 发布 RTL SHA-256：`e81fd3aa33da3c1987d0b1b23f9da2cc4d7813c675b6735a7dd722038556ed34`；
+  - 锁定容器 port-check / lint / yosys-check 全部 pass，macOS 全量 Scala
+    测试 39 suites / 233 tests pass。
+
+### 板测证据（perf20，100 MHz，通过）
+
+- LabAgent job：`20260817-030305-5a6c7f1c`；
+- package SHA-256：`79e5498ac53d47fdf653e6db597429dc99ef5b6fa9b3f153770fd1b57705809a`；
+- verdict：`passed`，`nscscc-system-reset-v1`，20/20 全部通过，无 timeout；
+- selected 双跑合计：`soc_count=33,404,961`、`cpu_count=33,393,947`，
+  `cpu/soc=0.99967`，实际 CPU 100.000000 MHz；
+- 相对 2026-08-16 首次板测 `cpu_count=33,373,331` 仅 `+0.062%`，仍在
+  相对 R5 `cpu_count=43,489,002` 的 `-23.2%` 优势范围内。
+- 证据目录：`.codex-tmp-linux/board-final-c60dadd-perf20/`，哈希与服务端
+  声明一致：
+  - `board-summary.txt`：`6f51bdaa...`
+  - `perf_vio.csv`：`40c101d5...`
+  - `perf_vio_runs.csv`：`85058101...`
+  - `programming-summary.txt`：`780e41c2...`
+  - `vivado-metrics.txt`：`3663b76b...`
+
+### 结论
+
+100 MHz setup 已闭合且板测 20/20 通过。实现脚本现在默认对 perf build 执行
+AggressiveExplore phys_opt + route 后处理；func build 仍走原单遍流程。
+
