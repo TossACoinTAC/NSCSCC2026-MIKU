@@ -286,10 +286,25 @@ Linux random-AXI seed `5570815` 在 50 ms 窗口以 `linux-time-window-complete`
 `24,999,995` cycles，结果为
 `build/sim/runs/cpu_bbd36ac2be82_chiplab_c398d274812f/clean_model_706227055ff2_software_d3ce90aca67c/random/linux/seed_5570815/limit_50000000ns/sim-result.json`。
 
-下一步只运行一次 matching 100 MHz direct full implementation，并重新读取 local congestion、
-ROB/PRF top-N 与 WNS。若该运行仍由容量区域主导且未闭合，则保持 R13 的完整证据，切换到
-`CPU_VARIANT=default` 做同一软件合同下的正式 A/B；default 不是本轮的预设回退，也不从历史
-WNS 推断其当前表现。
+R13 matching direct full 已在 router 的 4.2 阶段停止：峰值/最终样本 node overlap 为 `135,525`，
+中间 setup WNS/TNS 为 `-0.448/-62.807 ns`，没有 routed DCP、正式 WNS、DRC 或 bitstream。该结果
+只说明 64 ROB / 128 PRF 的本地化组合仍处于不健康的拥挤区，不能把中间数当实现结论。
+
+随后以相同源码、软件、B02-F history 配置完成 `CPU_VARIANT=default` 的 100 MHz direct full 对照。
+它 fully routed、bitstream 成功、DRC 0 error，route 全程回到 zero overlap；routed setup/hold WNS
+为 `-0.527/+0.051 ns`，setup TNS 为 `-108.677 ns`。归档为候选
+`Post_Impl_Bundles/cpu_31982c053b0b_chiplab_c398d274812f_perf_100mhz_20260817-122604/`，
+不能作为 100 MHz 里程碑。default 相对 64/128 的 perf20 代价为 `+2.104349%`，但它把“扩容导致
+路由失控”与“所有配置都存在的 setup 路径”明确分开。
+
+RF06 已完成（`5727016`）：OooBackendDispatch 25/25、RegisterStructures 13/13、完整 cpu-check
+41 suites/264 tests、Python 95/95 都通过；Yosys 的 cells/word bits/post-flat 逐项不变，default
+perf20 20/20 逐项精确等于 `3,879,728` cycles。它是纯跨区连线重定位，尚无 matching physical
+证据，不能把 default route 的 WNS 归给它。
+
+下一批按 [rob-prf-capacity-review.md](rob-prf-capacity-review.md) 的边界筛选 RF07、RT22 和 RT25。
+`64 ROB / 64 PRF` 是待验证的中间点，不预设为默认或回退；任何容量配置必须重新完成 matching
+software、Yosys 与 direct full，不能继承 R13 或 default 的时序证据。
 
 ## R0：实验合同
 
