@@ -82,6 +82,30 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     (distance =/= U(0, config.robPointerWidth bits)) && !distance.msb
   }
 
+  private def lowestIndex4(requests: Bits): UInt = {
+    require(requests.getWidth == 4)
+    val lowValid = requests(1 downto 0).orR
+    val selectedPair = Mux(lowValid, requests(1 downto 0), requests(3 downto 2))
+    val index = UInt(2 bits)
+    index(1) := !lowValid && requests(3 downto 2).orR
+    index(0) := !selectedPair(0) && selectedPair(1)
+    index
+  }
+
+  private def lowestIndex4x4(requests: Bits): UInt = {
+    require(requests.getWidth == 16)
+    val groups = Vec(Bits(4 bits), 4)
+    val groupValid = Bits(4 bits)
+    val laneIndex = Vec(UInt(2 bits), 4)
+    for (group <- 0 until 4) {
+      groups(group) := requests(group * 4 + 3 downto group * 4)
+      groupValid(group) := groups(group).orR
+      laneIndex(group) := lowestIndex4(groups(group))
+    }
+    val groupIndex = lowestIndex4(groupValid)
+    (groupIndex.asBits ## laneIndex(groupIndex).asBits).asUInt
+  }
+
   private def formatLoad(word: Bits, address: UInt, size: Bits, signExtend: Bool): Bits = {
     val shift = (address(1 downto 0) ## U(0, 3 bits)).asUInt
     val shifted = word |>> shift
@@ -274,7 +298,13 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val youngerSearchBase = (loadHead + 1).resize(config.loadQueueIndexWidth)
   val rotatedYoungerReady = ((youngerReadyLoads ## youngerReadyLoads) |>> youngerSearchBase)
     .resize(config.loadQueueEntries)
-  val youngerLoadOffset = OHToUInt(OHMasking.first(rotatedYoungerReady))
+  val youngerLoadOffset = if (
+    config.enableBalancedLoadPrioritySelect && config.loadQueueEntries == 16
+  ) {
+    lowestIndex4x4(rotatedYoungerReady)
+  } else {
+    OHToUInt(OHMasking.first(rotatedYoungerReady))
+  }
   val selectedYoungerLoadHead =
     (youngerSearchBase + youngerLoadOffset).resize(config.loadQueueIndexWidth)
   val selectYoungerLoad = if (config.enableYoungerReadyLoadBypass) {
@@ -284,7 +314,13 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   }
   val rotatedPending = ((pendingLoads ## pendingLoads) |>> loadBase)
     .resize(config.loadQueueEntries)
-  val loadHeadOffset = OHToUInt(OHMasking.first(rotatedPending))
+  val loadHeadOffset = if (
+    config.enableBalancedLoadPrioritySelect && config.loadQueueEntries == 16
+  ) {
+    lowestIndex4x4(rotatedPending)
+  } else {
+    OHToUInt(OHMasking.first(rotatedPending))
+  }
   val oldestPendingLoadHead =
     (loadBase + loadHeadOffset).resize(config.loadQueueIndexWidth)
   val selectedLoadHead = Mux(selectYoungerLoad, youngerRetryIndex, oldestPendingLoadHead)
