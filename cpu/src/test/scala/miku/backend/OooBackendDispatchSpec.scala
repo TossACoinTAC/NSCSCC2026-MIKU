@@ -1062,6 +1062,12 @@ class OooBackendDispatchSpec extends AnyFunSuite {
         )
         dut.io.completionValid #= 0
         dut.io.directWakeupValid #= false
+        // The PRF write happens on the following ROB-qualified edge. Changing the unaccepted
+        // completion tuple must not split the destination from the data captured on the prior edge.
+        val poisonPdst =
+          if (producerPdst + 1 < config.physicalRegs) producerPdst + 1 else BigInt(1)
+        dut.io.completionPdst #= poisonPdst
+        dut.io.completionData #= BigInt("deadbeef", 16)
 
         dut.clockDomain.waitSampling()
         sleep(1)

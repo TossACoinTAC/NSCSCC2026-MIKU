@@ -98,12 +98,17 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   }
   val storeDataQueue = new StoreDataQueue(config)
 
-  // The ROB and PRF consume the same incoming completion on the same edge.  Keep a data-only
-  // copy beside the PRF so the next-cycle epoch-qualified write does not route stagedResult
-  // back across the ROB/PRF boundary.  Capturing every cycle keeps completionValid out of this
-  // wide register enable; ROB completionWakeupValid remains the only write qualification.
+  // The ROB and PRF consume the same incoming completion on the same edge.  Keep the destination
+  // and data together beside the PRF so the next-cycle epoch-qualified write does not route either
+  // staged payload field back across the ROB/PRF boundary.  Capturing every cycle keeps
+  // completionValid out of these register enables; ROB completionWakeupValid remains the only
+  // write qualification.
+  val localPrfCompletionPdst = Vec.fill(config.writebackWidth)(
+    Reg(UInt(config.physicalRegIndexWidth bits))
+  )
   val localPrfCompletionData = Vec.fill(config.writebackWidth)(Reg(Bits(config.xlen bits)))
   for (lane <- 0 until config.writebackWidth) {
+    localPrfCompletionPdst(lane) := io.completion(lane).pdst
     localPrfCompletionData(lane) := io.completion(lane).data
   }
 
@@ -623,7 +628,11 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   rob.io.storeCompletionBypass := io.storeCompletionBypass
   for (write <- 0 until config.writebackWidth) {
     prf.io.writeValid(write) := rob.io.completionWakeupValid(write)
-    prf.io.write(write).pdst := rob.io.completionWakeupPdst(write)
+    prf.io.write(write).pdst := (if (config.enableLocalPrfCompletionDataCapture) {
+      localPrfCompletionPdst(write)
+    } else {
+      rob.io.completionWakeupPdst(write)
+    })
     prf.io.write(write).data := (if (config.enableLocalPrfCompletionDataCapture) {
       localPrfCompletionData(write)
     } else {
