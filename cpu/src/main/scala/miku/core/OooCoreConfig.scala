@@ -121,8 +121,9 @@ final case class OooCoreConfig(
     enableHeadCompletionCommitBypass: Boolean = true,
     enableBranchHeadCompletionBypass: Boolean = true,
     // Register speculative RAS operations before they drive the RAS array write enable.  The
-    // direct input path remains available for predictor timing A/B and older configurations.
-    enableRegisteredSpeculativeRasUpdate: Boolean = false,
+    // pending-push top bypass keeps the following synchronous predictor response cycle-equivalent.
+    // The direct input path remains available for predictor timing A/B and older configurations.
+    enableRegisteredSpeculativeRasUpdate: Boolean = true,
     enableDirectDmwPretranslation: Boolean = true,
     enableLoadCompletionEarlyWakeup: Boolean = true,
     // Preload the data-side micro-TLB probe key while the request stream is ready.  The request

@@ -325,10 +325,24 @@ final class BankedFetchPredictor(
   val btbRead = Vec(Bits(btbEntryWidth bits), config.fetchWidth)
   val phtRead = Vec(Bits(2 bits), config.fetchWidth)
   val speculativeRasTop = UInt(config.xlen bits)
+  val speculativeRasAvailable = Bool()
   speculativeRasTop := 0
+  speculativeRasAvailable := speculativeRasCount =/= 0
   when(speculativeRasCount =/= 0) {
     speculativeRasTop :=
       speculativeRas(speculativeRasCount(rasIndexWidth - 1 downto 0) - 1)
+  }
+  if (config.enableRegisteredSpeculativeRasUpdate) {
+    // The registered operation is committed to the array on the next edge. A synchronous BTB
+    // response visible before that edge must nevertheless observe a pending call's new return
+    // address. A pending pop belongs to an already predicted return and must not hide its current
+    // top. The array and count stay behind the register, removing the BTB-response CE path.
+    val pendingPush = effectiveSpeculativeRasPush && !effectiveSpeculativeRasPop &&
+      speculativeRasCount =/= U(rasDepth, rasCountWidth bits)
+    when(pendingPush) {
+      speculativeRasTop := effectiveSpeculativeReturnAddress
+      speculativeRasAvailable := True
+    }
   }
   for (bank <- 0 until config.fetchWidth) {
     val btbWrite = io.btbUpdateValid && btbUpdateBankMask(bank) && !invalidating
@@ -382,7 +396,7 @@ final class BankedFetchPredictor(
       btbRead(bank)(btbTargetLsb + config.xlen - 1 downto btbTargetLsb).asUInt
     when(
       io.prediction(bank).branchType === PredictedBranchType.ret &&
-        speculativeRasCount =/= 0
+        speculativeRasAvailable
     ) {
       io.prediction(bank).target := speculativeRasTop
     }

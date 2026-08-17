@@ -124,6 +124,100 @@ class BranchPredictorSpec extends AnyFunSuite {
       }
   }
 
+  test("registered speculative RAS exposes a pending push and the following committed pop") {
+    for ((registered, label, seed) <- Seq(
+        (false, "direct", 0x4c94),
+        (true, "registered", 0x4c95)
+      )) {
+      val config = OooCoreConfig.FourIssueThreeCommit.copy(
+        enableRegisteredSpeculativeRasUpdate = registered
+      )
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-banked-predictor-ras-$label"
+        )
+        .compile(new BankedFetchPredictor(config))
+        .doSim(s"ooo-banked-predictor-ras-$label", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          dut.io.lookupValid #= false
+          dut.io.lookupPc #= 0
+          dut.io.btbUpdateValid #= false
+          dut.io.btbUpdatePc #= 0
+          dut.io.btbUpdateTarget #= 0
+          dut.io.btbUpdateType #= 0
+          dut.io.btbUpdateDirectionTrained #= false
+          dut.io.phtUpdateValid #= false
+          dut.io.phtUpdatePc #= 0
+          dut.io.phtUpdateIndex #= 0
+          dut.io.phtUpdateOldState #= 0
+          dut.io.phtUpdateOldValid #= false
+          dut.io.phtUpdateTaken #= false
+          dut.io.speculativeHistoryValid #= false
+          dut.io.speculativeHistoryTaken #= false
+          dut.io.speculativeRasPush #= false
+          dut.io.speculativeRasPop #= false
+          dut.io.speculativeReturnAddress #= 0
+          dut.io.commitRasPush #= false
+          dut.io.commitRasPop #= false
+          dut.io.commitReturnAddress #= 0
+          dut.io.architecturalHistoryValid #= 0
+          dut.io.architecturalHistoryTaken #= 0
+          dut.io.architecturalRasPush #= 0
+          dut.io.architecturalRasPop #= 0
+          for (lane <- 0 until config.commitWidth) {
+            dut.io.architecturalReturnAddress(lane) #= 0
+          }
+          dut.io.flush #= false
+
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          dut.clockDomain.waitSampling(132)
+
+          val returnPc = BigInt("1c002000", 16)
+          dut.io.btbUpdateValid #= true
+          dut.io.btbUpdatePc #= returnPc
+          dut.io.btbUpdateTarget #= BigInt("dead0000", 16)
+          dut.io.btbUpdateType #= 3
+          dut.clockDomain.waitSampling()
+          dut.io.btbUpdateValid #= false
+
+          val olderReturn = BigInt("1c001004", 16)
+          val youngerReturn = BigInt("1c001104", 16)
+          dut.io.speculativeRasPush #= true
+          dut.io.speculativeReturnAddress #= olderReturn
+          dut.clockDomain.waitSampling()
+          dut.io.speculativeRasPush #= false
+          dut.clockDomain.waitSampling()
+
+          def lookupWithOperation(push: Boolean, pop: Boolean, address: BigInt): BigInt = {
+            dut.io.speculativeRasPush #= push
+            dut.io.speculativeRasPop #= pop
+            dut.io.speculativeReturnAddress #= address
+            dut.io.lookupValid #= true
+            dut.io.lookupPc #= returnPc
+            dut.clockDomain.waitSampling()
+            dut.io.speculativeRasPush #= false
+            dut.io.speculativeRasPop #= false
+            dut.io.lookupValid #= false
+            sleep(1)
+            assert(dut.io.responseValid.toBoolean)
+            assert(dut.io.prediction(0).hit.toBoolean)
+            assert(dut.io.prediction(0).branchType.toInt == 3)
+            dut.io.prediction(0).target.toBigInt
+          }
+
+          assert(lookupWithOperation(push = true, pop = false, youngerReturn) == youngerReturn)
+          dut.io.speculativeRasPop #= true
+          dut.clockDomain.waitSampling()
+          dut.io.speculativeRasPop #= false
+          dut.clockDomain.waitSampling()
+          assert(lookupWithOperation(push = false, pop = false, 0) == olderReturn)
+        }
+    }
+  }
+
   test(
     "official 32-entry BTB, saturating counters and return prediction obey the active contract"
   ) {
