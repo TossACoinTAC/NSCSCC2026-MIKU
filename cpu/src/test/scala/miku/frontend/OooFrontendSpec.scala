@@ -313,7 +313,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(4200)
+        dut.clockDomain.waitSampling(historyTurnoverConfig.predictorPhtEntriesPerBank + 4)
         sleep(1)
 
         val branchPc = config.resetVector + 0x200
@@ -1848,9 +1848,10 @@ class OooFrontendSpec extends AnyFunSuite {
         // A precise mispredict update overrides forward-not-taken on the next visit.
         val learnedPc = base + 0x200
         val learnedTarget = learnedPc + 0x10
-        // The BRAM-backed predictor clears the 128 BTB rows after reset; PHT payload does not need
-        // reset because an explicit trained bit guards every read.
-        dut.clockDomain.waitSampling(4200)
+        // The BRAM-backed predictor clears the 128 BTB rows after reset.  Derive PHT metadata from
+        // the public configuration so this fixture remains valid as the history and row widths
+        // evolve; the selected history row must be trained explicitly before the revisit.
+        dut.clockDomain.waitSampling(config.predictorPhtEntriesPerBank + 4)
         sleep(1)
         dut.io.predictorUpdatePc #= learnedPc
         dut.io.predictorUpdateTaken #= true
