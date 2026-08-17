@@ -28,7 +28,6 @@ final case class StoreQueueEntry(config: OooCoreConfig) extends Bundle {
   val scSuccess = Bool()
   val size = Bits(3 bits)
   val byteMask = Bits(4 bits)
-  val writeData = Bits(config.xlen bits)
 }
 
 final case class LoadQueueEntry(config: OooCoreConfig) extends Bundle {
@@ -211,6 +210,11 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val aguFire = Bool()
 
   val stores = Vec.fill(config.storeQueueEntries)(Reg(StoreQueueEntry(config)))
+  // Store data has a different lifetime from the speculative SQ metadata. It
+  // is meaningful only while dataReady is set, so recovery does not need to
+  // clear or hold it. Keeping it in a separate bank prevents the global
+  // recovery domain from entering every 32-bit payload register.
+  val storeDataBanks = Vec.fill(config.storeQueueEntries)(Reg(Bits(config.xlen bits)))
   val loads = Vec.fill(config.loadQueueEntries)(Reg(LoadQueueEntry(config)))
   for (entry <- stores) {
     entry.valid.init(False)
@@ -594,7 +598,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     requestCandidate.size := headStore.size
     requestCandidate.byteMask := headStore.byteMask
     requestCandidate.writeData := formatStore(
-      headStore.writeData,
+      storeDataBanks(storeHead),
       headStore.virtualAddress,
       headStore.size
     )
@@ -772,7 +776,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       generatedCompletion.writesPdst := scheduledLoadPayload.writesPdst
       generatedCompletion.data := formatLoad(
         formatStore(
-          stores(forwardingId).writeData,
+          storeDataBanks(forwardingId),
           stores(forwardingId).virtualAddress,
           stores(forwardingId).size
         ),
@@ -860,7 +864,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     for (entry <- 0 until config.storeQueueEntries) {
       dataBanks(entry) := formatLoad(
         formatStore(
-          stores(entry).writeData,
+          storeDataBanks(entry),
           stores(entry).virtualAddress,
           stores(entry).size
         ),
@@ -1062,7 +1066,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       observation.physicalAddress := storeEntry.physicalAddress
       observation.virtualAddress := storeEntry.virtualAddress
       observation.storeData := formatStore(
-        storeEntry.writeData,
+        storeDataBanks(io.commit(lane).storeQueueIndex),
         storeEntry.virtualAddress,
         storeEntry.size
       )
@@ -1188,9 +1192,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
         aguBypassScSuccess
     }
     when(storeDataFire) {
-      val index = io.storeDataStoreQueueIndex
-      stores(index).writeData := io.storeData
-      stores(index).dataReady := True
+      stores(io.storeDataStoreQueueIndex).dataReady := True
     }
     when(aguFire && !io.agu.isWrite) {
       val index = io.agu.uop.loadQueueIndex
@@ -1296,6 +1298,21 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     when(earlyCachedStoreRelease || failedScReleaseFire ||
       uncachedStoreRelease) {
       storeHead := storeHead + 1
+    }
+  }
+
+  // Payload capture is intentionally independent of the recovery branch
+  // above. A coincident flush may update an architecturally invisible bank,
+  // while dataReady remains the sole visibility bit and is cleared normally.
+  // This also lets the producer keep board-like stable inputs without making
+  // flush part of the wide payload write-enable cone.
+  for (entry <- 0 until config.storeQueueEntries) {
+    when(
+      io.storeDataValid && stores(entry).valid &&
+        stores(entry).robPointer === io.storeDataRobPointer &&
+        io.storeDataStoreQueueIndex === entry && !stores(entry).dataReady
+    ) {
+      storeDataBanks(entry) := io.storeData
     }
   }
 
