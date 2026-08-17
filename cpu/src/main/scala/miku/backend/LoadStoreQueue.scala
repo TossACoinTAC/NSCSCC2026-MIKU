@@ -885,6 +885,15 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
      } else {
        forwardFire && scheduledLoadPayload.writesPdst && scheduledLoadPayload.pdst =/= 0
      })
+  val generatedLoadWakeupEpochCurrent = if (config.enableBankedLoadForwardCompletion) {
+    responseLoadRecoveryEpoch === io.currentRecoveryEpoch
+  } else {
+    Mux(
+      responseLoadAccepted,
+      responseLoadRecoveryEpoch,
+      scheduledLoadOwner.recoveryEpoch
+    ) === io.currentRecoveryEpoch
+  }
   val generatedCompletion = Completion(config)
   clearCompletion(generatedCompletion)
   when(responseStoreArchitectural) {
@@ -1140,7 +1149,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     // broadcasts this registered Boolean instead of placing the global epoch
     // comparator on every IQ select path.
     completionLoadWakeupEpochCurrent :=
-      generatedCompletion.recoveryEpoch === io.currentRecoveryEpoch
+      generatedLoadWakeup && generatedLoadWakeupEpochCurrent
     // Validity, not payload clock-enables, defines whether this register is
     // observable. Sampling every cycle prevents the deep forwarding predicate
     // from being replicated onto every completion payload register.
