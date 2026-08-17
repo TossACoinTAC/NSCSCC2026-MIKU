@@ -70,6 +70,16 @@ final case class ReorderBufferEntry(config: OooCoreConfig) extends Bundle {
 }
 
 final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) extends Component {
+  private def rotateLeftFixed(value: Bits, amount: Int): Bits = {
+    require(amount >= 0 && amount < value.getWidth)
+    if (amount == 0) {
+      value
+    } else {
+      value(value.getWidth - amount - 1 downto 0) ##
+        value(value.getWidth - 1 downto value.getWidth - amount)
+    }
+  }
+
   private def selectLowest(mask: Bits, width: Int): UInt = {
     val selected = UInt(width bits)
     selected := 0
@@ -154,6 +164,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   }
 
   val allocatePointer = Reg(UInt(config.robPointerWidth bits)) init (0)
+  val allocationStatePointer = Reg(Bits(config.robEntries bits)) init (1)
   val commitPointer = Reg(UInt(config.robPointerWidth bits)) init (0)
   val occupancy = Reg(UInt(log2Up(config.robEntries + 1) bits)) init (0)
   val entries = Vec.fill(config.robEntries)(Reg(ReorderBufferState(config)))
@@ -282,30 +293,41 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
 
   }
 
-  val allocationStateBankTargets = Vec(Bits(payloadBankCount bits), config.renameWidth)
-  val allocationStateRowTargets = Vec(Bits(payloadDepth bits), config.renameWidth)
+  val allocationStateTargets = Vec(Bits(config.robEntries bits), config.renameWidth)
   for (lane <- 0 until config.renameWidth) {
-    allocationStateBankTargets(lane) := UIntToOh(
-      allocationDestination(lane)(payloadBankWidth - 1 downto 0),
-      payloadBankCount
-    )
-    allocationStateRowTargets(lane) := Mux(
-      acceptedMask(lane),
-      UIntToOh(
-        allocationDestination(lane)(config.robIndexWidth - 1 downto payloadBankWidth),
-        payloadDepth
-      ),
-      B(0, payloadDepth bits)
-    )
+    if (config.enableOneHotRobAllocationState) {
+      val rotatedTarget = Bits(config.robEntries bits)
+      rotatedTarget := allocationStatePointer
+      switch(allocatePrefix(lane)) {
+        is(U(1, allocatePrefix(lane).getWidth bits)) {
+          rotatedTarget := rotateLeftFixed(allocationStatePointer, 1)
+        }
+        is(U(2, allocatePrefix(lane).getWidth bits)) {
+          rotatedTarget := rotateLeftFixed(allocationStatePointer, 2)
+        }
+        is(U(3, allocatePrefix(lane).getWidth bits)) {
+          rotatedTarget := rotateLeftFixed(allocationStatePointer, 3)
+        }
+      }
+      allocationStateTargets(lane) := Mux(
+        acceptedMask(lane),
+        rotatedTarget,
+        B(0, config.robEntries bits)
+      )
+    } else {
+      allocationStateTargets(lane) := Mux(
+        acceptedMask(lane),
+        UIntToOh(
+          allocationDestination(lane)(config.robIndexWidth - 1 downto 0),
+          config.robEntries
+        ),
+        B(0, config.robEntries bits)
+      )
+    }
   }
   for (entryIndex <- 0 until config.robEntries) {
-    val entryBank = entryIndex % payloadBankCount
-    val entryRow = entryIndex / payloadBankCount
     for (lane <- 0 until config.renameWidth) {
-      when(
-        allocationStateBankTargets(lane)(entryBank) &&
-          allocationStateRowTargets(lane)(entryRow)
-      ) {
+      when(allocationStateTargets(lane)(entryIndex)) {
         entries(entryIndex).valid := True
         entries(entryIndex).complete := io.allocate(lane).uop.decoded.exception.valid
         entries(entryIndex).payloadReady := False
@@ -1056,6 +1078,19 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   }.otherwise {
     when(acceptedMask.orR) {
       allocatePointer := allocatePointer + CountOne(acceptedMask)
+      if (config.enableOneHotRobAllocationState) {
+        switch(CountOne(acceptedMask)) {
+          is(U(1, log2Up(config.renameWidth + 1) bits)) {
+            allocationStatePointer := rotateLeftFixed(allocationStatePointer, 1)
+          }
+          is(U(2, log2Up(config.renameWidth + 1) bits)) {
+            allocationStatePointer := rotateLeftFixed(allocationStatePointer, 2)
+          }
+          is(U(3, log2Up(config.renameWidth + 1) bits)) {
+            allocationStatePointer := rotateLeftFixed(allocationStatePointer, 3)
+          }
+        }
+      }
     }
     for (entryIndex <- 0 until config.robEntries) {
       val entryBank = entryIndex % payloadBankCount

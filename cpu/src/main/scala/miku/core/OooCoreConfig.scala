@@ -84,6 +84,9 @@ final case class OooCoreConfig(
     // backend can accept before falling back to the oldest lane only.
     enableRenameTwoWideFallback: Boolean = false,
     robEntries: Int = 32,
+    // Track the next ROB state slot with a one-hot sidecar. Binary allocation pointers remain
+    // authoritative tags and RAM addresses, but no longer drive every resident state decoder.
+    enableOneHotRobAllocationState: Boolean = true,
     instructionBufferEntries: Int = 16,
     dispatchQueueEntries: Int = 8,
     issueQueueEntriesPerPort: Int = 8,
