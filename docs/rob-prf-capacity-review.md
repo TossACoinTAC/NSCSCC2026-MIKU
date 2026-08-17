@@ -13,6 +13,13 @@
 WNS 是 `-0.527 ns`、hold WNS 是 `+0.051 ns`。因此扩容是拥挤失控的主要放大因素，但不是
 default 仍有约 0.5 ns setup 缺口的唯一原因。
 
+随后默认 32 ROB / 64 PRF 的 RF06+RT22+RT23+RT24+RT26 matching direct full 进一步说明，容量
+缩回并不自动闭合时序：它 fully routed、无残留 overlap、DRC 0 error / 0 critical warning、bitstream
+成功，但 setup/hold 为 `-0.816/+0.049 ns`、TNS `-167.447 ns`。top-50 中 IQ 占 20 条且最差
+`-0.816 ns`，ROB/CSR 占 16 条且最差 `-0.587 ns`。因此扩容确实是拥挤失控的主要放大器，但当前
+default 的主要障碍已是 IQ source-tag 到 queue payload 的跨区路由；ROB/PRF 仍需结构性处理，不能
+以继续增加局部 completion mux/布尔树作为闭合策略。
+
 下一轮不直接删除容量路线，也不把 expanded-window 当作默认路线。工作分为两条：
 
 1. 在不改变架构拍数的前提下，继续削减 ROB completion/tag 和 PRF read/bypass 的跨区网络；
@@ -84,8 +91,10 @@ RF06+RT22+RT23+RT24+RT26 的最终 default 批次为 `e04edc8`。完整 `cpu-che
 cycles，func58 seeds `240/255/141` 均为 58/58。相对 RF06 的同配置 Yosys 为：全核 cells
 `57,660 -> 57,205`、word bits `389,771 -> 391,210`、post-flat cells `51,638 -> 51,183`、ROB
 cells `6,067 -> 5,612`，ROB raw LTP `40 -> 32`。比较见
-`build/reports/yosys/RT26-final-vs-RF06-default-local-tag.json`。这些结果证明 RTL 结构和软件门禁
-均可接受，但是否保留仍取决于 matching direct route 的 ROB/PRF、commit 和 IQ 路径。
+`build/reports/yosys/RT26-final-vs-RF06-default-local-tag.json`。matching direct route 已完成，归档为
+`Post_Impl_Bundles/cpu_5454bd3336b8_chiplab_c398d274812f_perf_100mhz_20260817-143710/`；最终 setup/hold
+为 `-0.816/+0.049 ns`、TNS `-167.447 ns`、peak overlap 42,344、最终 overlap 0。RTL 结构和软件
+门禁可接受，但该次未形成 closure，后续选择应以 IQ/LSQ top-N 与 RT25 等 ROB 结构性方向为主。
 
 RF07 已由 Yosys 否决，不进入实现批次。RT25 sidecar 仍是下一轮高风险研究项，不与当前轻量候选
 混写；若本批次仍无法让 default 在 100 MHz 闭合，再并行评估 RT25 与 `64 ROB / 64 PRF`，而不是

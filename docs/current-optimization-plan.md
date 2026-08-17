@@ -330,9 +330,21 @@ func58 random-AXI seeds `240/255/141` 均为 58/58，matrix 为
 `389,771 -> 391,210`（`+0.369%`）、post-flat cells `51,638 -> 51,183`（`-0.881%`），ROB
 cells `6,067 -> 5,612`（`-7.50%`）。ROB raw LTP 从 40 降至 32；其中 RT22 贡献主要规模下降，
 RT23/RT24/RT26 依次将 completion-source、commit 资格与 head-bypass 选择的逻辑深度压缩。
-这些是综合前结构代理；该批次仍须完成 matching 100 MHz direct full，不能继承 default 的
-`-0.527 ns`。`64 ROB / 64 PRF` 仍是待验证的中间点，不预设为默认或回退；任何容量配置必须
-重新完成 matching software、Yosys 与 direct full。
+matching 100 MHz direct full 已完成，归档为
+`Post_Impl_Bundles/cpu_5454bd3336b8_chiplab_c398d274812f_perf_100mhz_20260817-143710/`。同一
+source tree、RTL 和实验 manifest 下，routed setup/hold WNS 为 `-0.816/+0.049 ns`，setup TNS
+为 `-167.447 ns`，fully routed、DRC 为 0 error / 0 critical warning，bitstream 成功；因此它是
+完整的 candidate evidence，仍不是 100 MHz milestone。路由最终没有残留 overlap，峰值为 42,344，
+但 top-50 已转为 IQ 20 条（最差 `-0.816 ns`，平均 route 79.90%）、ROB/CSR 16 条（最差
+`-0.587 ns`）和 LSQ 4 条（最差 `-0.639 ns`）。相对此前 default direct 的
+`-0.527/+0.051 ns`，本批没有带来总体 setup 改善；这不能否定 RT22 的 ROB 局部 cell 减少，
+但证明继续压缩该小范围 completion/commit 逻辑不足以闭合全核。
+
+后续优先处理 IQ source-tag 到 queue payload 的跨区网络、LSQ completed-to-scheduled-load
+网络和 frontend/translation 回授；ROB/PRF 则从 RT25 异常 sidecar、completion storage 组织与
+多读端 PRF 的微架构级重构重新评估，不再默认追加局部布尔/选择树改写。`64 ROB / 64 PRF` 仍是
+待验证的中间点，不预设为默认或回退；任何容量配置必须重新完成 matching software、Yosys 与
+direct full。
 
 ## R0：实验合同
 
