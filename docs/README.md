@@ -13,8 +13,8 @@ Vivado 或 FPGA 验证时，应先阅读 [status.md](status.md)，不要从历�
 
 ## CPU 与 SoC 设计
 
-- [architecture.md](architecture.md)：完整微架构学习与设计记录。该文件较长，当前状态仍以
-  [status.md](status.md) 为准。
+- [architecture.md](architecture.md)：微架构总览与分卷索引。历史讨论已按前端、Backend、
+  存储、系统状态和 FPGA 验证分开；当前状态仍以 [status.md](status.md) 为准。
 - [func-perf-build-contract.md](func-perf-build-contract.md)：func 和 perf 构建合同。
 - [linux-system-requirements.md](linux-system-requirements.md)：Linux 功能目标和验收条件。
 - [custom-instructions.md](custom-instructions.md)：决赛自定义指令 profile、编码和验证方法。
