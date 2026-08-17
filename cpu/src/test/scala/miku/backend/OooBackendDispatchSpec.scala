@@ -1165,6 +1165,104 @@ class OooBackendDispatchSpec extends AnyFunSuite {
     assert(decoupledRegistered == legacyRegistered + 1)
   }
 
+  test("local fixed-port select wake preserves LSU latency and is cleared by flush") {
+    def run(enableLocal: Boolean, flushProducer: Boolean, label: String, seed: Int): Option[Int] = {
+      val testConfig = config.copy(enableLocalFixedPortSelectWakeup = enableLocal)
+      var consumerIssueCycle = Option.empty[Int]
+      SimConfig.withVerilator
+        .workspacePath(
+          s"${sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target")}/sim-workspace-ooo-backend-fixed-select-$label"
+        )
+        .compile(new OooBackendDispatchProbe(testConfig))
+        .doSim(s"ooo-backend-fixed-select-$label", seed) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearControl(dut)
+          dut.io.issueReady #= 0xf
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
+          dut.clockDomain.waitSampling()
+
+          def addi(rd: Int, immediate: Int): BigInt =
+            BigInt("02800000", 16) | ((immediate & 0xfff) << 10) | rd
+
+          val basePc = BigInt("1c000000", 16)
+          val producerPc = basePc + 8
+          val consumerPc = basePc + 0x10
+          val producerRegister = 17
+          val directPort = testConfig.executionPorts.indexWhere(_.capabilities.contains(
+            ExecutionUnitKind.Multiply
+          ))
+
+          // Three independent producers occupy ports 0/1/2. The third producer is therefore
+          // accepted by the fixed port while its dependent Load is resident in the LSU IQ.
+          dut.io.inputValid #= 7
+          for (lane <- 0 until 3) {
+            dut.io.pc(lane) #= basePc + lane * 4
+            dut.io.instruction(lane) #= addi(13 + lane * 2, lane + 1)
+          }
+          dut.clockDomain.waitSampling()
+          dut.io.inputValid #= 1
+          dut.io.pc(0) #= consumerPc
+          dut.io.instruction(0) #=
+            (BigInt("28800000", 16) | (producerRegister << 5) | 18) // ld.w r18,r17,0
+          dut.clockDomain.waitSampling()
+          dut.io.inputValid #= 0
+
+          var producerPdst = BigInt(0)
+          var producerRobPointer = BigInt(0)
+          for (_ <- 0 until 20 if producerPdst == 0) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            if (
+              (dut.io.issueValid.toBigInt & (BigInt(1) << directPort)) != 0 &&
+              dut.io.issuePc(directPort).toBigInt == producerPc
+            ) {
+              producerPdst = dut.io.issuePdst(directPort).toBigInt
+              producerRobPointer = dut.io.issueRobPointer(directPort).toBigInt
+            }
+          }
+          assert(producerPdst != 0)
+          assert(dut.io.loadStoreIssueOccupancy.toBigInt != 0)
+
+          val result = BigInt("12345000", 16)
+          dut.io.completionValid #= BigInt(1) << directPort
+          dut.io.completionLane #= directPort
+          dut.io.completionRobPointer #= producerRobPointer
+          dut.io.completionPdst #= producerPdst
+          dut.io.completionWritesPdst #= true
+          dut.io.completionData #= result
+          dut.io.fixedPortWakeupValid #= true
+          dut.io.fixedPortWakeupPdst #= producerPdst
+          dut.io.flush #= flushProducer
+          dut.clockDomain.waitSampling()
+          dut.io.completionValid #= 0
+          dut.io.fixedPortWakeupValid #= false
+          dut.io.flush #= false
+
+          for (cycle <- 1 to 8 if consumerIssueCycle.isEmpty) {
+            dut.clockDomain.waitSampling()
+            sleep(1)
+            if (
+              (dut.io.issueValid.toBigInt & (BigInt(1) << loadStorePort)) != 0 &&
+              dut.io.issuePc(loadStorePort).toBigInt == consumerPc
+            ) {
+              consumerIssueCycle = Some(cycle)
+              assert(dut.io.issueSource1(loadStorePort).toBigInt == result)
+            }
+          }
+        }
+      consumerIssueCycle
+    }
+
+    val external = run(enableLocal = false, flushProducer = false, "external", 0x4c86)
+    val local = run(enableLocal = true, flushProducer = false, "local", 0x4c87)
+    val flushed = run(enableLocal = true, flushProducer = true, "flush", 0x4c88)
+    assert(external.nonEmpty)
+    assert(local == external)
+    assert(flushed.isEmpty)
+  }
+
   test("ordinary IQ select keeps source readiness while deferring registered-only wake") {
     def measure(testConfig: OooCoreConfig, label: String, seed: Int): Int = {
       var consumerIssueCycle = -1

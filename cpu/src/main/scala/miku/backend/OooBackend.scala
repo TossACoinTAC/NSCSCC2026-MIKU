@@ -123,6 +123,24 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   val issueOperandUop = Vec.fill(config.executionWidth)(Reg(RenamedMicroOp(config)))
   val issueOperandSource1 = Vec.fill(config.executionWidth)(Reg(Bits(config.xlen bits)))
   val issueOperandSource2 = Vec.fill(config.executionWidth)(Reg(Bits(config.xlen bits)))
+  // The fixed port is always execution-ready and every physical-register producer routed to it
+  // emits a direct wake on the cycle after IQ acceptance. Replicate that narrow identity at the
+  // consumer boundary; the execution wake still owns persistent ready-state mutation.
+  val localFixedPortSelectWakeupValid = Vec.fill(config.executionWidth)(Reg(Bool()) init (False))
+  val localFixedPortSelectWakeupPdst = Vec.fill(config.executionWidth)(
+    Reg(UInt(config.physicalRegIndexWidth bits))
+  )
+  val fixedPortIssueAccepted = issueQueues(multiplyPort).io.issueValid &&
+    issueQueues(multiplyPort).io.issueReady
+  for (consumer <- 0 until config.executionWidth) {
+    when(io.flush) {
+      localFixedPortSelectWakeupValid(consumer) := False
+    }.otherwise {
+      localFixedPortSelectWakeupValid(consumer) :=
+        fixedPortIssueAccepted && issueQueues(multiplyPort).io.issue.pdst =/= 0
+    }
+    localFixedPortSelectWakeupPdst(consumer) := issueQueues(multiplyPort).io.issue.pdst
+  }
   val recoveryEpoch = Reg(UInt(config.recoveryEpochWidth bits)) init (0)
   when(io.flush) { recoveryEpoch := recoveryEpoch + 1 }
   io.currentRecoveryEpoch := recoveryEpoch
@@ -612,9 +630,15 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
       (port == loadStorePort && config.enableLsuRegisteredWakeSelectDecoupling) ||
       (port != loadStorePort && config.enableOrdinaryRegisteredWakeSelectDecoupling)
     ) {
-      issueQueues(port).io.selectWakeupValid := fastSelectWakeupValid
       for (write <- 0 until config.writebackWidth) {
-        issueQueues(port).io.selectWakeupPdst(write) := fastSelectWakeupPdst(write)
+        if (config.enableLocalFixedPortSelectWakeup && write == multiplyPort) {
+          issueQueues(port).io.selectWakeupValid(write) :=
+            localFixedPortSelectWakeupValid(port)
+          issueQueues(port).io.selectWakeupPdst(write) := localFixedPortSelectWakeupPdst(port)
+        } else {
+          issueQueues(port).io.selectWakeupValid(write) := fastSelectWakeupValid(write)
+          issueQueues(port).io.selectWakeupPdst(write) := fastSelectWakeupPdst(write)
+        }
       }
     } else {
       issueQueues(port).io.selectWakeupValid := earlyWakeupValid

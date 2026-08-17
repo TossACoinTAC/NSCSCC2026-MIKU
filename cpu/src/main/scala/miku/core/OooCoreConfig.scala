@@ -106,6 +106,11 @@ final case class OooCoreConfig(
     // Registered wakeups still update resident source-ready state, but only direct/early
     // wakeups may make an ordinary IQ entry selectable in the same cycle.
     enableOrdinaryRegisteredWakeSelectDecoupling: Boolean = true,
+    // Port 2 accepts only one-cycle ALU/branch operations or the fixed-latency multiplier. Capture
+    // its accepted destination beside each consumer IQ so same-cycle select does not route the
+    // execution-cluster wake tag back across the backend. Persistent source-ready state continues
+    // to use the qualified execution/ROB wakeup network.
+    enableLocalFixedPortSelectWakeup: Boolean = true,
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableBalancedIssueSelection: Boolean = true,
     enableBankedLoadForwardCompletion: Boolean = true,
