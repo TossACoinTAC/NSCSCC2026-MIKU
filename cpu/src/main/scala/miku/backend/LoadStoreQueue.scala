@@ -276,10 +276,15 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // Completed loads remain allocated until commit.  The allocator therefore
   // advances the base only on commit, and a rotated priority select preserves
   // program order across physical slot wrap-around.
+  val registeredPendingLoads = Reg(Bits(config.loadQueueEntries bits)) init (0)
   val pendingLoads = Bits(config.loadQueueEntries bits)
-  for (entry <- 0 until config.loadQueueEntries) {
-    pendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
-      !loads(entry).completed
+  if (config.enableRegisteredLoadPendingMap) {
+    pendingLoads := registeredPendingLoads
+  } else {
+    for (entry <- 0 until config.loadQueueEntries) {
+      pendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
+        !loads(entry).completed
+    }
   }
   // A blocked oldest Load may request one alternate scheduling attempt through a
   // registered token.  Restrict the alternate selection to younger, translated
@@ -1351,6 +1356,39 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       uncachedStoreRelease) {
       storeHead := storeHead + 1
     }
+  }
+
+  if (config.enableRegisteredLoadPendingMap) {
+    val pendingClear = Bits(config.loadQueueEntries bits)
+    pendingClear := B(0, config.loadQueueEntries bits)
+    when(requestCapture && !storeRequest) {
+      pendingClear(loadHead) := True
+    }
+    when(aguFire && !io.agu.isWrite && aguMisaligned) {
+      pendingClear(io.agu.uop.loadQueueIndex) := True
+    }
+    when(translationCompletionFire && !translationOwnerStore) {
+      pendingClear(translationOwnerLoadIndex) := True
+    }
+    when(responseLoadAccepted) {
+      pendingClear(responseLoadIndex) := True
+    }
+    when(forwardFire) {
+      pendingClear(loadHead) := True
+    }
+    for (lane <- 0 until config.commitWidth) {
+      when(io.releaseLoadValid(lane)) {
+        pendingClear(io.commit(lane).loadQueueIndex) := True
+      }
+    }
+
+    val allocatedLoads = loadAllocationTargets.reduce(_ | _)
+    val pendingNext = (registeredPendingLoads & ~pendingClear) | allocatedLoads
+    registeredPendingLoads := Mux(
+      io.flush,
+      B(0, config.loadQueueEntries bits),
+      pendingNext
+    )
   }
 
   // Payload capture is intentionally independent of the recovery branch
