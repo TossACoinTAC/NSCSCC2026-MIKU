@@ -110,6 +110,9 @@ final case class OooCoreConfig(
     // Keep the registered map on an unconditional local next-state mux instead of distributing
     // the commit qualifier to every architectural register clock enable.
     enableArchitecturalCommitDataMux: Boolean = true,
+    // Decode each compact commit destination once, then distribute local one-hot ownership bits
+    // instead of rebuilding three equality comparators at every architectural map entry.
+    enableOneHotArchitecturalCommit: Boolean = true,
     enableStoreDataDirectWakeup: Boolean = true,
     enableLsuRegisteredWakeSelectDecoupling: Boolean = true,
     // Registered wakeups still update resident source-ready state, but only direct/early

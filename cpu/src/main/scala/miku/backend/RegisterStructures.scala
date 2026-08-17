@@ -180,15 +180,27 @@ final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
     architecturalCommitPdst := io.commitPdst
   }
 
+  val architecturalCommitMask = Vec(Bits(config.archRegs bits), config.commitWidth)
+  for (lane <- 0 until config.commitWidth) {
+    architecturalCommitMask(lane) := Mux(
+      architecturalCommitValid(lane) && architecturalCommitArch(lane) =/= 0,
+      UIntToOh(architecturalCommitArch(lane), config.archRegs),
+      B(0, config.archRegs bits)
+    )
+  }
+
   val visibleArchitectural = Vec(UInt(config.physicalRegIndexWidth bits), config.archRegs)
   for (arch <- 0 until config.archRegs) {
     visibleArchitectural(arch) := architectural(arch)
     if (arch != 0) {
       for (lane <- 0 until config.commitWidth) {
-        when(
+        val laneOwnsEntry = if (config.enableOneHotArchitecturalCommit) {
+          architecturalCommitMask(lane)(arch)
+        } else {
           architecturalCommitValid(lane) &&
             architecturalCommitArch(lane) === U(arch, config.archRegIndexWidth bits)
-        ) {
+        }
+        when(laneOwnsEntry) {
           visibleArchitectural(arch) := architecturalCommitPdst(lane)
         }
       }
