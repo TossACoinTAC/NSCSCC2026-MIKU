@@ -112,7 +112,7 @@ final case class OooCoreConfig(
     enableRegisteredArchitecturalCommit: Boolean = true,
     // Store non-zero GPR destination qualification with each ROB payload so commit does not
     // rebuild the rd comparison on the architectural-map path.
-    enableRobCommitDestinationPredecode: Boolean = true,
+    enableRobCommitDestinationPredecode: Boolean = false,
     // Keep the registered map on an unconditional local next-state mux instead of distributing
     // the commit qualifier to every architectural register clock enable.
     enableArchitecturalCommitDataMux: Boolean = true,
