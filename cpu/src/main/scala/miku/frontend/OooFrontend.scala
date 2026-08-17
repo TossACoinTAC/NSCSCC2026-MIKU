@@ -38,6 +38,16 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   private def lutTreeEqual(a: UInt, b: UInt): Bool =
     !((a ^ b).asBits.orR)
 
+  private def lowestIndex4(requests: Bits): UInt = {
+    require(requests.getWidth == 4)
+    val lowValid = requests(1 downto 0).orR
+    val selectedPair = Mux(lowValid, requests(1 downto 0), requests(3 downto 2))
+    val index = UInt(2 bits)
+    index(1) := !lowValid && requests(3 downto 2).orR
+    index(0) := !selectedPair(0) && selectedPair(1)
+    index
+  }
+
   val io = new Bundle {
     val translationRequest = master(Stream(TranslationRequest(config)))
     val translationResponse = slave(Stream(TranslationResponse(config)))
@@ -726,10 +736,19 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   )
   val responsePredictedTaken = earlierResponsePredictionTaken(config.fetchWidth)
   val responsePredictedTarget = UInt(config.xlen bits)
-  responsePredictedTarget := groupBase + fetchGroupBytes
-  for (lane <- (0 until config.fetchWidth).reverse) {
-    when(responsePredictionTaken(lane)) {
-      responsePredictedTarget := responsePredictionTarget(lane)
+  if (config.enableIndexedFrontendResponseTargets) {
+    val takenLane = lowestIndex4(responsePredictionTaken.asBits)
+    responsePredictedTarget := Mux(
+      responsePredictedTaken,
+      responsePredictionTarget(takenLane),
+      groupBase + fetchGroupBytes
+    )
+  } else {
+    responsePredictedTarget := groupBase + fetchGroupBytes
+    for (lane <- (0 until config.fetchWidth).reverse) {
+      when(responsePredictionTaken(lane)) {
+        responsePredictedTarget := responsePredictionTarget(lane)
+      }
     }
   }
   val responseCorrectedNextPc = Mux(
@@ -763,14 +782,33 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val responseLearnPc = UInt(config.xlen bits)
   val responseLearnTarget = UInt(config.xlen bits)
   val responseLearnType = UInt(PredictedBranchType.Width bits)
-  responseLearnPc := groupBase
-  responseLearnTarget := groupBase + fetchGroupBytes
-  responseLearnType := PredictedBranchType.direct
-  for (lane <- (0 until config.fetchWidth).reverse) {
-    when(responseLearnMask(lane)) {
-      responseLearnPc := groupBase + lane * 4
-      responseLearnTarget := responseActualTarget(lane)
-      responseLearnType := responseActualType(lane)
+  if (config.enableIndexedFrontendResponseTargets) {
+    val learnLane = lowestIndex4(responseLearnMask)
+    responseLearnPc := Mux(
+      responseLearnMask.orR,
+      groupBase + (learnLane << 2).resized,
+      groupBase
+    )
+    responseLearnTarget := Mux(
+      responseLearnMask.orR,
+      responseActualTarget(learnLane),
+      groupBase + fetchGroupBytes
+    )
+    responseLearnType := Mux(
+      responseLearnMask.orR,
+      responseActualType(learnLane),
+      PredictedBranchType.direct
+    )
+  } else {
+    responseLearnPc := groupBase
+    responseLearnTarget := groupBase + fetchGroupBytes
+    responseLearnType := PredictedBranchType.direct
+    for (lane <- (0 until config.fetchWidth).reverse) {
+      when(responseLearnMask(lane)) {
+        responseLearnPc := groupBase + lane * 4
+        responseLearnTarget := responseActualTarget(lane)
+        responseLearnType := responseActualType(lane)
+      }
     }
   }
   val responseLearnPending = RegNext(responseLearnMask.orR) init (False)

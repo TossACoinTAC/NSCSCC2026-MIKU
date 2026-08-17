@@ -144,6 +144,9 @@ final case class OooCoreConfig(
     // Count the four visible response lanes with a balanced population count instead of a
     // lane-serial prefix adder. Enqueue timing and the visible taken-prefix are unchanged.
     enableBalancedFrontendResponseCount: Boolean = true,
+    // Select the oldest taken/learn lane through one local encoder instead of a serial chain of
+    // wide target overrides after L1I response predecode.
+    enableIndexedFrontendResponseTargets: Boolean = true,
     enableBalancedFrontendPredictionSelect: Boolean = true,
     // B02-F: widen the gshare history/PHT.  Its deterministic background initialization keeps
     // fetch active on BTFNT and does not propagate startup latency into predictor-update commit.
