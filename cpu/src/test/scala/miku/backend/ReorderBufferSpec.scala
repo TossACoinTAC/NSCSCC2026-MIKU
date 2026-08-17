@@ -78,6 +78,13 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
   }
   noIoPrefix()
 
+  // These are fixture ingress pins. Keep them observable even in scenarios
+  // that do not consume the retired CSR fields, so storage repartitioning in
+  // the DUT cannot silently remove test stimulus from the Verilator model.
+  io.allocateCsrAddress.foreach(_.simPublic())
+  io.allocateCsrWrite.simPublic()
+  io.allocateCsrMask.simPublic()
+
   val rob = new ReorderBuffer(config)
   for (lane <- 0 until config.renameWidth) {
     rob.io.allocate(lane).assignFromBits(B(0, rob.io.allocate(lane).getBitsWidth bits))
@@ -199,6 +206,8 @@ class ReorderBufferSpec extends AnyFunSuite {
     dut.io.allocateIsLoad #= 0
     dut.io.allocateIsStore #= 0
     dut.io.allocateIsBranch #= 0
+    dut.io.allocateCsrWrite #= 0
+    dut.io.allocateCsrMask #= 0
     for (lane <- 0 until config.writebackWidth) {
       dut.io.completionRobPointer(lane) #= 0
       dut.io.completionRecoveryEpoch(lane) #= 0
@@ -209,8 +218,6 @@ class ReorderBufferSpec extends AnyFunSuite {
       dut.io.allocateLoadQueueIndex(lane) #= 0
       dut.io.allocateStoreQueueIndex(lane) #= 0
       dut.io.allocateCsrAddress(lane) #= 0
-      dut.io.allocateCsrWrite(lane) #= false
-      dut.io.allocateCsrMask(lane) #= false
       dut.io.allocateSystemOperation(lane) #= 0
     }
   }
