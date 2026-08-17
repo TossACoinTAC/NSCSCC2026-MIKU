@@ -304,6 +304,16 @@ final class IssueQueue(
     }
   }
 
+  private def balancedOr(values: Seq[Bits]): Bits = {
+    require(values.nonEmpty)
+    if (values.size == 1) {
+      values.head
+    } else {
+      val (lower, upper) = values.splitAt(values.size / 2)
+      balancedOr(lower) | balancedOr(upper)
+    }
+  }
+
   val io = new Bundle {
     val enqueueValid = in Bool ()
     val enqueue = in(RenamedMicroOp(config))
@@ -403,6 +413,16 @@ final class IssueQueue(
     val outputPsrc2 = Reg(UInt(config.physicalRegIndexWidth bits)) init (0)
     val outputEntry = IssueEntry(config, portIndex)
     outputEntry := payloadSlots(outputSlot)
+    val oneHotOutputPsrc1 = balancedOr(
+      (0 until physicalSlotCount).map { slot =>
+        payloadSlots(slot).psrc1.asBits.andMask(issueSlotMask(slot))
+      }
+    )
+    val oneHotOutputPsrc2 = balancedOr(
+      (0 until physicalSlotCount).map { slot =>
+        payloadSlots(slot).psrc2.asBits.andMask(issueSlotMask(slot))
+      }
+    )
     io.issueValid := outputValid
     unpackIssueEntry(io.issue, outputEntry, outputPsrc1, outputPsrc2)
 
@@ -418,8 +438,13 @@ final class IssueQueue(
       when(queueDequeue) {
         outputValid := True
         outputSlot := issueSlot
-        outputPsrc1 := payloadSlots(issueSlot).psrc1
-        outputPsrc2 := payloadSlots(issueSlot).psrc2
+        if (config.enableOneHotTokenPsrcCapture) {
+          outputPsrc1 := oneHotOutputPsrc1.asUInt
+          outputPsrc2 := oneHotOutputPsrc2.asUInt
+        } else {
+          outputPsrc1 := payloadSlots(issueSlot).psrc1
+          outputPsrc2 := payloadSlots(issueSlot).psrc2
+        }
       }
     }
     io.occupancy := (count + outputValid.asUInt).resized
