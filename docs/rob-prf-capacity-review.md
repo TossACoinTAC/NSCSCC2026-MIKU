@@ -72,15 +72,16 @@ R13 的 `RF05/RT18-RT21` 已使 expanded-window 的 Yosys 总 cells、ROB cells 
 | ID | 动作 | 为什么可能改善物理实现 | 主要风险与门禁 |
 | --- | --- | --- | --- |
 | RF06 | 在已有本地 completion capture 边界内，让 dispatch、registered IQ wake、Store fallback 与 RenameMap 消费本地 pdst；ROB 仍唯一产生 valid/epoch/flush 资格 | 移除 ROB `stagedPdst` 到 backend/IQ 的 tag 广播，且不增加拍数 | poison completion tuple、stale epoch、flush、direct/registered wake 优先级、PRF bypass；完整 cpu-check、perf20 exact 与 matching top-N |
-| RF07 | 以 PRF bank/row 作为局部 wake/bypass 的物理边界，先由 bank match 限定再比较 row，并保持原五写口优先级 | 有机会减少 128-entry PRF 的全局 pDst 路由和 forwarding mux 扇出 | 不能仅做逻辑等价拆位；必须证明 Vivado 的 PRF/IQ route 下降，否则回退 |
+| RF07 | 尝试以 PRF bank/row 作为同拍 bypass 的物理边界 | 已否决：动态 row-bit 选择映射为 `shiftx/procmux`，PRF cells `+135`、raw LTP `9 -> 12`；未进入 perf20/Vivado | 保留 `a7b588a` 后由 `2edc9d6` 回退；证据为 `build/reports/yosys/RF07-bank-local-bypass-fresh-vs-RF06-default-local-tag.json` |
 | RT22 | 将 ROB completion hot state 的 indexed update 与 64-entry扫描式资格进一步按 bank 局部化 | 减少 completion 到 entry CE 的宽选择和 control fanout | 多 completion 同拍优先级、epoch、wrap/reuse、flush、三宽 allocate/commit；先扩展 ROB 定向回归 |
 | RT25 | 把完整 exception metadata 移到“最老已知异常”sidecar，正常 ROB entry 仅保留必要 hot state | 降低 completion/commit 异常 payload mux 与每 entry 冷字段负担 | 精确异常、BADV、TLB refill、同拍多异常的 oldest 选择、branch recovery；这是高风险微架构改造，先设计/测试后实现 |
 
 RF06 已完成：backend/PRF 定向测试、完整 `cpu-check`（41 suites / 264 tests）、95 项 Python
 合同和 default perf20 20/20 均通过，后者逐项精确等于 `3,879,728` cycles。其 Yosys cells、
 word bits 和 post-flat cells 均不变，符合它只改变跨区网络归属的预期；是否保留仍取决于下一份
-matching direct route 的 ROB-to-IQ 路径。RF07/RT22 需要先用 Yosys 检查局部 mux、word-bits 和
-LTP，再决定是否进入同一实现批次；RT25 是研究候选，不能与轻量时序候选混作一次无归因的修改。
+matching direct route 的 ROB-to-IQ 路径。RF07 已由 Yosys 否决，不再进入实现批次；RT22 需要先用
+Yosys 检查 completion hot-state 的 mux、word-bits 和 LTP，RT25 是研究候选，不能与轻量时序候选
+混作一次无归因的修改。
 
 ## 设计依据
 

@@ -302,7 +302,14 @@ RF06 已完成（`5727016`）：OooBackendDispatch 25/25、RegisterStructures 13
 perf20 20/20 逐项精确等于 `3,879,728` cycles。它是纯跨区连线重定位，尚无 matching physical
 证据，不能把 default route 的 WNS 归给它。
 
-下一批按 [rob-prf-capacity-review.md](rob-prf-capacity-review.md) 的边界筛选 RF07、RT22 和 RT25。
+RF07（`a7b588a`，随后由 `2edc9d6` 回退）曾将 PRF 同拍 bypass 的比较和 data mux 下推到
+bank-local row token。14/14 RegisterStructures 定向测试通过，但 fresh RTL 的 Yosys 对照显示
+PRF cells `1,314 -> 1,449`、全核 word bits `389,771 -> 396,341`、PRF raw LTP `9 -> 12`；动态
+row-bit 选择被映射为 `shiftx/procmux` 深链，不能作为物理优化保留。比较为
+`build/reports/yosys/RF07-bank-local-bypass-fresh-vs-RF06-default-local-tag.json`；它未进入
+perf20 或 Vivado。
+
+下一批按 [rob-prf-capacity-review.md](rob-prf-capacity-review.md) 的边界筛选 RT22 和 RT25。
 `64 ROB / 64 PRF` 是待验证的中间点，不预设为默认或回退；任何容量配置必须重新完成 matching
 software、Yosys 与 direct full，不能继承 R13 或 default 的时序证据。
 
