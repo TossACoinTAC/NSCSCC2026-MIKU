@@ -426,21 +426,33 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   )
   val candidateRetirementMetadata =
     Vec(ReorderBufferRetirementMetadata(config), config.commitWidth)
-  for (lane <- 0 until config.commitWidth) {
-    val pointer = candidatePointer(lane)
-    val candidateIndex = pointer(config.robIndexWidth - 1 downto 0)
-    val bank = candidateIndex(payloadBankWidth - 1 downto 0)
-    val candidateStateBankRead = Vec(Bits(stateWidth bits), payloadBankCount)
+
+  // State is physically arranged as four banks even though its architectural
+  // indexing remains a single ROB pointer.  Use the same local bank/row read
+  // for commit candidates and completion qualification: a completion only
+  // needs to inspect its one addressed entry, not OR valid/complete/generation
+  // terms across the entire ROB before it can write the existing one-hot token.
+  def readState(pointer: UInt): ReorderBufferState = {
+    val bankRead = Vec(Bits(stateWidth bits), payloadBankCount)
     for (readBank <- 0 until payloadBankCount) {
       val bankRows = Vec(Bits(stateWidth bits), payloadDepth)
       for (row <- 0 until payloadDepth) {
         bankRows(row) := entries(row * payloadBankCount + readBank).asBits
       }
-      candidateStateBankRead(readBank) := bankRows(
-        candidatePointer(lane)(config.robIndexWidth - 1 downto payloadBankWidth)
+      bankRead(readBank) := bankRows(
+        pointer(config.robIndexWidth - 1 downto payloadBankWidth)
       )
     }
-    candidates(lane).state.assignFromBits(candidateStateBankRead(bank))
+    val state = ReorderBufferState(config)
+    state.assignFromBits(bankRead(pointer(payloadBankWidth - 1 downto 0)))
+    state
+  }
+
+  for (lane <- 0 until config.commitWidth) {
+    val pointer = candidatePointer(lane)
+    val candidateIndex = pointer(config.robIndexWidth - 1 downto 0)
+    val bank = candidateIndex(payloadBankWidth - 1 downto 0)
+    candidates(lane).state.assignFromBits(readState(pointer).asBits)
     candidates(lane).payload.assignFromBits(payloadBankRead(bank))
     candidateRetirementMetadata(lane).assignFromBits(retirementMetadataBankRead(bank))
     val selectedCompletionPayload = Bits(completionPayloadWidth bits)
@@ -691,19 +703,36 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   )
   val stagedCompletionMatches = Vec(Bits(config.writebackWidth bits), config.robEntries)
   val stagedStoreCompletionMatches = Bits(config.robEntries bits)
+  val stagedCompletionTargetState = Vec(
+    ReorderBufferState(config),
+    config.writebackWidth
+  )
+  for (lane <- 0 until config.writebackWidth) {
+    stagedCompletionTargetState(lane).assignFromBits(readState(stagedRobPointer(lane)).asBits)
+  }
+  val stagedStoreCompletionTargetState = readState(stagedStoreCompletionRobPointer)
+  val completionWriteValid = Bits(config.writebackWidth bits)
+  for (lane <- 0 until config.writebackWidth) {
+    completionWriteValid(lane) := !io.flush && stagedCompletionValid(lane) &&
+      stagedCompletionCurrent(lane) && stagedCompletionTargetState(lane).valid &&
+      !stagedCompletionTargetState(lane).complete &&
+      stagedCompletionTargetState(lane).generation === stagedRobPointer(lane).msb
+  }
+  val storeCompletionWriteValid = !io.flush && stagedStoreCompletionValid &&
+    stagedStoreCompletionCurrent && stagedStoreCompletionTargetState.valid &&
+    !stagedStoreCompletionTargetState.complete &&
+    stagedStoreCompletionTargetState.generation === stagedStoreCompletionRobPointer.msb
   for (entryIndex <- 0 until config.robEntries) {
     val entryBank = entryIndex % payloadBankCount
     val entryRow = entryIndex / payloadBankCount
     for (lane <- 0 until config.writebackWidth) {
       stagedCompletionMatches(entryIndex)(lane) :=
-        stagedCompletionBankTargets(lane)(entryBank) && stagedCompletionRowTargets(lane)(entryRow) &&
-        entries(entryIndex).valid && !entries(entryIndex).complete &&
-        entries(entryIndex).generation === stagedRobPointer(lane).msb
+        completionWriteValid(lane) && stagedCompletionBankTargets(lane)(entryBank) &&
+        stagedCompletionRowTargets(lane)(entryRow)
     }
     stagedStoreCompletionMatches(entryIndex) :=
-      stagedStoreCompletionBankTarget(entryBank) && stagedStoreCompletionRowTarget(entryRow) &&
-      entries(entryIndex).valid && !entries(entryIndex).complete &&
-      entries(entryIndex).generation === stagedStoreCompletionRobPointer.msb
+      storeCompletionWriteValid && stagedStoreCompletionBankTarget(entryBank) &&
+      stagedStoreCompletionRowTarget(entryRow)
   }
   val stagedCompletionPayload = Vec(
     ReorderBufferCompletionPayload(config),
@@ -730,13 +759,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     stagedCompletionControl(lane).branchTaken := stagedBranchTaken(lane)
     stagedCompletionControl(lane).branchMispredict := stagedBranchMispredict(lane)
   }
-  val completionWriteValid = Bits(config.writebackWidth bits)
   for (lane <- 0 until config.writebackWidth) {
-    val laneMatches = Bits(config.robEntries bits)
-    for (entryIndex <- 0 until config.robEntries) {
-      laneMatches(entryIndex) := stagedCompletionMatches(entryIndex)(lane)
-    }
-    completionWriteValid(lane) := !io.flush && laneMatches.orR
     for (bank <- 0 until payloadBankCount) {
       completionPayloadMemories(lane)(bank).write(
         address = stagedRobPointer(lane)(
