@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/TossACoinTAC/NSCSCC2026-MIKU.git",
+  "status_document": "docs/status.md",
+  "current_cpu": {
+    "source_commit": "35c7f5d97ecef0fb2c6ec6a424f11bdd93077da4",
+    "profile": "disabled",
+    "source_tree_sha256": "bec6f629ee667e09d1f4ab81de78aa4cb027e370c4614b46039197844402a5a0",
+    "raw_rtl_sha256": "b7d62d418c899f04e7d22ed78ff170fc8f968e40f823aed90838d71627c16df6",
+    "published_rtl_sha256": "6a08b0dc21d16f9b9b2c2aa6136bd6973ed28184f58345928dda5fd1a47326ec",
+    "verification": {
+      "scala_suites": 42,
+      "scala_tests": 256,
+      "scala_skipped": 0,
+      "scala_status": "passed",
+      "python_contract_passed": 73,
+      "python_contract_skipped": 0,
+      "rtl_generation": "passed",
+      "port_contract": "passed",
+      "verilator_lint": "passed",
+      "verilator_lint_warning_count": 0,
+      "yosys": "passed",
+      "vivado_implementation": "not_run",
+      "fpga_func": "not_run",
+      "fpga_perf20": "not_run",
+      "linux_release": "not_run_for_this_cpu_source"
+    },
+    "performance_claim": "none"
+  },
+  "last_measured_hardware_reference": {
+    "repository_commit": "8f33144de808d28bb287cd358afeef02f24c8336",
+    "source_commit": "c60dadd4fdc1c2ae3f7eb61a345a515e907ba93a",
+    "chiplab_commit": "c398d274812f164d387146fa7d8f612a4a1296d9",
+    "published_rtl_sha256": "e81fd3aa33da3c1987d0b1b23f9da2cc4d7813c675b6735a7dd722038556ed34",
+    "vivado_version": "2023.2",
+    "part": "xc7a200tfbg676-2",
+    "profile": "perf",
+    "frequency_mhz": 100.0,
+    "setup_wns_ns": 0.018,
+    "hold_wns_ns": 0.05,
+    "drc_errors": 0,
+    "perf20": {
+      "job_id": "20260817-030305-5a6c7f1c",
+      "passed": 20,
+      "total": 20,
+      "cpu_count": 33393947,
+      "soc_count": 33404961
+    },
+    "package_sha256": "79e5498ac53d47fdf653e6db597429dc99ef5b6fa9b3f153770fd1b57705809a",
+    "evidence_document": "docs/research-20260816-execution-log.md"
+  },
+  "claim_rules": [
+    "Local tests do not prove Vivado timing.",
+    "Vivado implementation does not prove FPGA functional or perf results.",
+    "Historical measurements do not transfer to a different published RTL SHA256."
+  ]
+}

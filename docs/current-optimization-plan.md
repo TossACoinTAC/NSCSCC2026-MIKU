@@ -1,8 +1,10 @@
-# MIKU 当前多轮优化计划
+# MIKU R0 至 R6 多轮优化执行记录
 
-本文是动态执行清单，随候选和 matching implementation 结果更新。长期不变的测试、归档、
-并发和发布合同见 [verification-workflow.md](verification-workflow.md)，候选机制、状态与实测
-效果见 [optimization-candidates.md](optimization-candidates.md)；本轮 top-50 之外的静态时序审计见
+状态说明（2026-08-17）：本文最初用作动态执行清单，现保留为 R0 至 R6
+的历史记录，不再表示仓库现在的待办项。现在的 CPU 源码身份和验证范围见
+[status.md](status.md)。长期使用的测试、归档、并发和发布合同见
+[verification-workflow.md](verification-workflow.md)，候选机制、历史状态与实测效果见
+[optimization-candidates.md](optimization-candidates.md)；R5 的静态时序审计见
 [timing-static-audit-r5.md](timing-static-audit-r5.md)。
 
 ## 当前基线与目标
@@ -492,12 +494,14 @@ R5 已完成四个相互独立候选的组合 direct implementation：
   completion 侧只做已注册 index 的局部 data select。只有新的 LSQ 路径重新进入 top-50 时才实施，
   避免为已变成正 slack 的路径增加寄存器。
 
-R6 已以 L13 为软件 baseline 完成完整门禁、perf20、func58、Linux 固定窗口和 matching
-observer；L14、PHT 扩容与 BTB 扩容均已完成 A/B 并退出组合。下一步冻结 L11+L13 身份并
-启动一次 direct full implementation。旧稳定归档中 BTB prediction
-到 instruction TLB request 的 `+0.028 ns`、ROB/CSR `+0.051 ns`、IQ `+0.099 ns`、
-cache/L2 `+0.097 ns` 只属于旧 RTL 组合；L13 改变 LSQ 请求控制后必须重新读取 top-50，
-不能把这些 WNS 当作当前预算。
+R6 已以 L13 为软件 baseline 完成完整检查、perf20、func58、Linux 固定窗口和
+matching observer；L14、PHT 扩容与 BTB 扩容均已完成 A/B 并退出组合。
+L11+L13 的 matching direct full implementation 后续也已完成，结果为 setup WNS
+`-0.057 ns`、hold WNS `+0.048 ns` 和 setup TNS `-0.138 ns`；该结果不满足
+100 MHz setup 要求。它的 top-50 分类已记录在本文开头的基线段落。
+旧稳定归档中 BTB prediction 到 instruction TLB request 的 `+0.028 ns`、
+ROB/CSR `+0.051 ns`、IQ `+0.099 ns`、cache/L2 `+0.097 ns` 只属于旧 RTL 组合，
+不能作为 L11+L13 的 WNS 结论。
 
 ## 系统、归档与发布
 

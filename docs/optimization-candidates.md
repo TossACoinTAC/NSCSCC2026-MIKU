@@ -1,6 +1,11 @@
 # MIKU 优化候选账本与实验状态
 
-最后同步：2026-08-15。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)。本轮 top-50 之外的静态时序审计见 [timing-static-audit-r5.md](timing-static-audit-r5.md)。
+最后同步：2026-08-15。本文是当时候选编号、状态和效果的总账，不再作为
+仓库现在的验证状态页。现在的 CPU 源码身份与完成的检查以
+[status.md](status.md) 为准。微架构原理与十二阶段教学见
+[architecture.md](architecture.md)，验证与流水调度合同见
+[verification-workflow.md](verification-workflow.md)。当时 top-50 之外的静态时序审计见
+[timing-static-audit-r5.md](timing-static-audit-r5.md)。
 
 ## 1. 状态与编号合同
 

@@ -15,7 +15,7 @@
 ## 2. 依据
 
 - [2026 年团体赛技术方案](https://www.nscscc.com/?p=837)：基准集不含浮点和 TLB/MMU；系统测试分别评价 bootloader、教学操作系统、Linux、Linux 完成指定操作。
-- [龙架构 32 位精简版参考手册 r1p04](./References/2025032109211238668.龙架构32位精简版参考手册_r1p04.pdf)：指令、特权级、异常、CSR、TLB 和存储管理依据。
+- [龙架构 32 位精简版参考手册 r1p04](https://www.loongson.cn/uploads/images/2025032109211238668.%E9%BE%99%E6%9E%B6%E6%9E%8432%E4%BD%8D%E7%B2%BE%E7%AE%80%E7%89%88%E5%8F%82%E8%80%83%E6%89%8B%E5%86%8C_r1p04.pdf)：指令、特权级、异常、CSR、TLB 和存储管理依据。龙芯官网下载异常时，可使用 [Loongson 官方公开文档](https://github.com/loongson/LoongArch-Documentation) 核对通用 LoongArch 定义。
 - [Chiplab Linux 运行指引](https://gitee.com/loongson-edu/chiplab/blob/chiplab_diff/docs/FPGA_run_linux/linux_run.md)：典型链路是 SPI Flash 中的 PMON/U-Boot、DDR3、UART、以太网/TFTP 加载 `vmlinux`。
 - [官方 U-Boot](https://gitee.com/loongson-edu/la32r-uboot)、[Linux](https://gitee.com/loongson-edu/la32r-Linux)、[Buildroot](https://gitee.com/loongson-edu/la32r-buildroot) 和 [soft-float 工具链](https://gitee.com/loongson-edu/la32r-toolchains/releases)。
 
