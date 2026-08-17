@@ -58,25 +58,16 @@ final class L1InstructionCache(
     group
   }
 
-  private def driveResponse(
-      output: InstructionCacheResponse,
+  private def driveResponsePayload(
       context: InstructionCacheRequest,
       group: Vec[Bits],
       error: Bool
   ): Unit = {
-    val groupBase = context.virtualAddress &
-      U(((BigInt(1) << config.xlen) - 1) ^ (fetchGroupBytes - 1), config.xlen bits)
-    output.virtualAddress := context.virtualAddress
-    output.physicalAddress := context.physicalAddress
-    output.error := error
+    responseVirtualAddress := context.virtualAddress
+    responsePhysicalAddress := context.physicalAddress
+    responseError := error
     for (lane <- 0 until config.fetchWidth) {
-      output.instructions(lane) := group(lane)
-      FetchPredecoder.drive(
-        output.predecode(lane),
-        config,
-        groupBase + U(lane * 4, config.xlen bits),
-        group(lane)
-      )
+      responseInstructions(lane) := group(lane)
     }
   }
 
@@ -136,32 +127,37 @@ final class L1InstructionCache(
   }
 
   val responseValid = RegInit(False)
-  val response = Reg(InstructionCacheResponse(config))
+  val responseVirtualAddress = Reg(UInt(config.xlen bits))
+  val responsePhysicalAddress = Reg(UInt(config.xlen bits))
+  val responseInstructions = Vec.fill(config.fetchWidth)(Reg(Bits(32 bits)))
+  val responseError = Reg(Bool())
   responseValid := False
   // Keep the L1I-to-frontend response boundary registered.  The controller may
   // still accept the next synchronous lookup while the current response is in
   // this register, avoiding the direct BRAM-to-frontend correction path.
   io.responseValid := responseValid
-  io.response := response
-
-  // Compute each way's response in parallel with the tag comparison.  The hit way then selects
-  // between already decoded candidates instead of serializing tag compare, line selection and
-  // branch-target addition on the L1I response-register input.
-  val hitResponseByWay = Vec(InstructionCacheResponse(config), geometry.ways)
-  for (way <- 0 until geometry.ways) {
-    driveResponse(
-      hitResponseByWay(way),
-      request,
-      selectFetchGroup(cacheArray.io.wayData(way), request.physicalAddress),
-      False
+  io.response.virtualAddress := responseVirtualAddress
+  io.response.physicalAddress := responsePhysicalAddress
+  io.response.error := responseError
+  val responseGroupBase = responseVirtualAddress &
+    U(((BigInt(1) << config.xlen) - 1) ^ (fetchGroupBytes - 1), config.xlen bits)
+  for (lane <- 0 until config.fetchWidth) {
+    io.response.instructions(lane) := responseInstructions(lane)
+    FetchPredecoder.drive(
+      io.response.predecode(lane),
+      config,
+      responseGroupBase + U(lane * 4, config.xlen bits),
+      responseInstructions(lane)
     )
   }
 
-  private def writeResponse(
-      context: InstructionCacheRequest,
-      group: Vec[Bits],
-      error: Bool
-  ): Unit = driveResponse(response, context, group, error)
+  // Select only instruction payload at the response boundary.  Predecode is derived once from
+  // the registered group, avoiding one decoder copy per cache way without changing response
+  // visibility or hit-turnover latency.
+  val hitGroupByWay = Vec(Vec(Bits(32 bits), config.fetchWidth), geometry.ways)
+  for (way <- 0 until geometry.ways) {
+    hitGroupByWay(way) := selectFetchGroup(cacheArray.io.wayData(way), request.physicalAddress)
+  }
 
   val newInvalidate = io.invalidate && !invalidateSeen
   when(io.invalidate) { invalidateSeen := True }.otherwise { invalidateSeen := False }
@@ -272,7 +268,7 @@ final class L1InstructionCache(
       state := L1InstructionCacheState.idle
     }.elsewhen(cacheArray.io.hit) {
       responseValid := True
-      response := hitResponseByWay(cacheArray.io.hitWay)
+      driveResponsePayload(request, hitGroupByWay(cacheArray.io.hitWay), False)
       state := Mux(
         lookupHitTurnoverFire,
         L1InstructionCacheState.lookup,
@@ -335,7 +331,11 @@ final class L1InstructionCache(
     refillReplayPending := False
     when(!requestKilled && !io.kill) {
       responseValid := True
-      writeResponse(request, selectFetchGroup(refillLine, request.physicalAddress), refillError)
+      driveResponsePayload(
+        request,
+        selectFetchGroup(refillLine, request.physicalAddress),
+        refillError
+      )
       refillResponseSent := True
     }
   }
@@ -347,7 +347,7 @@ final class L1InstructionCache(
       (refillMaskWithAcceptedBeat & requestedBeatMask) === requestedBeatMask
     when(requestedGroupReady && !refillResponseSent && !requestKilled && !io.kill) {
       responseValid := True
-      writeResponse(
+      driveResponsePayload(
         request,
         selectFetchGroup(refillLineWithAcceptedBeat, request.physicalAddress),
         refillError || io.lineReadBeat.error
@@ -375,7 +375,11 @@ final class L1InstructionCache(
     cacheArray.io.writeDirty := False
     when(!refillResponseSent && !requestKilled && !io.kill) {
       responseValid := True
-      writeResponse(request, selectFetchGroup(refillLine, request.physicalAddress), refillError)
+      driveResponsePayload(
+        request,
+        selectFetchGroup(refillLine, request.physicalAddress),
+        refillError
+      )
     }
     state := L1InstructionCacheState.idle
   }
