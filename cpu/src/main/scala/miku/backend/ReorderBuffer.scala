@@ -519,8 +519,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     // Exception validity is retirement-control state.  Keeping that hot bit beside valid/complete
     // avoids routing a block-RAM payload output through the three-wide commit stop chain.  The
     // cold exception payload remains banked, preserving almost all of the storage reduction.
-    candidates(lane).exception.valid := candidates(lane).state.decodedExceptionValid ||
-      candidates(lane).state.completionExceptionValid
+    candidates(lane).exception.valid := candidates(lane).state.decodedExceptionValid
     candidates(lane).exception.ecode := candidates(lane).payload.decodedException.ecode
     candidates(lane).exception.esubcode := candidates(lane).payload.decodedException.esubcode
     candidates(lane).exception.badVAddrValid :=
@@ -528,6 +527,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     candidates(lane).exception.badVAddr := candidates(lane).payload.decodedException.badVAddr
     candidates(lane).exception.tlbRefill := candidates(lane).payload.decodedException.tlbRefill
     when(candidates(lane).state.completionExceptionValid) {
+      candidates(lane).exception.valid := True
       candidates(lane).exception.ecode := candidateCompletionControl(lane).exceptionEcode
       candidates(lane).exception.esubcode := candidateCompletionControl(lane).exceptionEsubcode
       candidates(lane).exception.badVAddrValid :=
