@@ -297,7 +297,15 @@ final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
     }
     ready := (ready | completedMask) & ~allocatedMask
   }
-  if (config.enableRegisteredArchitecturalCommit) {
+  if (config.enableArchitecturalCommitDataMux) {
+    for (arch <- 1 until config.archRegs) {
+      if (config.enableRegisteredArchitecturalCommit) {
+        architectural(arch) := visibleArchitectural(arch)
+      } else {
+        architectural(arch) := Mux(io.flush, architectural(arch), visibleArchitectural(arch))
+      }
+    }
+  } else if (config.enableRegisteredArchitecturalCommit) {
     for (lane <- 0 until config.commitWidth) {
       when(
         architecturalCommitValid(lane) && architecturalCommitArch(lane) =/= 0

@@ -107,6 +107,9 @@ final case class OooCoreConfig(
     // Stage architectural RenameMap updates at its local boundary.  The map exposes the pending
     // batch combinationally so consecutive retirement and recovery keep their original semantics.
     enableRegisteredArchitecturalCommit: Boolean = true,
+    // Keep the registered map on an unconditional local next-state mux instead of distributing
+    // the commit qualifier to every architectural register clock enable.
+    enableArchitecturalCommitDataMux: Boolean = true,
     enableStoreDataDirectWakeup: Boolean = true,
     enableLsuRegisteredWakeSelectDecoupling: Boolean = true,
     // Registered wakeups still update resident source-ready state, but only direct/early
