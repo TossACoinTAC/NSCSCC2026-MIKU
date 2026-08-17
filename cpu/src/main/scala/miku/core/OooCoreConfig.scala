@@ -155,6 +155,9 @@ final case class OooCoreConfig(
     // The same L1I controller exclusion applies to tag reads and installs. Do not feed a tag-read
     // result through miss/install control and back into another tag RAM's read enable.
     enableInstructionArrayTagReadDecoupling: Boolean = true,
+    // Capture branch predecode beside the selected instruction group at the existing response
+    // boundary. Frontend target/count logic then starts from registered branch facts.
+    enableRegisteredInstructionPredecode: Boolean = true,
     // L1D/L2 arbitration keeps lookup response and line installation mutually exclusive.  Keep
     // data-array reads qualified by lookup/maintenance acceptance independently of write enable.
     enableDataArrayDataReadDecoupling: Boolean = true,

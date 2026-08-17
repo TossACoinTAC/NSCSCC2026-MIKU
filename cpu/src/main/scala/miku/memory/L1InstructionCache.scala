@@ -63,8 +63,18 @@ final class L1InstructionCache(
     responseVirtualAddress := context.virtualAddress
     responsePhysicalAddress := context.physicalAddress
     responseError := error
+    val groupBase = context.virtualAddress &
+      U(((BigInt(1) << config.xlen) - 1) ^ (fetchGroupBytes - 1), config.xlen bits)
     for (lane <- 0 until config.fetchWidth) {
       responseInstructions(lane) := group(lane)
+      if (config.enableRegisteredInstructionPredecode) {
+        FetchPredecoder.drive(
+          responsePredecode(lane),
+          config,
+          groupBase + U(lane * 4, config.xlen bits),
+          group(lane)
+        )
+      }
     }
   }
 
@@ -128,6 +138,7 @@ final class L1InstructionCache(
   val responseVirtualAddress = Reg(UInt(config.xlen bits))
   val responsePhysicalAddress = Reg(UInt(config.xlen bits))
   val responseInstructions = Vec.fill(config.fetchWidth)(Reg(Bits(32 bits)))
+  val responsePredecode = Vec.fill(config.fetchWidth)(Reg(FetchPredecode(config)))
   val responseError = Reg(Bool())
   responseValid := False
   // Keep the L1I-to-frontend response boundary registered.  The controller may
@@ -141,17 +152,20 @@ final class L1InstructionCache(
     U(((BigInt(1) << config.xlen) - 1) ^ (fetchGroupBytes - 1), config.xlen bits)
   for (lane <- 0 until config.fetchWidth) {
     io.response.instructions(lane) := responseInstructions(lane)
-    FetchPredecoder.drive(
-      io.response.predecode(lane),
-      config,
-      responseGroupBase + U(lane * 4, config.xlen bits),
-      responseInstructions(lane)
-    )
+    if (config.enableRegisteredInstructionPredecode) {
+      io.response.predecode(lane) := responsePredecode(lane)
+    } else {
+      FetchPredecoder.drive(
+        io.response.predecode(lane),
+        config,
+        responseGroupBase + U(lane * 4, config.xlen bits),
+        responseInstructions(lane)
+      )
+    }
   }
 
-  // Select only instruction payload at the response boundary.  Predecode is derived once from
-  // the registered group, avoiding one decoder copy per cache way without changing response
-  // visibility or hit-turnover latency.
+  // Select one group before the response boundary so instructions and their branch facts remain
+  // aligned without replicating a decoder for every cache way.
   val hitGroupByWay = Vec(Vec(Bits(32 bits), config.fetchWidth), geometry.ways)
   for (way <- 0 until geometry.ways) {
     hitGroupByWay(way) := selectFetchGroup(cacheArray.io.wayData(way), request.physicalAddress)
