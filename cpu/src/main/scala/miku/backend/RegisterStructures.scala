@@ -36,9 +36,6 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
   val writeBankRowTargets = Vec.fill(config.writebackWidth)(
     Vec(Bits(storageBankDepth bits), storageBankCount)
   )
-  val writeBankData = Vec.fill(config.writebackWidth)(
-    Vec(Bits(config.xlen bits), storageBankCount)
-  )
 
   def storageBank(address: UInt): UInt =
     address(storageBankWidth - 1 downto 0)
@@ -60,11 +57,6 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
         writeBankValid(writePort)(bank),
         UIntToOh(storageRow(io.write(writePort).pdst), storageBankDepth),
         B(0, storageBankDepth bits)
-      )
-      writeBankData(writePort)(bank) := Mux(
-        writeBankValid(writePort)(bank),
-        io.write(writePort).data,
-        B(0, config.xlen bits)
       )
     }
   }
@@ -116,13 +108,15 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
     if (bank != 0 || row != 0) {
       for (writePort <- 0 until config.writebackWidth) {
         when(writeBankRowTargets(writePort)(bank)(row)) {
-          registerBanks(bank)(row) := writeBankData(writePort)(bank)
+          // The row target already implies write-valid and bank ownership, so
+          // an additional per-bank data mux is redundant and only duplicates
+          // the 32-bit completion data cone across the PRF.
+          registerBanks(bank)(row) := io.write(writePort).data
         }
       }
     }
   }
   registerBanks(0)(0) := B(0, config.xlen bits)
-  when(io.flush) { registerBanks(0)(0) := B(0, config.xlen bits) }
 }
 
 final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
