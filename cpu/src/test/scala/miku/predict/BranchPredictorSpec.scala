@@ -404,6 +404,14 @@ class BranchPredictorSpec extends AnyFunSuite {
         dut.io.btbUpdateValid #= true
         dut.clockDomain.waitSampling()
         dut.io.btbUpdateValid #= false
+        for (bank <- 1 until config.fetchWidth) {
+          dut.io.btbUpdatePc #= returnPc + bank * 4
+          dut.io.btbUpdateTarget #= fallbackTarget + bank * 4
+          dut.io.btbUpdateType #= 3
+          dut.io.btbUpdateValid #= true
+          dut.clockDomain.waitSampling()
+          dut.io.btbUpdateValid #= false
+        }
 
         dut.io.architecturalRasPush #= 3
         dut.io.architecturalReturnAddress(0) #= olderReturnAddress
@@ -419,8 +427,10 @@ class BranchPredictorSpec extends AnyFunSuite {
         dut.io.lookupValid #= false
         sleep(1)
         assert(dut.io.responseValid.toBoolean)
-        assert(dut.io.prediction(0).hit.toBoolean)
-        assert(dut.io.prediction(0).target.toBigInt == recoveryReturnAddress)
+        for (bank <- 0 until config.fetchWidth) {
+          assert(dut.io.prediction(bank).hit.toBoolean)
+          assert(dut.io.prediction(bank).target.toBigInt == recoveryReturnAddress)
+        }
         dut.io.lookupPc #= returnPc + 0x1000
         dut.clockDomain.waitSampling()
         sleep(1)
