@@ -427,6 +427,50 @@ LSQ 占 72% 和 58%，另一个前端热点由 frontend/L1I 占 82%/17%；ROB �
 预解码/学习链，并把 ROB 仅作为全局拥挤的结构背景处理。R15 setup 仍为负，不是 100 MHz
 里程碑，也不晋级 `main`。
 
+### R16：LSQ、L1I、frontend 与 ROB 的周期透明收敛批次
+
+R16 保持 default `32 ROB / 64 PRF`，在 R15 的 routed DCP 上一次累积六项不改变可观察拍数的
+候选：`LST01 @ 4e82e7c` 将 16 项旋转 pending-Load 选择改为 4x4 平衡树；`LST02 @ d9d55be`
+把 pending map 注册为窄 sidecar；`ICT03 @ b31023c` 在既有 L1I response 边界捕获 predecode；
+`FT13 @ 146d2da` 平衡 response lane count；`FT14 @ 451e2ba` 用局部最低索引选择
+taken/learn lane；`RBT01 @ 591292e` 用 one-hot next-free state 局部化 ROB 分配状态。每项的定向
+suite 通过；最终 `cpu-check` 为 40 suites / 265 tests，Python contracts 为 95/95。
+
+clean ideal perf20 20/20 的总周期仍为 `3,879,728`，相对 R15 每一项精确相等；func58 random-AXI
+seeds `240/255/141` 均通过。冻结身份为 source commit `591292e`、source tree SHA-256
+`59cc0cdb47f31f26dbad8e4eee7b35c76bcb9a4c2eadf30a3b5c5cfb3dcb2285`、发布 RTL SHA-256
+`39c840141836a8c50f6dd1c6c234730b01dd5b1970c6e3cf54047c24e44642c7`，实验清单为
+`build/reports/experiments/R16-six-timing-candidates/experiment-manifest.json`。
+
+Yosys 相对 R15 的全核 cells 为 `57,275 -> 57,882`（`+1.060%`）、word bits 为
+`391,004 -> 397,735`（`+1.721%`）、post-flat cells 为 `51,253 -> 51,860`（`+1.184%`）。其中
+ROB cells `-77`、LSQ `+49`、frontend `+27`，但 registered predecode 使 L1I `+608`；四个
+目标模块的模块内 LTP 没有下降。因此 Yosys 只能说明没有 ROB/LSQ 的规模失控，不能证明该批
+一定降低跨区路由压力。
+
+matching 100 MHz direct full 已完成，归档为
+`Post_Impl_Bundles/cpu_591292e46b08_chiplab_c398d274812f_perf_100mhz_20260817-202317/`。它是
+从 matching RTL 直接完整 implementation 产生的 bitstream，fully routed，DRC 为 0 errors /
+0 critical warnings，但 setup/hold WNS 为 `-0.334/+0.051 ns`、setup TNS 为 `-14.756 ns`，所以
+只归档为 candidate，`competition_eligible=false`。相对 R15，setup WNS 改善 `0.038 ns`、TNS
+改善 `24.286 ns`，不足以作为 100 MHz 闭合里程碑，也不进入 `main`。
+
+R16 的 top-50 从 R15 的 LSQ 24、frontend/L1I 20 变为 IQ 28、ROB/CSR 11、cache/L2 10、LSQ 1；
+frontend/predictor 均为 0。最差六条均为 `LSQ bankedForwardCompletionValid -> IQ issue payload`
+（route `79.8%` 至 `82.0%`，logic 约 2 ns），L1D `waiterBeatReady -> response_data` 的 route 为
+约 `83%` 至 `85%`，ROB `candidatePointer -> privilegedRedirect{Target,Pending}` 为约 `72%` 至 `85%`。
+路由 peak overlap 为 `38,792`、最终 0；DCP 的 East global congestion 为 119%，其中 ROB 87%、
+TLB 8%。R17 因而优先选择 IQ/LSQ forwarding 边界局部化、ROB redirect payload 局部化、L1D
+response data/control 局部化、shared-MSHR response identity/ADDRD 局部化，以及 ROB 的
+allocation/completion high-fanout 结构性拆分。以上均是候选，不把工具未能自动复制的 net 当作
+应由 `max_fanout` 约束解决的问题。
+
+本轮也重新审计了 `origin/main`：`06ca492` 的 registered correction decision 已由本分支
+`c9af20c` 覆盖，`c60dadd` 的四处 LUT-tree equality 已由 `03e8e25` 覆盖；最新 `35c7f5d` 是
+custom-instruction 框架，不是独立时序候选且会扩大 ISA/验证面，故不引入。主线 `06ca492` 的
+正 WNS 使用了 route 后 `AggressiveExplore phys_opt`，仅可作探索信息，不取代本仓库的 direct
+full 里程碑。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。

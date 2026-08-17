@@ -469,6 +469,38 @@ route peak overlap 为 `43,599` 且最终归零；方向性最大局部拥挤为
 `build/reports/vivado/R15-five-timing-congestion/`。R15 保留为新的开发 baseline，但 setup
 仍为负，不是 100 MHz milestone，也不进入 `main`。
 
+## 10. R16：六项周期透明时序候选
+
+| ID | 机制与目标 | 状态 | 当前效果与证据 |
+| --- | --- | --- | --- |
+| LST01 | 16-entry rotated pending-Load priority select 改为 4x4 平衡 lowest-index tree，去除原 CARRY4 串行选择链 | 已实现并进入 R16 | `4e82e7c`；LSQ 36/36。Yosys LSQ 与 R15 相比只增 49 cells；完整 perf20 周期透明。最终 direct 中 LSQ 仅余 1/50 路径，但不能把这个组合变化全归因于本项。 |
+| LST02 | 以 16-bit registered pending-map sidecar 服务选路，allocation/clear 同沿保持原有优先级与 flush 语义 | 已实现并进入 R16 | `d9d55be`；LSQ 36/36，perf20 逐项精确相等。它切断一部分 allocation/clear 到选择网络，但 R16 top path 显示 Store forwarding 仍是更大的 LSQ 输出簇。 |
+| ICT03 | 在既有 L1I response register 边界捕获四 lane FetchPredecode，消除 response instruction 到 decode 的组合预解码 | 已实现并进入 R16 | `b31023c`；L1I 11/11，连续 turnover alignment 覆盖。Yosys L1I `+608 cells / +4,760 word bits`，但 direct top-50 的 frontend/L1I 从 20 降为 0；物理收益为组合观察，非单项 WNS。 |
+| FT13 | response prefix lane count 改为平衡 `CountOne` | 已实现并进入 R16 | `146d2da`；OooFrontend 26/26，perf20 周期透明。Yosys frontend 只增 27 cells（与 FT14 合并差分）。 |
+| FT14 | taken/learn mask 用局部最低索引和 indexed payload 选择，替代串行宽 payload 覆盖 | 已实现并进入 R16 | `451e2ba`；OooFrontend 26/26，perf20 周期透明。配合 ICT03 后 frontend/predictor 不再进入 R16 top-50。 |
+| RBT01 | 以 one-hot next-free state 表示 ROB 分配游标，binary pointer 保留给 tag/RAM/公开 pointer | 已实现并进入 R16 | `591292e`；ROB 20/20，涵盖 wrap、full、epoch 和 flush。Yosys ROB `-77 cells`；direct DCP 的 ROB 仍占 East global congestion 87%，说明仅局部 allocation-state 变换不足以释放其物理核心。 |
+
+完整门禁为 40 suites / 265 tests、Python contracts 95/95；clean ideal perf20 20/20 为
+`3,879,728` cycles，逐项精确等于 R15；func58 random-AXI seeds `240/255/141` 均通过。source
+commit 为 `591292e`，RTL SHA-256 为
+`39c840141836a8c50f6dd1c6c234730b01dd5b1970c6e3cf54047c24e44642c7`。实验清单与软件 A/B
+证据分别在 `build/reports/experiments/R16-six-timing-candidates/experiment-manifest.json` 和
+`build/reports/comparisons/R15-vs-R16-six-timing.json`。
+
+matching direct full 的 setup/hold WNS 为 `-0.334/+0.051 ns`、TNS `-14.756 ns`、DRC 0 errors /
+0 critical warnings、fully routed、bitstream 成功。它比 R15 的 setup `-0.372 ns` 改善 `0.038 ns`，
+但未闭合，归档为 candidate 而非 stable。top-50 与 route health 见
+`build/reports/timing/R16-six-timing-direct-top50.json` 和
+`build/reports/timing/R16-six-timing-direct-route-health.json`；DCP 拥挤/复杂度审计见
+`build/reports/vivado/R16-six-timing-congestion/`。
+
+R17 开放候选：`IQT04`（把 LSQ forwarding completion 对 IQ issue payload 的宽 CE/metadata
+影响收敛到本地 forwarding-accept 边界）、`RBT02`（ROB candidate pointer 到 privileged redirect
+payload 的局部捕获）、`L1DT04`（L1D waiter beat 到 response data 的 one-hot/局部 data capture）、
+`MRT01`（shared MSHR response ID/ADDRD 的消费者侧局部身份）和 `RBT03`（ROB allocation 与
+completion-payload memory 的 high-fanout 结构拆分）。这五项均须先补针对性等价性测试；不采用
+`max_fanout` 或 forced replication 作为 RTL 设计替代品。
+
 ## 11. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
