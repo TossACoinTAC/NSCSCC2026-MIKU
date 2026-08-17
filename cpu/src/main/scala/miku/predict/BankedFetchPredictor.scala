@@ -69,6 +69,12 @@ final class BankedFetchPredictor(
   require(historyWidth == BankedFetchPrediction.HistoryWidth)
   require(rasDepth == 8)
 
+  // Vivado maps UInt/Bits equality onto a CARRY4 compare chain.  The BTB tag
+  // hit feeds the live history-turnover prediction cone, so keep the 21-bit
+  // match on a short XOR/NOR LUT tree.  Same cycle behavior, faster routing.
+  private def lutTreeEqual(a: Bits, b: Bits): Bool =
+    !((a.asUInt ^ b.asUInt).asBits.orR)
+
   val io = new Bundle {
     val lookupValid = in Bool ()
     val lookupPc = in UInt (config.xlen bits)
@@ -335,7 +341,7 @@ final class BankedFetchPredictor(
 
     val entryTag = btbRead(bank)(btbTagLsb + btbTagWidth - 1 downto btbTagLsb)
     io.prediction(bank).hit := io.responseValid && btbRead(bank)(btbValidBit) &&
-      entryTag === capturedTag
+      lutTreeEqual(entryTag, capturedTag)
     // The static-taken fallback remains visible only while the PHT sweep is
     // running.  Afterwards the initialized gshare table is authoritative.
     io.prediction(bank).phtValid := io.responseValid && !phtInvalidating

@@ -16,6 +16,12 @@ final class CacheArray(
   private val tagWidth = addressWidth - indexWidth - offsetWidth
   private val tagEntryWidth = tagWidth + 2
 
+  // The tag-match result gates the L1 controller request/lookup handshake,
+  // so avoid Vivado's CARRY4 compare chain with an XOR/NOR LUT tree.  Cycle
+  // behavior is unchanged; only the FPGA mapping differs.
+  private def lutTreeEqual(a: UInt, b: UInt): Bool =
+    !((a ^ b).asBits.orR)
+
   val io = new Bundle {
     val lookupValid = in Bool ()
     val lookupAddress = in UInt (addressWidth bits)
@@ -136,7 +142,7 @@ final class CacheArray(
   for (way <- 0 until geometry.ways) {
     val valid = tagRead(way)(1)
     val tag = tagRead(way)(tagEntryWidth - 1 downto 2).asUInt
-    hitMask(way) := responseValid && valid && tag === capturedTag
+    hitMask(way) := responseValid && valid && lutTreeEqual(tag, capturedTag)
     invalidMask(way) := responseValid && !valid
   }
 
