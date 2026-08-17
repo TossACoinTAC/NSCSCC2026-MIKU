@@ -295,6 +295,15 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     when(selectedLoadMask(entry)) { selectedLoad := loads(entry) }
   }
   val selectedLoadValid = pendingLoads.orR
+  // Keep the registered scheduler payload resident while the same queue slot
+  // remains selected. Rewriting it every cycle makes requestSent and the
+  // pending-load scan feed the clock-enable cone of every payload bit.
+  val scheduledLoadReselect =
+    selectedLoadValid && (!scheduledLoadValid || selectedLoadHead =/= loadHead)
+  val scheduledLoadAguMatch =
+    selectedLoadValid && aguFire && !io.agu.isWrite && !aguMisaligned &&
+      io.agu.uop.loadQueueIndex === selectedLoadHead &&
+      selectedLoad.valid && selectedLoad.robPointer === io.agu.uop.robPointer
   // Match the registered uop boundary used by the reference LoadQueue.  The
   // selected index and immutable payload are state: translation, forwarding,
   // and cache request ownership no longer re-read wide queue fields through a
@@ -305,7 +314,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   }.otherwise {
     scheduledLoadValid := selectedLoadValid
     scheduledLoadWasYoungerBypass := selectYoungerLoad
-    when(selectedLoadValid) {
+    when(scheduledLoadReselect) {
       loadHead := selectedLoadHead
       youngerRetryOwnerRobPointer := selectedLoad.robPointer
       scheduledLoadOwner.robPointer := selectedLoad.robPointer
@@ -321,34 +330,30 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       scheduledLoadPayload.byteMask := selectedLoad.byteMask
       scheduledLoadPayload.signExtend := selectedLoad.signExtend
       scheduledLoadPayload.isLl := selectedLoad.isLl
+    }
 
-      // AGU and scheduler can target the same newly-ready entry on one edge.
-      // Bypass that write into the registered payload so this timing cut does
-      // not add a cycle to the normal address-to-translation path.
-      when(
-        aguFire && !io.agu.isWrite && !aguMisaligned &&
-          io.agu.uop.loadQueueIndex === selectedLoadHead &&
-          selectedLoad.valid && selectedLoad.robPointer === io.agu.uop.robPointer
-      ) {
-        youngerRetryOwnerRobPointer := io.agu.uop.robPointer
-        scheduledLoadOwner.robPointer := io.agu.uop.robPointer
-        scheduledLoadOwner.recoveryEpoch := io.agu.uop.recoveryEpoch
-        scheduledLoadOwner.memoryEpoch := selectedLoad.memoryEpoch
-        scheduledLoadPayload.pdst := io.agu.uop.pdst
-        scheduledLoadPayload.writesPdst := io.agu.uop.pdst =/= 0
-        scheduledLoadPayload.virtualAddress := io.agu.virtualAddress
-        scheduledLoadTranslation.physicalAddress := Mux(
-          aguTranslationBypass,
-          io.translationBypass.physicalAddress,
-          U(0, config.xlen bits)
-        )
-        scheduledLoadTranslation.done := aguTranslationBypass
-        scheduledLoadTranslation.uncached := aguTranslationBypass && io.translationBypass.uncached
-        scheduledLoadPayload.size := io.agu.size
-        scheduledLoadPayload.byteMask := io.agu.byteMask
-        scheduledLoadPayload.signExtend := io.agu.uop.decoded.memorySignExtend
-        scheduledLoadPayload.isLl := io.agu.uop.decoded.isLl
-      }
+    // AGU and scheduler can target the same newly-ready entry on one edge.
+    // Keep this independent path at higher priority than a head reselect so
+    // the optimization does not add a cycle to address generation.
+    when(scheduledLoadAguMatch) {
+      youngerRetryOwnerRobPointer := io.agu.uop.robPointer
+      scheduledLoadOwner.robPointer := io.agu.uop.robPointer
+      scheduledLoadOwner.recoveryEpoch := io.agu.uop.recoveryEpoch
+      scheduledLoadOwner.memoryEpoch := selectedLoad.memoryEpoch
+      scheduledLoadPayload.pdst := io.agu.uop.pdst
+      scheduledLoadPayload.writesPdst := io.agu.uop.pdst =/= 0
+      scheduledLoadPayload.virtualAddress := io.agu.virtualAddress
+      scheduledLoadTranslation.physicalAddress := Mux(
+        aguTranslationBypass,
+        io.translationBypass.physicalAddress,
+        U(0, config.xlen bits)
+      )
+      scheduledLoadTranslation.done := aguTranslationBypass
+      scheduledLoadTranslation.uncached := aguTranslationBypass && io.translationBypass.uncached
+      scheduledLoadPayload.size := io.agu.size
+      scheduledLoadPayload.byteMask := io.agu.byteMask
+      scheduledLoadPayload.signExtend := io.agu.uop.decoded.memorySignExtend
+      scheduledLoadPayload.isLl := io.agu.uop.decoded.isLl
     }
   }
 
