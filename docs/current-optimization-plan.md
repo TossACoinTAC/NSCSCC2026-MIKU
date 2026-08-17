@@ -381,6 +381,52 @@ cache/L2 `-0.686 -> -0.344 ns`，frontend 与 ROB/CSR 均退出 top-50。
 不得晋级正式产物。下一轮优先解决 IQ 35/50 的 source-tag 到 payload 跨区路径，同时保留三个
 提交边界供后续隔离。
 
+### R15：R14 top-50 定向时序批次
+
+R15 沿用 default `32 ROB / 64 PRF` 和 R14 的软件周期基线，不恢复已经证明会放大拥挤的扩容
+配置。本批根据 R14 direct full 的 top-50 一次纳入五项不增加可观察拍数的定向候选：
+
+1. `IQT03 @ a211500`：只把 fixed/multiply 端口当拍接受的窄 `{valid, pDst}` token 用于
+   select fast path，持久 source-ready 仍由 epoch-qualified completion wakeup 驱动；
+2. `ICT02 @ 15e1ff3`：在 L1I controller 已保证 lookup/install 互斥的前提下，将 tag read CE
+   与 install write enable 解耦；
+3. `BPT04 @ 94d8317`：在既有 predictor response 边界注册 speculative RAS 操作，并对 pending
+   push 提供 top bypass，避免把 BTB BRAM 输出直接送入 RAS payload CE；
+4. `FT09 @ 51d8ed7`：复用已经形成的 canonical predicted successor，消除到 ATU 的重复
+   taken/fallthrough 32-bit mux；
+5. `MT21 @ fc91801`：用二进制 head 索引读取 scheduled Load payload，替代 16 项 one-hot
+   bundle priority selection；legacy 路径仍由配置保留，便于隔离回归。
+
+五项均有各自定向测试，最终完整 `cpu-check` 为 40 suites / 265 tests，Python contracts 95/95；
+perf20 20/20 总周期为 `3,879,728`，20 项均与 R14 逐项精确相等；func58 random-AXI seeds
+`240/255/141` 均为 58/58。source tree SHA-256 为
+`8aae07fe6815f082d9e73a2faccf2b44aace14a62f1fea40f8c4b6449251ccf7`，发布 RTL SHA-256 为
+`7773665e522dce787ea6bcaceeb4ba265e1c8a19211b10d7c9fef6e2cfc53d15`。实验身份冻结在
+`build/reports/experiments/R15-five-timing-candidates/experiment-manifest.json`，perf A/B 证据为
+`build/reports/comparisons/R14-vs-R15-five-timing.json`。
+
+Yosys 相对 R14 的全核 cells 为 `57,233 -> 57,275`（`+0.073%`）、word bits 为
+`391,587 -> 391,004`（`-0.149%`）、post-flat cells 为 `51,211 -> 51,253`
+（`+0.082%`）；L1I local LTP 从 28 降至 27。该结果证明本批没有明显规模膨胀，但不能替代
+跨区控制、RAM CE 和物理拥挤目标的 Vivado 判断。比较证据为
+`build/reports/yosys/R14-vs-R15-five-timing-candidates.json`。
+
+matching 100 MHz direct full 已完成并归档为
+`Post_Impl_Bundles/cpu_fc91801aab52_chiplab_c398d274812f_perf_100mhz_20260817-190437/`。
+setup/hold WNS 为 `-0.372/+0.050 ns`、setup TNS 为 `-39.042 ns`，fully routed、DRC
+0 error / 0 critical warning、bitstream 成功。相对 R14，setup WNS 改善 `0.301 ns`、TNS 改善
+约 `68.2 ns`；Slice LUT `85,919 -> 84,521`，FF `52,317 -> 52,335`。top-50 从 IQ 35、
+predictor 9、LSQ 4、cache/L2 2，变为 IQ 6、predictor 0、LSQ 24、L1I-response/frontend 20；
+IQ 最差 slack 从 `-0.673 -> -0.276 ns`，predictor 退出 top-50。该变化支持保留 R15 作为新的
+开发 baseline，但不能把组合结果精确拆给单个候选。
+
+route 最终无 failed net 或 overlap，peak overlap `43,599`，但方向性最大局部拥挤从 R14 的
+`91.4414%` 升至 `99.0991%`。routed DCP 的 design-analysis 进一步显示两个短线热点分别由
+LSQ 占 72% 和 58%，另一个前端热点由 frontend/L1I 占 82%/17%；ROB 仍占全局热点 37%，
+却已退出 top-50。下一批因此优先重构 scheduled-load 捕获与 L1I response 到 frontend 的
+预解码/学习链，并把 ROB 仅作为全局拥挤的结构背景处理。R15 setup 仍为负，不是 100 MHz
+里程碑，也不晋级 `main`。
+
 ## R0：实验合同
 
 - `experiment-freeze` 锁定源码、RTL、模型、软件、工具、Chiplab 和显式证据。

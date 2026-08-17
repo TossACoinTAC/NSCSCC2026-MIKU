@@ -425,7 +425,51 @@ WNS 为 `-0.673/+0.018 ns`、setup TNS 为 `-107.284 ns`，fully routed、DRC 0 
 物理里程碑，也没有竞争产物资格。下一轮直接针对 IQ 35/50 的 source-tag/payload 跨区网络，
 并保留 `EQ01 -> MT20 -> FT12` 的提交边界供后续回归隔离。
 
-## 10. 当前优先级与下一步
+## 10. R15：R14 top-50 定向时序批次
+
+R15 在 R14 的 default `32 ROB / 64 PRF` baseline 上一次累积五项周期透明候选。每项保留独立
+提交边界，组合软件门禁通过后只做一次 matching direct full；因此最终 Vivado 结果用于判断组合
+是否值得保留，不会被反向包装成五项各自的独立 WNS。
+
+| ID | 机制与目标 | 状态 | 当前效果与证据 |
+| --- | --- | --- | --- |
+| IQT03 | fixed/multiply 端口接受时形成局部窄 destination token，只服务当拍 select fast path；持久 source-ready 与 flush/epoch 语义不变 | 已实现并进入 R15 组合 | `a211500`；针对 R14 的 35/50 IQ source-tag/payload 路径。定向测试覆盖 external/local wake、flush 和 fixed-port 接受边界；perf20 周期透明。Yosys OooBackend 增加 25 cells / 65 word bits，物理收益必须由 matching route 判断。 |
+| ICT02 | L1I controller 的互斥合同用于把 tag read CE 与 install write enable 解耦，不修改 lookup、refill、maintenance 或 response 拍数 | 已实现并进入 R15 组合 | `15e1ff3`；针对 R14 两条 L1I tag RAM CLK-to-EN 路径。L1I 定向测试和完整门禁通过；Yosys local LTP `28 -> 27`，perf20 周期透明。 |
+| BPT04 | 在既有 response 边界注册 speculative RAS 操作，pending push 通过 top bypass 保持同拍预测语义 | 已实现并进入 R15 组合 | `94d8317`；针对 R14 8 条 BTB BRAM-to-RAS CE 路径。测试覆盖 pending push、return 与前端连续预测；perf20 周期透明。Predictor Yosys 增加 12 cells / 130 word bits。 |
+| FT09 | 复用 canonical predicted successor，移除到 ATU instruction-search owner 的重复 32-bit taken/fallthrough mux | 已实现并进入 R15 组合 | `51d8ed7`；OooFrontend 26/26 和完整门禁通过，perf20 周期透明。Yosys frontend 减少 4 cells / 128 word bits。 |
+| MT21 | 用二进制 selected-load head 直接读取 resident payload，取代 16 项 one-hot bundle priority override；保留 legacy A/B 开关 | 已实现并进入 R15 组合 | `fc91801`；针对 R14 四条 completed/priority-to-scheduled-load 路径。LSQ 36/36 和完整门禁通过；perf20 周期透明。Yosys LSQ 增加 13 cells、减少 646 word bits。 |
+
+最终完整门禁为 40 suites / 265 tests、Python contracts 95/95。perf20 20/20 总周期
+`3,879,728`，20 项相对 R14 逐项精确相等；func58 random-AXI seeds `240/255/141` 均为
+58/58。source tree SHA-256 为
+`8aae07fe6815f082d9e73a2faccf2b44aace14a62f1fea40f8c4b6449251ccf7`，发布 RTL SHA-256 为
+`7773665e522dce787ea6bcaceeb4ba265e1c8a19211b10d7c9fef6e2cfc53d15`。
+
+组合 Yosys 相对 R14 为 cells `57,233 -> 57,275`（`+0.073%`）、word bits
+`391,587 -> 391,004`（`-0.149%`）、post-flat cells `51,211 -> 51,253`
+（`+0.082%`）。该代理结果排除了明显规模失控，却不能证明跨区网络或器件 CE 已改善；最终取舍
+必须服从 matching 100 MHz direct full。身份和证据分别在
+`build/reports/experiments/R15-five-timing-candidates/experiment-manifest.json`、
+`build/reports/comparisons/R14-vs-R15-five-timing.json` 和
+`build/reports/yosys/R14-vs-R15-five-timing-candidates.json`。
+
+matching direct full 归档为
+`Post_Impl_Bundles/cpu_fc91801aab52_chiplab_c398d274812f_perf_100mhz_20260817-190437/`：
+setup/hold WNS `-0.372/+0.050 ns`、setup TNS `-39.042 ns`、fully routed、DRC 0 error /
+0 critical warning、bitstream 成功。相对 R14 的 `-0.673 ns`，WNS 改善 `0.301 ns`；Slice LUT
+`85,919 -> 84,521`，FF `52,317 -> 52,335`。top-50 中 IQ `35 -> 6`、predictor `9 -> 0`，
+而 LSQ `4 -> 24`、L1I-response/frontend `2 -> 20`，说明本批成功消除了原先的 IQ/predictor
+主墙，同时暴露了下一层瓶颈。单次组合 route 仍不提供单项 WNS 归因。
+
+route peak overlap 为 `43,599` 且最终归零；方向性最大局部拥挤为 `99.0991%`，比 R14 的
+`91.4414%` 更高。routed DCP 的拥挤窗口中，LSQ 分别占两个 short-congestion window 的
+72% 和 58%，frontend/L1I 占另一窗口的 82%/17%，ROB/dispatch 则主导 global window。
+证据为 `build/reports/timing/R15-five-timing-direct-top50.json`、
+`build/reports/timing/R15-five-timing-direct-route-health.json` 和
+`build/reports/vivado/R15-five-timing-congestion/`。R15 保留为新的开发 baseline，但 setup
+仍为负，不是 100 MHz milestone，也不进入 `main`。
+
+## 11. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
@@ -447,11 +491,11 @@ WNS 为 `-0.673/+0.018 ns`、setup TNS 为 `-107.284 ns`，fully routed、DRC 0 
 7. 当前阶段以 CT05 的 isolated perf20、最终组合通过的 func58 三 seed 和 B02-F 的完整软件门禁为准。任何
    post-route physopt 仅用于路径探索，不是 matching direct full，不能作为正式时序、资源、组合收益或板测归因证据。
 
-## 11. 详细说明的维护边界
+## 12. 详细说明的维护边界
 
 上表保存每个候选的完整机制、风险、决策指标、当前状态和效果。涉及流水级行为、示例和理论推导的长篇说明继续保留在 [architecture.md](architecture.md) 对应的十二阶段章节，以免把教学主线拆碎；这些章节不再维护第二份状态列。候选状态发生变化时只更新本文，并把不可变的 cycles、RTL hash、工具版本、WNS/资源和报告路径写入对应实验 manifest。
 
-## 12. 证据入口
+## 13. 证据入口
 
 - 当前 RTL：`build/rtl/generation-manifest.json`。
 - R6 L11 perf20：`build/sim/runs/cpu_1548f170c573_chiplab_c398d274812f/clean-perf20_model_858465589681_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`；逐项比较为 `build/reports/comparisons/R6-L11.json`。
