@@ -35,6 +35,12 @@ final class L1InstructionCache(
   private def lineAddress(address: UInt): UInt =
     address & U(((BigInt(1) << config.xlen) - 1) ^ (geometry.lineBytes - 1), config.xlen bits)
 
+  // Same-line refill ownership sits on the frontend TLB-bypass to L1I lookup
+  // enable cone.  Use an XOR/NOR LUT tree instead of Vivado's CARRY4 compare
+  // chain; behavior is unchanged.
+  private def lutTreeEqual(a: UInt, b: UInt): Bool =
+    !((a ^ b).asBits.orR)
+
   private def indexOf(address: UInt): UInt =
     address(offsetWidth + indexWidth - 1 downto offsetWidth)
 
@@ -188,7 +194,10 @@ final class L1InstructionCache(
   io.hitResponsePending := lookupHitTurnoverReady
   val refillSameLineReady = state === L1InstructionCacheState.refillData &&
     refillResponseSent && !refillReplayPending && !requestKilled && !io.request.uncached &&
-    lineAddress(io.request.physicalAddress) === lineAddress(request.physicalAddress)
+    lutTreeEqual(
+      lineAddress(io.request.physicalAddress),
+      lineAddress(request.physicalAddress)
+    )
   io.requestCapacityReady :=
     (idleRequestReady || lookupHitTurnoverCapacityReady || refillSameLineReady) &&
       !invalidateRequest && !io.maintenanceRequest.valid

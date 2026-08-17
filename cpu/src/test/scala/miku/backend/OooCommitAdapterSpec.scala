@@ -59,6 +59,10 @@ private final class OooCommitAdapterProbe(config: OooCoreConfig) extends Compone
     commit.exception.badVAddr := 0
     commit.exception.tlbRefill := False
     commit.systemOperation := io.systemOperation(lane)
+    commit.systemOperationIsMemoryBarrier :=
+      io.systemOperation(lane) === SystemOperation.dataBarrier ||
+        io.systemOperation(lane) === SystemOperation.instructionBarrier ||
+        io.systemOperation(lane) === SystemOperation.cacheOperation
     commit.csrAddress := 0
     commit.csrWrite := False
     commit.csrMask := False

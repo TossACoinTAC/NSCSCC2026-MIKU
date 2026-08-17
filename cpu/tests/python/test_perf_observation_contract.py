@@ -24,7 +24,7 @@ OBSERVATION_SOURCES = (
 
 def valid_document() -> dict:
     return {
-        "schema_version": "miku-perf-observation-v5",
+        "schema_version": "miku-perf-observation-v7",
         "observation_abi": {"magic": "MIKU", "version": 1, "word_count": 8},
         "roi": {
             "mode": "outermost-counter-read-pair",
@@ -102,7 +102,9 @@ def valid_document() -> dict:
         "lsq": {
             "load_occupancy_sum": 0,
             "store_occupancy_sum": 0,
-            "events": [0] * 46,
+            "load_full_cycles": 0,
+            "store_full_cycles": 0,
+            "events": [0] * 53,
         },
         "cache": {"events": [0] * 20, "occupancy_sum": [0] * 3},
         "axi": {
@@ -183,6 +185,35 @@ class PerfObservationContractTest(unittest.TestCase):
         document["lsq"]["events"] = document["lsq"]["events"][:28]
         result = self.run_checker(document)
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_accepts_existing_v5_evidence(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v5"
+        document["lsq"]["events"] = document["lsq"]["events"][:46]
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_accepts_existing_v6_evidence(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v6"
+        document["lsq"]["events"] = document["lsq"]["events"][:46]
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_accepts_dut_reported_queue_full_counts(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["lsq"]["load_occupancy_sum"] = 8
+        document["lsq"]["load_full_cycles"] = 1
+        document["lsq"]["events"][46] = 1
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_harness_queue_full_mismatch(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["lsq"]["load_full_cycles"] = 1
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("full count does not match DUT observation", result.stdout)
 
     def test_accepts_full_run_without_counter_markers(self) -> None:
         document = copy.deepcopy(valid_document())
@@ -302,6 +333,8 @@ class PerfObservationContractTest(unittest.TestCase):
         )
         for name in forbidden:
             self.assertNotIn(name, source)
+        self.assertNotIn("load_occupancy >= 16", source)
+        self.assertIn("field(lsq, 55, 1)", source)
 
     def test_monitor_detects_counter_reads_from_public_commit_instruction(self) -> None:
         source = MONITOR.read_text(encoding="utf-8")

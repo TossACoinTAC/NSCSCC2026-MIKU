@@ -33,6 +33,13 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   private val fetchGroupOffsetWidth = log2Up(fetchGroupBytes)
   require(fetchGroupBytes == 16)
 
+  // Vivado's default UInt equality builds a CARRY4 subtract/compare chain.  For
+  // the response-owner matches the equality result fans out into same-cycle
+  // bypass, kill, and L1I request cones, so implement it as an XOR/NOR LUT
+  // tree instead.  Cycle behavior is unchanged; only the FPGA mapping differs.
+  private def lutTreeEqual(a: UInt, b: UInt): Bool =
+    !((a ^ b).asBits.orR)
+
   val io = new Bundle {
     val translationRequest = master(Stream(TranslationRequest(config)))
     val translationResponse = slave(Stream(TranslationResponse(config)))
@@ -112,7 +119,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val cacheOwnerUncached = RegInit(False)
   val cacheDropPending = RegInit(False)
   val cacheResponseContextPending = RegInit(False)
-  val predictionCorrectionFlushPending = RegInit(False)
+  val predictionCorrectionFlushPendingLegacy = RegInit(False)
   val predictionCorrectionNextPc =
     Reg(UInt(config.xlen bits)) init (U(config.resetVector, config.xlen bits))
   val predictionCorrectionTranslationDrainPending = RegInit(False)
@@ -207,7 +214,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   // protects the virtual-PC tag from being paired with a physical address from a stale request
   // after a redirect or a translator response race.
   val translationResponseMatches =
-    io.translationResponse.virtualAddress === translationPc
+    lutTreeEqual(io.translationResponse.virtualAddress, translationPc)
   val translationResponseBypassValid = if (config.enableFrontendTranslationResponseBypass) {
     translationResponseFire && translationOutstanding && translationResponseMatches &&
       !io.translationResponse.cancelled && !io.translationResponse.exception.valid &&
@@ -397,21 +404,43 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     io.translationResponse.exception.valid
   val predictionCorrectionOnResponse = Bool()
   val correctionKillsCachedRequest = Bool()
-  val cachedCorrectionKillPending = RegNext(correctionKillsCachedRequest) init (False)
+  // Crossing the response boundary into a dedicated decision register removes
+  // the wide predictor target-equality / next-PC mux from the correction
+  // flush, kill, and drain timing cones.  The decision and its terminal
+  // qualifiers are sampled on the same edge as before, so the corrected-lookup
+  // latency is unchanged.
+  val predictionCorrectionValidReg = RegNext(predictionCorrectionOnResponse) init (False)
+  // Keep the flush pulse cycle-equivalent to the original register: this alias and
+  // predictionCorrectionValidReg are both true on the cycle following the correcting
+  // response, exactly when the legacy register used to pulse.
+  val predictionCorrectionFlushPending =
+    if (config.enableDeferredFrontendCorrectionCleanup) {
+      predictionCorrectionValidReg
+    } else {
+      predictionCorrectionFlushPendingLegacy
+    }
+  val correctionYoungerOwnerPresentReg = Reg(Bool()) init (False)
+  val correctionYoungerOwnerUncachedReg = Reg(Bool()) init (False)
+  val correctionTranslationDrainReg = Reg(Bool()) init (False)
+  val correctionCreatesUncachedDrain = Bool()
+  val cachedCorrectionKillPending = if (config.enableDeferredFrontendCorrectionCleanup) {
+    correctionKillsCachedRequest
+  } else {
+    RegNext(correctionKillsCachedRequest) init (False)
+  }
   val cacheRequestCapacityAvailable = Bool()
   // Cached requests can be killed at the L1 boundary, but an already accepted uncached AXI burst
   // still completes.  Do not let that stale response satisfy a newer request after redirect.
   val pendingCacheResponseMatches =
-    io.cacheResponse.virtualAddress === pendingResponsePc
-  val activeCacheResponseMatches = io.cacheResponse.virtualAddress === cachePc
+    lutTreeEqual(io.cacheResponse.virtualAddress, pendingResponsePc)
+  val activeCacheResponseMatches =
+    lutTreeEqual(io.cacheResponse.virtualAddress, cachePc)
   // Responses are ordered at the single-request L1I boundary.  Select the wide prediction owner
   // from registered state; address matching qualifies acceptance without feeding the comparator
   // result back through every prediction lane.
   val responseSelectsPendingContext = cacheResponseContextPending
   val activeCacheDropPending = if (config.enableDeferredFrontendCorrectionCleanup) {
-    cacheDropPending ||
-      (predictionCorrectionFlushPending && predictionCorrectionUncachedDrainPending) ||
-      cachedCorrectionKillPending
+    cacheDropPending || correctionCreatesUncachedDrain || cachedCorrectionKillPending
   } else {
     cacheDropPending
   }
@@ -491,15 +520,24 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     requestUncached,
     cacheOwnerUncached
   )
+  correctionYoungerOwnerPresentReg := correctionYoungerOwnerPresent
+  correctionYoungerOwnerUncachedReg := correctionYoungerOwnerUncached
+  correctionTranslationDrainReg :=
+    translationRequestFire ||
+      ((translationOutstanding || translationDropPending) && !translationResponseFire)
   if (config.enableDeferredFrontendCorrectionCleanup) {
-    correctionKillsCachedRequest := predictionCorrectionOnResponse &&
-      correctionYoungerOwnerPresent && !correctionYoungerOwnerUncached
+    correctionKillsCachedRequest := predictionCorrectionValidReg &&
+      correctionYoungerOwnerPresentReg && !correctionYoungerOwnerUncachedReg
   } else {
     correctionKillsCachedRequest := predictionCorrectionOnResponse &&
       (cachedRequestFire || (responseUsesPendingContext && cacheOutstanding))
   }
-  val correctionCreatesUncachedDrain = predictionCorrectionOnResponse &&
-    correctionYoungerOwnerPresent && correctionYoungerOwnerUncached
+  correctionCreatesUncachedDrain := (if (config.enableDeferredFrontendCorrectionCleanup) {
+    predictionCorrectionValidReg && correctionYoungerOwnerPresentReg &&
+      correctionYoungerOwnerUncachedReg
+  } else {
+    predictionCorrectionOnResponse && correctionYoungerOwnerPresent && correctionYoungerOwnerUncached
+  })
   // The cache-array lookup is synchronous, so canceling the just-accepted wrong-path request on
   // the following cycle still prevents both a hit response and a miss allocation.  Registering
   // this pulse also keeps response predecode out of the L1I response-register enable cone.
@@ -652,12 +690,12 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       predecode.target
     )
     responsePredictorMetadata(lane) := 0
-    responsePredictorMetadata(lane)(9 downto 0) :=
-      responseContextPrediction(lane).phtIndex.asBits
-    responsePredictorMetadata(lane)(11 downto 10) :=
-      responseContextPrediction(lane).phtState.asBits
-    responsePredictorMetadata(lane)(12) := responseContextPrediction(lane).phtValid
-    responsePredictorMetadata(lane)(15 downto 13) := predecode.branchType.asBits
+    responsePredictorMetadata(lane)(
+      BankedFetchPrediction.PhtRowWidth - 1 downto 0
+    ) := responseContextPrediction(lane).phtIndex.asBits
+    responsePredictorMetadata(lane)(
+      BankedFetchPrediction.PhtRowWidth + 1 downto BankedFetchPrediction.PhtRowWidth
+    ) := responseContextPrediction(lane).phtState.asBits
     responsePrefix(lane + 1) :=
       responsePrefix(lane) + responseSlotCandidateValid(lane).asUInt
   }
@@ -702,11 +740,14 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val earlyLanePredictionTarget = responsePredictionTarget(responseContextPredictedLane)
   val responsePredictionMatchesRequest = Mux(
     responseContextPredictedTaken,
-    earlyLanePredictionTaken && responseContextPredictedTarget === earlyLanePredictionTarget,
+    earlyLanePredictionTaken &&
+      lutTreeEqual(responseContextPredictedTarget, earlyLanePredictionTarget),
     !responsePredictedTaken
   )
   predictionCorrectionOnResponse := responseFire && !responsePredictionMatchesRequest
-  predictionCorrectionFlushPending := predictionCorrectionOnResponse
+  if (!config.enableDeferredFrontendCorrectionCleanup) {
+    predictionCorrectionFlushPendingLegacy := predictionCorrectionOnResponse
+  }
 
   val responseLearnMask = Bits(config.fetchWidth bits)
   for (lane <- 0 until config.fetchWidth) {
@@ -750,9 +791,17 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   targetPredictor.io.phtUpdateValid := preciseUpdate &&
     io.predictorUpdateType === PredictedBranchType.conditional
   targetPredictor.io.phtUpdatePc := io.predictorUpdatePc
-  targetPredictor.io.phtUpdateIndex := io.predictorUpdateMetadata(9 downto 0).asUInt
-  targetPredictor.io.phtUpdateOldState := io.predictorUpdateMetadata(11 downto 10).asUInt
-  targetPredictor.io.phtUpdateOldValid := io.predictorUpdateMetadata(12)
+  targetPredictor.io.phtUpdateIndex := io
+    .predictorUpdateMetadata(BankedFetchPrediction.PhtRowWidth - 1 downto 0)
+    .asUInt
+  targetPredictor.io.phtUpdateOldState := io
+    .predictorUpdateMetadata(
+      BankedFetchPrediction.PhtRowWidth + 1 downto BankedFetchPrediction.PhtRowWidth
+    )
+    .asUInt
+  // The widened PHT is initialized by the predictor reset sweep; committed
+  // conditional branches are always authoritative updates.
+  targetPredictor.io.phtUpdateOldValid := True
   targetPredictor.io.phtUpdateTaken := io.predictorUpdateTaken
   targetPredictor.io.commitRasPush := io.predictorUpdateValid && io.predictorUpdateIsCall
   targetPredictor.io.commitRasPop := io.predictorUpdateValid && io.predictorUpdateIsReturn
@@ -910,7 +959,6 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         when(!responseUsesPendingContext) {
           cacheOutstanding := requestFire
         }
-        predictionCorrectionUncachedDrainPending := correctionCreatesUncachedDrain
       } else {
         when(!responseUsesPendingContext) {
           cacheOutstanding := requestFire && !correctionKillsCachedRequest
@@ -923,11 +971,11 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       when(responseUsesPendingContext) {
         cacheResponseContextPending := False
       }
-      when(predictionCorrectionOnResponse) {
-        predictionCorrectionTranslationDrainPending :=
-          translationRequestFire ||
-            ((translationOutstanding || translationDropPending) && !translationResponseFire)
-        if (!config.enableDeferredFrontendCorrectionCleanup) {
+      if (!config.enableDeferredFrontendCorrectionCleanup) {
+        when(predictionCorrectionOnResponse) {
+          predictionCorrectionTranslationDrainPending :=
+            translationRequestFire ||
+              ((translationOutstanding || translationDropPending) && !translationResponseFire)
           translatedRequestValid := False
           translatedExceptionValid := False
           translationOutstanding := False
@@ -985,12 +1033,10 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         translatedExceptionValid := False
         translationOutstanding := False
         translationDropPending :=
-          predictionCorrectionTranslationDrainPending && !translationResponseFire
+          correctionTranslationDrainReg && !translationResponseFire
         cacheDropPending :=
-          predictionCorrectionUncachedDrainPending && !droppedResponseFire
+          correctionCreatesUncachedDrain && !droppedResponseFire
         predictionPendingValid := False
-        predictionCorrectionTranslationDrainPending := False
-        predictionCorrectionUncachedDrainPending := False
       }
     }
     val correctionCleanupAllowsException =

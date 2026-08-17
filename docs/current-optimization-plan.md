@@ -7,19 +7,16 @@
 
 ## 当前基线与目标
 
-- CPU 开发分支：`dev/ECHO`；当前里程碑证据提交 `fbc9634`，最近 RTL 变更提交
-  `c47f7fb`（CT03 + RT03）。
+- CPU 开发分支：`dev/ECHO`；最近稳定 100 MHz 里程碑的开发分支证据提交为
+  `fbc9634`，已 squash 发布到 `main @ 6b559ec`。R6 `L11+L13` matching 源码身份为
+  `6bbf9ed`；它已经完成新的 direct full implementation，但 setup 未闭合，因此仍是候选，
+  不替代 R5 稳定里程碑。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
-- perf20：当前 R5 RTL 为 `5,014,776` cycles，20/20 pass；R4 前三项保持
-  `5,014,520`，FT08 增加 26 cycles（`+0.000518%`），归一化几何平均性能回退
-  `0.005882%`；WT05 相对 R4 增加 230 cycles（`+0.004587%`），归一化几何
-  平均性能回退 `0.010913%`；CT02 相对 WT05 的 20 项周期逐项精确相等。两项组合满足
-  时序批次 `<0.5%` 的软件预算。W01 相对 WT02
-  减少 42,348 cycles（`-0.837435%`），几何平均加速 `1.010598877x`；BR01 相对 L07
-  `5,104,911` 为 `-0.921799%`，归一化几何平均 `1.009753745x`；相对本轮原始
-  baseline `5,543,953` 累计 `-9.549269%`。
-- func58：当前 `c47f7fb` RTL 的 random-AXI seeds `240/255/141` 均为 58/58；证据为
-  `build/sim/runs/cpu_4e6d37b21365_chiplab_c398d274812f/clean-func58_model_2d816b9020b0_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
+- perf20：R6 L13 clean RTL 为 `4,423,675` cycles，20/20 pass，相对 L11 `4,865,310`
+  下降 `9.077222%`，几何平均加速 `1.085725368x`；20 项全部改善。L13 的 clean
+  matrix 为 `build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/clean-perf20_model_4f54ae244f79_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`。
+- func58：L13 random-AXI seeds `240/255/141` 均为 58/58，摘要为
+  `build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/clean-func58_model_403c6f68d060_software_3fe689f227db/random/matrix_1892a80af7f5_summary.txt`。
 - R5 `RT02+MT08+CT03+RT03` matching 100 MHz direct full 已闭合：setup WNS
   `+0.028 ns`、hold WNS `+0.047 ns`、setup TNS `0`，fully routed、DRC 0
   error/critical warning、bitstream 成功。placed utilization 为 91,059 LUT、55,813 FF、
@@ -34,10 +31,20 @@
   合计下降 `14.345294%`，逐项几何平均加速 `1.168457245x`。上传包 SHA-256 为
   `3687124f745a95398ffbf282897cec62b2b380454c0f99bbea269439b34d2ec7`，bitstream
   SHA-256 为 `4c9b4d0ccadd032e305f8acbdb03ec1a3538c7a2e5e65fce559a789d849448ba`；
-  证据位于稳定归档的 `board/20260815-114325-2bc00a63/`。
-- Linux clean random-AXI seed `5570815` 的固定 50 ms 窗口通过，执行 25,000,000 cycles、
-  18,569,989 instructions，IPC `0.7428`，UART 推进到内存、时钟源和 `devtmpfs` 初始化，
-  无 DiffTest/trace 错误。该证据只表示固定窗口回归通过，不表示已进入用户态。
+  证据位于稳定归档的 `board/20260815-114325-2bc00a63/`。该结果只属于 R5，不能继承
+  给 R6 L13 或后续 RTL。
+- R6 `L11+L13` matching 100 MHz direct full 已完成：setup WNS `-0.057 ns`、setup
+  TNS `-0.138 ns`、hold WNS `+0.048 ns`，fully routed、DRC 0 error/critical warning、
+  bitstream 成功；placed utilization 为 91,002 LUT、55,869 FF、66.5 BRAM、8 DSP。
+  该结果距 setup 门禁仍差 57 ps，故只归档为 candidate：
+  `Post_Impl_Bundles/cpu_6bbf9edcdd36_chiplab_c398d274812f_perf_100mhz_20260815-205104/`。
+  top-50 为 cache/L2 18、frontend 17、ROB/CSR 10、IQ 3、predictor 1、LSQ 1；最差
+  cache/L2、frontend、ROB/CSR 分别为 `-0.057/-0.003/-0.017 ns`，LSQ 最差仍为
+  `+0.094 ns`。这说明当前 setup 缺口主要是 cache/L2 的高布线占比路径，不能归为
+  L11/L13 引入的 LSQ 面积膨胀。
+- Linux clean random-AXI seed `5570815` 的固定 50 ms 窗口在 L13 通过，exit code 为 0；摘要为
+  `build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/clean_model_7735f43e91c7_software_d3ce90aca67c/random/matrix_517ad2574f10_summary.txt`。
+  该证据只表示固定窗口回归通过，不表示已进入用户态。
 - 历史 R3 matching 100 MHz direct full implementation：setup `-0.440 ns`、hold `+0.009 ns`、
   setup TNS `-13.390 ns`、128 个失败 endpoint；DRC 0 error/critical warning、fully routed、
   bitstream 成功，但仍不是里程碑。placed utilization 为 88,048 LUT、54,595 FF、
@@ -92,6 +99,122 @@
   Load 原始完成命中 head `354,260` 次（`6.9396%`）以及 oldest Load 阻塞但存在另一个
   地址已就绪 pending Load `364,380` 次（`7.1379%`）。三者都是一拍或调度机会的上界；
   只有 branch 项已具备不跨越 LSU 数据寄存边界的低侵入实现路径。
+- R5 matching instrumented perf20 为 `5,014,776` cycles，20 项与 clean matrix 逐项
+  精确相等；ROI 为 `5,014,756` cycles、退休 `3,608,034`、IPC `0.719483`。ROB
+  非空零退休占 `53.45%`，其中 head Load/Store 未完成分别占 `26.55%/15.40%`；ROB
+  空和满分别占 `6.90%/3.75%`。普通 Load 原始完成命中 ROB head `382,202` 次
+  （`7.6215%` ROI），构成 R6 `L10` 的一拍上界。oldest Load 被阻塞且存在另一个
+  地址已就绪 Load 的 `340,689` 次只表示调度暴露，未知老 Load 仍可能解析为 SUC，
+  因而不能直接视为 L02 的安全可回收周期。branch recovery 只占 `0.97%`，本轮不优先
+  扩大分支恢复机制。汇总证据为 `build/reports/observations/R6-baseline.json`。
+
+## R6：Load/SQ 归因与性能实验
+
+首项 `L10` 使用 LSQ 原始 ordinary cached Load completion 产生窄身份 token；ROB 只在
+当前 epoch、准确命中下一拍 head 时保存 token。Load 数据仍由现有 LSQ completion 寄存器
+提供，下一拍 token 与该固定延迟数据配对，使 head Load 可与既有 completion 写回同拍退休，
+避免把 cache response/forwarding 的组合数据路径直接拉入 ROB 提交控制。异常、LL、SUC、
+translation completion、flush、旧 epoch 和非 head completion 全部保留原路径。
+
+`L10 @ 518714a` 的动态上界为 `382,202/5,014,756 = 7.6215%`，但完整实验说明该上界
+大部分不能转化为总周期收益。原始实现首先暴露出一项真实恢复边界：Load 已提前退休，随后
+年轻分支 recovery 与延迟一拍的 PRF 写回重合时，普通 flush 抑制会丢失已成为架构状态的
+写回；`43d8f41` 将恢复例外严格限定为同一拍实际退休的准确 Load 身份。修复后
+ReorderBuffer 18/18、完整 `cpu-check` 39 suites/231 tests、RTL/Yosys/合同门禁和 perf20
+20/20 均通过。
+
+相对 R5，perf20 总周期为 `5,014,776 -> 5,015,136`（`+0.007179%`），归一化几何平均
+加速仅 `1.000411877x`，远低于 `0.5%` 保留门槛；单项在 `coremark -1.27359%` 至
+`fireye_I2 +1.16388%` 间重排，说明早退主要改变调度相位，未稳定回收整体瓶颈。
+`4cdfd21`、`baca0c6` 已依次撤回修复与实现，当前默认 RTL 回到 R5。比较证据为
+`build/reports/comparisons/R6-L10.json`。
+
+`L11 @ fe4028c` 处理 matching observer 中占 ROI `9.1629%` 的 SQ-full 暴露：ordinary
+cached Store 在退休且完整捕获到既有 request buffer 的边沿释放原 SQ 槽；buffer 随后作为
+已提交架构状态，在 cache backpressure 和 recovery flush 下保持请求并参与 Store drain、
+`olderStorePending` 与 barrier 排空。为避免把新的地址比较锥接回已闭合的 LSQ 时序路径，
+buffer 占用期间暂时不发出年轻 Load；该限制不会阻止已被 buffer 占用的单一 cache request
+端口，只会推迟原本可能由 SQ entry 直接完成的同址 forwarding。
+
+定向测试覆盖提前 release、稳定 backpressure、年轻 Load 顺序、flush 后继续 drain 与槽位
+复用；完整 `cpu-check` 为 39 suites/231 tests、58 项 Python 合同，发布 RTL hash 为
+`057eb73a39c98e97b59b1fd7b0cfc28a0495ca622f7bc7fd4fa57b9e193d70bb`。clean perf20
+20/20，总周期 `5,014,776 -> 4,865,310`（`-2.980512%`），归一化几何平均加速
+`1.034213285x`；`stringsearch -16.38779%`、`fireye_D1 -13.61335%`、
+`my_memcmp -10.27449%`，主要回退为 `bubble_sort +0.78006%`。func58 random-AXI
+seeds `240/255/141` 均通过。逐项比较见 `build/reports/comparisons/R6-L11.json`；该候选
+达到性能保留门槛。相同源码身份的 Linux random-AXI seed `5570815` 已完成固定 50 ms
+窗口且 exit code 为 0。后续以 matching instrumented observer 判断剩余 SQ 压力和是否值得
+扩展为多项退休 Store buffer，暂不直接把 STQ 从 8 扩到 16。
+
+`L12 @ 35da264` 尝试在 cached Store request 被接受的同一边沿捕获下一项 Store。定向测试
+通过，但相对 L11 的完整 perf20 为 `4,865,310 -> 4,865,462`（`+0.003124%`），几何
+平均仅 `1.000059817x`，并且没有触及主要的 Load buffer 空泡；`3f80400` 已独立回退，
+只保留比较证据，不进入后续组合。
+
+`L13 @ 0c771bd` 将 Load 的所有权转移点从 cache handshake 前移到 request-buffer capture。
+当 buffer 反压时，外部请求 payload 仍保持稳定且只存在一份；flush 会同时清除未被层次接受
+的 buffer 请求和对应 speculative LQ entry。由于 `requestSent` 在 capture 边沿登记，调度器
+可以在下一拍选择下一项 Load，不再反复选择 buffer 内的旧 Load。完整门禁为 39 suites/232
+tests、59 项 Python 合同，LSQ 定向 34/34；clean perf20 为 `4,865,310 -> 4,423,675`
+（`-9.077222%`，几何平均 `1.085725368x`），20 项全部改善，func58 三 seed 通过。
+matching instrumented 观测显示 `load_candidate_buffer_busy` 从 `887,069` 降至 `3,561`，
+ROI IPC 从 `0.741587` 升至 `0.815623`。观测汇总为
+`build/reports/observations/R6-L13.json`，instrumented matrix 为
+`build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/instrumented-perf20_model_73548b35df4a_software_f6e7c20f71a4/ideal/matrix_7fead17be770_perf20.csv`。
+Linux 固定窗口已通过；这是当前 R6 的软件性能基线。matching direct full 已在
+`6bbf9ed` 完成，结果为 setup/hold `-0.057/+0.048 ns`、setup TNS `-0.138 ns`，
+fully routed、DRC 0 error/critical warning 且 bitstream 成功。由于 setup 仍为负，R6
+保留为高性能候选，不晋级 100 MHz 里程碑，也不覆盖 R5 的 Stable_Backup。
+
+随后两类局部实验均未进入 R6 组合。`L14 @ 28bbe94` 允许 request buffer 中已提交 Store
+向年轻 Load 转发，以降低 L11 保守顺序边界的代价；完整 perf20 仅从 `4,423,675` 降到
+`4,422,920`（`-0.017067%`，几何平均加速 `1.000096047x`），`2b6a697` 已回退。
+predictor 容量实验中，`B02-B @ 2b428d6` 扩大 PHT 后总周期反而增加 `0.028800%`，
+`8071454` 已回退；`B02-C @ efb6572` 将每 bank BTB 扩容后为 `4,423,675 ->
+4,409,791`（`-0.313857%`，几何平均加速 `1.002553477x`），但低于 `0.5%` 保留
+门槛且增加 predictor memory bits，`6eda207` 已回退。三项均无 matching Vivado 证据，
+后续实现仍以 L13 的 `4,423,675` cycles 为 R6 baseline。
+
+R6 observer 同时暴露出一项 harness 归因错误：当前硬件 `loadQueueEntries=8`，旧 monitor
+却用 `load_occupancy >= 16` 推导 LDQ full，导致该字段恒为零；其他
+`oldest blocked + alternate address ready` 计数也只是宽松上界，不能证明年轻 Load 已满足
+alias、MAT、LL/SUC 和顺序条件。`M02 @ 6cce873` 将容量 full 和逐级资格直接放入版本化
+observation word，monitor 不再猜测微架构容量。matching instrumented perf20 保持
+`4,423,675` cycles、ROI IPC `0.815623`，确认 observer 修改周期透明；LDQ/SQ 满周期分别为
+`805,264`（`18.2036%`）和 `141,232`（`3.1927%`），最老 Load 仅受本地 alias 条件阻塞且
+存在地址已就绪替代项为 `120,185` cycles（ROI 的 `2.7178%`）。因此下一批同时进入
+`L02` 受限 younger-ready Load bypass 和 `L03` LDQ-only 8-to-16 独立 A/B；L03 首次不扩大
+STQ/SDQ，避免在低得多的 Store full 暴露量下无依据地放大 forwarding/order cone。
+
+`L03+L15` 已用 post-route 物理优化版位流完成一次 matching perf20 板测：
+job `20260816-051403-a9377049`，source `9b761d5`，20/20 pass，CPU 总周期
+`38,229,428`，相对 R6 板测 `41,191,272` 下降 `-7.19%`。该板测包 WNS `-0.065 ns`
+（post-route phys_opt），所以板测通过与 100 MHz 时序闭合仍是两个独立结论。
+
+
+`L03` 的 LDQ-only 8-to-16 已在 `dev/L03-ldq16` 完成首轮实现与本地 A/B：R6
+baseline `4,423,675 -> 4,320,785`（总周期 `-2.326%`，几何平均 `0.986232`），
+完整 Scala 39 suites/233 tests 通过。`fireye_A0 -17.30%` 是最主要收益项；
+`fireye_B2 +0.35%` 是最大回退。该结果只是短路径 perf20，下一步必须补 matching
+func58 三 seed、Linux 固定窗口和 direct full 时序，通过后再决定是否进入组合板测。
+
+`L02` 的受限 younger-ready retry 形式也已在同一分支完成：当 scheduled Load 被本地
+alias/forwarding 条件阻塞且存在地址已就绪的更年轻 Load 时，选择下一个候选并在下一拍
+经过原有完整 Store/Load 顺序逻辑重新资格化。相对 L03+L15，完整短路径 perf20 为
+`4,316,663 -> 4,259,994`（`-1.313%`），几何平均 `0.991835`；主要收益
+`inner_product -7.59%`、`minmax_sequence -1.79%`、`loop_induction -1.54%`。
+完整 Scala 39 suites/233 tests 和本地 func58 seeds `240/255/141` 通过。
+L02 组合的 matching direct full 已完成：WNS `-0.230 ns`、TNS `-5.071 ns`，板测 job
+`20260816-055202-61bdbe02` 20/20 pass，CPU 总周期 `37,714,405`，相对 L03+L15 板测
+再降 `1.35%`，相对 R6 板测降 `8.44%`。
+该候选改变了 LSQ scheduler select 路径，matching direct full 的 LSQ/WNS 必须重点观察。
+
+`L15` 作为同一分支上的第二个独立候选已实现：L1D 在 victim writeback/writebackWait
+期间不再全局拒绝其他 set 的新 lookup，只保留 `setConflictMask` 的同 set 串行保护。
+本地短路径 A/B 相对 L03 为 `4,320,785 -> 4,316,663`（`-0.095%`），主要改善
+`inner_product/loop_induction/fireye_D1`，无明显回退；完整 Scala 39 suites/233 tests 通过；本地 func58 random-AXI seeds `240/255/141` 均达到 `3A00003A`。该候选理想仿真收益小，目标是板级写响应延迟下的行为，必须与 L03 一起做
+matching direct full，若时序或资源恶化则优先保留 L03 单项。
 
 ## R1：时序候选与周期验证
 
@@ -369,10 +492,12 @@ R5 已完成四个相互独立候选的组合 direct implementation：
   completion 侧只做已注册 index 的局部 data select。只有新的 LSQ 路径重新进入 top-50 时才实施，
   避免为已变成正 slack 的路径增加寄存器。
 
-下一步先运行当前 RTL 的版本化 `PerfObservationV1`，按真实周期权重选择首轮 IPC 候选。
-新 top-50 的最差路径是 BTB prediction 到 instruction TLB request 的 `+0.028 ns`；ROB/CSR
-最差为 `+0.051 ns`，IQ 最差 `+0.099 ns`，cache/L2 最差 `+0.097 ns`。下一轮实现候选时
-必须同时控制这些路径锥，不能把当前很小的正裕量视为可随意消耗的空间。
+R6 已以 L13 为软件 baseline 完成完整门禁、perf20、func58、Linux 固定窗口和 matching
+observer；L14、PHT 扩容与 BTB 扩容均已完成 A/B 并退出组合。下一步冻结 L11+L13 身份并
+启动一次 direct full implementation。旧稳定归档中 BTB prediction
+到 instruction TLB request 的 `+0.028 ns`、ROB/CSR `+0.051 ns`、IQ `+0.099 ns`、
+cache/L2 `+0.097 ns` 只属于旧 RTL 组合；L13 改变 LSQ 请求控制后必须重新读取 top-50，
+不能把这些 WNS 当作当前预算。
 
 ## 系统、归档与发布
 
@@ -382,4 +507,4 @@ MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其
 失败尝试和完整证据链；满足 matching 100 MHz direct full 的 setup/hold WNS 均严格大于零、
 DRC/route/bitstream 完整且 Linux 门禁通过后，`main` 可将该阶段 squash 成一个里程碑提交，
 不要求保留候选级提交拓扑。R5 稳定 bitstream 已完成 matching perf20 板测；后续每个新的
-时序闭合里程碑仍须使用自己的 matching bitstream 重新板测，不能跨 RTL 继承该结果。
+时序闭合里程碑仍须使用自己的 matching bitstream 重新板测，R6 当前不能继承该结果。

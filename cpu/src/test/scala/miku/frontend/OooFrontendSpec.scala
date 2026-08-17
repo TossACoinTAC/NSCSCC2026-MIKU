@@ -313,17 +313,17 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(132)
+        dut.clockDomain.waitSampling(4200)
         sleep(1)
 
         val branchPc = config.resetVector + 0x200
         val branchTarget = branchPc + 0x40
-        val phtIndex = ((branchPc >> 4) & 0x1f).toInt
+        val phtIndex = ((branchPc >> 4) & 0xfff).toInt
         dut.io.predictorUpdatePc #= branchPc
         dut.io.predictorUpdateTaken #= true
         dut.io.predictorUpdateTarget #= branchTarget
         dut.io.predictorUpdateType #= 0
-        dut.io.predictorUpdateMetadata #= (phtIndex | (2 << 10))
+        dut.io.predictorUpdateMetadata #= (phtIndex | (2 << 12))
         dut.io.predictorUpdateValid #= true
         sample(dut)
         dut.io.predictorUpdateValid #= false
@@ -383,9 +383,9 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.io.cacheRequestReady #= false
 
         returnGroup(dut, branchTarget, firstRd = 9)
-        val targetPhtIndex = (1 << 5) | ((branchTarget >> 4) & 0x1f).toInt
+        val targetPhtIndex = 1 ^ ((branchTarget >> 4) & 0xfff).toInt
         assert(dut.io.decoded(1).pc.toBigInt == branchTarget)
-        assert((dut.io.decoded(1).predictorMetadata.toBigInt & 0x3ff) == targetPhtIndex)
+        assert((dut.io.decoded(1).predictorMetadata.toBigInt & 0xfff) == targetPhtIndex)
       }
   }
 
@@ -401,7 +401,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(132)
+        dut.clockDomain.waitSampling(4200)
         sleep(1)
 
         val callPc = config.resetVector + 0x300 + callLane * 4
@@ -488,7 +488,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(132)
+        dut.clockDomain.waitSampling(4200)
         sleep(1)
 
         val callPc = config.resetVector + 0x30c
@@ -1572,7 +1572,7 @@ class OooFrontendSpec extends AnyFunSuite {
         dut.clockDomain.deassertReset()
 
         // Wait for BTB invalidation, then train a direct prediction for the older group.
-        dut.clockDomain.waitSampling(134)
+        dut.clockDomain.waitSampling(4200)
         sleep(1)
         val firstPc = config.resetVector + 0x200
         val predictedTarget = firstPc + 0x40
@@ -1850,22 +1850,24 @@ class OooFrontendSpec extends AnyFunSuite {
         val learnedTarget = learnedPc + 0x10
         // The BRAM-backed predictor clears the 128 BTB rows after reset; PHT payload does not need
         // reset because an explicit trained bit guards every read.
-        dut.clockDomain.waitSampling(134)
+        dut.clockDomain.waitSampling(4200)
         sleep(1)
         dut.io.predictorUpdatePc #= learnedPc
         dut.io.predictorUpdateTaken #= true
         dut.io.predictorUpdateTarget #= learnedTarget
         dut.io.predictorUpdateType #= 0
         dut.io.predictorUpdateValid #= true
-        var learnedHistory = 0
+        // After six retired taken branches the architectural GHR is 0x3f.
+        // Train the exact folded gshare row that the redirected lookup will use.
+        val learnedHistory = 0x3f
+        val historyFold = (learnedHistory & 0xfff) ^ (learnedHistory >> 12)
+        val phtIndex = historyFold ^ ((learnedPc >> 4) & 0xfff)
         for (_ <- 0 until 6) {
-          val phtIndex = ((learnedHistory & 0x1f) << 5) | ((learnedPc >> 4) & 0x1f)
-          dut.io.predictorUpdateMetadata #= (phtIndex | (2 << 10))
+          dut.io.predictorUpdateMetadata #= (phtIndex | (2 << 12))
           dut.io.predictorRetireValid #= 1
           dut.io.predictorRetireTaken #= 1
           dut.io.predictorRetireType(0) #= 0
           sample(dut)
-          learnedHistory = ((learnedHistory << 1) | 1) & 0x1f
         }
         dut.io.predictorUpdateValid #= false
         dut.io.predictorRetireValid #= 0

@@ -146,7 +146,13 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val pendingStoreAddress = Reg(UInt(offsetWidth bits))
   val pendingStoreByteMask = Reg(Bits(4 bits))
   val pendingStoreData = Reg(Bits(config.xlen bits))
-  val missVictimData = Reg(Bits(CacheContract.LineBits bits))
+  // One victim-data register per MSHR.  A dirty victim may wait several
+  // cycles for the shared line-write port while younger misses in other sets
+  // capture their own victims; a single global buffer could be overwritten
+  // before the older writeback is accepted.
+  val missVictimData = Vec.fill(config.mshrEntries)(
+    Reg(Bits(CacheContract.LineBits bits))
+  )
   for (entry <- misses) {
     entry.valid.init(False)
     entry.state.init(L1DataMshrState.readRequest)
@@ -265,7 +271,6 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     misses(lineMatchId).state =/= L1DataMshrState.respond &&
     pendingStoreReady
   val newLookupReady = !lineMatch && !setConflictMask.orR && freeMissMask.orR &&
-    !(activeWritebackMask | activeWritebackWaitMask).orR &&
     (io.request.isWrite || freeWaiterMask.orR) &&
     (!io.request.isWrite || pendingStoreReady) && cacheArray.io.lookupReady
   io.requestReady := commonRequestReady &&
@@ -397,7 +402,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
         B(0, CacheContract.LineBytes bits)
       )
       when(cacheArray.io.victimValid && cacheArray.io.victimDirty) {
-        missVictimData := cacheArray.io.victimData
+        missVictimData(lookupMshrId) := cacheArray.io.victimData
       }
       when(lookupRequest.isWrite) {
         pendingStoreValid := True
@@ -442,7 +447,7 @@ final class L1DataCache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
 
   io.lineWriteValid := False
   io.lineWrite.lineAddress := misses(writebackId).victimAddress
-  io.lineWrite.data := missVictimData
+  io.lineWrite.data := missVictimData(writebackId)
   io.lineWrite.byteMask := B(
     (BigInt(1) << CacheContract.LineBytes) - 1,
     CacheContract.LineBytes bits

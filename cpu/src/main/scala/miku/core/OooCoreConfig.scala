@@ -217,5 +217,6 @@ object OooCoreConfig {
     ExecutionPortConfig("load-store", Set(LoadStore), registeredIssueOutput = true)
   )
 
-  val FourIssueThreeCommit: OooCoreConfig = OooCoreConfig()
+  val FourIssueThreeCommit: OooCoreConfig =
+    OooCoreConfig(loadQueueEntries = 16)
 }

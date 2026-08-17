@@ -275,7 +275,7 @@ class BranchPredictorSpec extends AnyFunSuite {
         dut.clockDomain.assertReset()
         dut.clockDomain.waitSampling(2)
         dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(132)
+        dut.clockDomain.waitSampling(4200)
 
         val returnPc = BigInt("1c004000", 16)
         val fallbackTarget = BigInt("1c008000", 16)
@@ -323,8 +323,8 @@ class BranchPredictorSpec extends AnyFunSuite {
         dut.clockDomain.waitSampling()
         dut.io.lookupValid #= false
         sleep(1)
-        val pcIndex = ((returnPc >> 4) & 0x1f).toInt
-        assert(dut.io.prediction(0).phtIndex.toInt == ((5 << 5) | pcIndex))
+        val pcIndex = ((returnPc >> 4) & 0xfff).toInt
+        assert(dut.io.prediction(0).phtIndex.toInt == (5 ^ pcIndex))
       }
   }
 }

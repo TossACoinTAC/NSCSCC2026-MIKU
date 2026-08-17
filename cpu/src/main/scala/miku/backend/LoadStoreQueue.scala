@@ -51,8 +51,8 @@ final case class LoadQueueEntry(config: OooCoreConfig) extends Bundle {
   val isLl = Bool()
 }
 
-// Payload consumed after load selection.  Volatile queue state such as
-// requestSent/translationDone stays in the indexed entry, while the wide
+// Payload consumed after load selection.  Volatile queue state such as request
+// ownership/translationDone stays in the indexed entry, while the wide
 // immutable fields cross the selection boundary once and remain registered.
 final case class ScheduledLoad(config: OooCoreConfig) extends Bundle {
   val robPointer = UInt(config.robPointerWidth bits)
@@ -225,13 +225,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // load on every cycle.
   val loadBase = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val drainAfterFlush = RegInit(False)
-  val committedStorePresent = stores
-    .map(entry => entry.valid && (entry.committed || (entry.uncached && entry.requestSent)))
-    .reduce(_ || _)
-  io.storeDrainBusy := drainAfterFlush
-  io.olderStorePending := stores
-    .map(entry => entry.valid && isOlder(entry.robPointer, io.orderingRobPointer))
-    .reduce(_ || _)
 
   // Completed loads remain allocated until commit.  The allocator therefore
   // advances the base only on commit, and a rotated priority select preserves
@@ -244,8 +237,17 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val rotatedPending = ((pendingLoads ## pendingLoads) |>> loadBase)
     .resize(config.loadQueueEntries)
   val loadHeadOffset = OHToUInt(OHMasking.first(rotatedPending))
-  val selectedLoadHead = (loadBase + loadHeadOffset).resized
-  val selectedLoadValid = pendingLoads.orR
+  val oldestLoadHead = (loadBase + loadHeadOffset).resized
+  // Restricted younger-ready Load bypass (L02 retry-token form).  When the
+  // currently scheduled oldest Load is held by a local alias/forwarding
+  // condition, select the next younger pending Load whose address is already
+  // known.  Its payload crosses the same registered scheduler boundary and is
+  // fully re-qualified by the normal Store/Load ordering logic next cycle.
+  val retryValid = RegInit(False)
+  val retryLoadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
+  val retryCandidatePending = retryValid && pendingLoads(retryLoadHead)
+  val selectedLoadHead = Mux(retryCandidatePending, retryLoadHead, oldestLoadHead)
+  val selectedLoadValid = retryCandidatePending || pendingLoads.orR
   // Match the registered uop boundary used by the reference LoadQueue.  The
   // selected index and immutable payload are state: translation, forwarding,
   // and cache request ownership no longer re-read wide queue fields through a
@@ -253,11 +255,24 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val scheduledLoadValid = RegInit(False)
   val loadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val scheduledLoad = Reg(ScheduledLoad(config))
+  // Only re-capture the wide scheduled payload when the selected head changes
+  // or the previous capture is invalid.  Capturing every cycle makes the wide
+  // physical-address read depend on requestSent/pendingLoads, which collapses
+  // the scheduler, request-buffer ownership, and store-ordering logic into
+  // one long combinational loop on the storage timing path.
+  val scheduledLoadReselect =
+    selectedLoadValid && (!scheduledLoadValid || selectedLoadHead =/= loadHead)
+  val selectedLoadForAgu = loads(selectedLoadHead)
+  val scheduledLoadAguMatch =
+    selectedLoadValid && aguFire && !io.agu.isWrite && !aguMisaligned &&
+      io.agu.uop.loadQueueIndex === selectedLoadHead &&
+      selectedLoadForAgu.valid &&
+      selectedLoadForAgu.robPointer === io.agu.uop.robPointer
   when(io.flush) {
     scheduledLoadValid := False
   }.otherwise {
     scheduledLoadValid := selectedLoadValid
-    when(selectedLoadValid) {
+    when(scheduledLoadReselect) {
       loadHead := selectedLoadHead
       val selectedLoad = loads(selectedLoadHead)
       scheduledLoad.robPointer := selectedLoad.robPointer
@@ -273,33 +288,29 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       scheduledLoad.byteMask := selectedLoad.byteMask
       scheduledLoad.signExtend := selectedLoad.signExtend
       scheduledLoad.isLl := selectedLoad.isLl
-
-      // AGU and scheduler can target the same newly-ready entry on one edge.
-      // Bypass that write into the registered payload so this timing cut does
-      // not add a cycle to the normal address-to-translation path.
-      when(
-        aguFire && !io.agu.isWrite && !aguMisaligned &&
-          io.agu.uop.loadQueueIndex === selectedLoadHead &&
-          selectedLoad.valid && selectedLoad.robPointer === io.agu.uop.robPointer
-      ) {
-        scheduledLoad.robPointer := io.agu.uop.robPointer
-        scheduledLoad.recoveryEpoch := io.agu.uop.recoveryEpoch
-        scheduledLoad.memoryEpoch := selectedLoad.memoryEpoch
-        scheduledLoad.pdst := io.agu.uop.pdst
-        scheduledLoad.writesPdst := io.agu.uop.pdst =/= 0
-        scheduledLoad.virtualAddress := io.agu.virtualAddress
-        scheduledLoad.physicalAddress := Mux(
-          aguTranslationBypass,
-          io.translationBypass.physicalAddress,
-          U(0, config.xlen bits)
-        )
-        scheduledLoad.translationDone := aguTranslationBypass
-        scheduledLoad.uncached := aguTranslationBypass && io.translationBypass.uncached
-        scheduledLoad.size := io.agu.size
-        scheduledLoad.byteMask := io.agu.byteMask
-        scheduledLoad.signExtend := io.agu.uop.decoded.memorySignExtend
-        scheduledLoad.isLl := io.agu.uop.decoded.isLl
-      }
+    }
+    // AGU and scheduler can target the same newly-ready entry on one edge.
+    // Bypass that write into the registered payload so this timing cut does
+    // not add a cycle to the normal address-to-translation path.  It is an
+    // independent narrow mux with priority over the reselect copy above.
+    when(scheduledLoadAguMatch) {
+      scheduledLoad.robPointer := io.agu.uop.robPointer
+      scheduledLoad.recoveryEpoch := io.agu.uop.recoveryEpoch
+      scheduledLoad.memoryEpoch := selectedLoadForAgu.memoryEpoch
+      scheduledLoad.pdst := io.agu.uop.pdst
+      scheduledLoad.writesPdst := io.agu.uop.pdst =/= 0
+      scheduledLoad.virtualAddress := io.agu.virtualAddress
+      scheduledLoad.physicalAddress := Mux(
+        aguTranslationBypass,
+        io.translationBypass.physicalAddress,
+        U(0, config.xlen bits)
+      )
+      scheduledLoad.translationDone := aguTranslationBypass
+      scheduledLoad.uncached := aguTranslationBypass && io.translationBypass.uncached
+      scheduledLoad.size := io.agu.size
+      scheduledLoad.byteMask := io.agu.byteMask
+      scheduledLoad.signExtend := io.agu.uop.decoded.memorySignExtend
+      scheduledLoad.isLl := io.agu.uop.decoded.isLl
     }
   }
 
@@ -341,6 +352,23 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
   val headStore = stores(storeHead)
   val headLoadState = loads(loadHead)
+  // A retired cached Store owns this buffer after leaving the speculative SQ.
+  // Its payload remains stable under backpressure and survives recovery, which
+  // lets the allocator reuse the SQ slot without widening the ordering CAM.
+  val requestBufferValid = RegInit(False)
+  val requestBuffer = Reg(CacheRequest(config))
+  val requestBufferLoadIndex = Reg(UInt(config.loadQueueIndexWidth bits))
+  val requestBufferStoreIndex = Reg(UInt(config.storeQueueIndexWidth bits))
+  val bufferedCommittedStore = requestBufferValid && requestBuffer.isWrite &&
+    !requestBuffer.uncached
+  val committedStorePresent = stores
+    .map(entry => entry.valid && (entry.committed || (entry.uncached && entry.requestSent)))
+    .reduce(_ || _) || bufferedCommittedStore
+  io.storeDrainBusy := drainAfterFlush
+  io.olderStorePending := stores
+    .map(entry => entry.valid && isOlder(entry.robPointer, io.orderingRobPointer))
+    .reduce(_ || _) ||
+    (bufferedCommittedStore && isOlder(requestBuffer.robPointer, io.orderingRobPointer))
   val loadHeadReady = scheduledLoadValid && headLoadState.valid &&
     headLoadState.robPointer === scheduledLoad.robPointer && headLoadState.addressReady &&
     !headLoadState.requestSent && !headLoadState.completed &&
@@ -383,8 +411,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
   val forwardingCount = CountOne(forwardingStore)
   val forwardingId = OHToUInt(OHMasking.first(forwardingStore))
-  val loadOrderClear = !unknownOlderStore.orR && !olderUncachedStore.orR &&
-    !olderLoadOrderBlock.orR && !partialOverlapStore.orR && !pendingDataStore.orR
+  val loadOrderClear = !bufferedCommittedStore && !unknownOlderStore.orR &&
+    !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
+    !partialOverlapStore.orR && !pendingDataStore.orR
   val forwardCandidate = loadHeadReady && scheduledLoad.translationDone &&
     !scheduledLoad.uncached && !scheduledLoad.isLl && loadOrderClear &&
     forwardingCount === 1
@@ -498,20 +527,10 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     requestCandidate.loadQueueIndex := 0
   }
 
-  // Cut the oldest-load/store-ordering cone before cache and AXI backpressure.  A buffered
-  // committed store remains represented in the SQ until the hierarchy accepts it, so CACOP
-  // ordering and recovery still observe that store as pending.
-  val requestBufferValid = RegInit(False)
-  val requestBuffer = Reg(CacheRequest(config))
-  val requestBufferLoadIndex = Reg(UInt(config.loadQueueIndexWidth bits))
-  val requestBufferStoreIndex = Reg(UInt(config.storeQueueIndexWidth bits))
-  // Cache readiness includes tag/MSHR arbitration. Keep that long cone out of the
-  // dynamically indexed store-entry clear network: acceptance advances the ordered
-  // head immediately, while this sidecar retires the accepted slot one cycle later.
-  val acceptedStoreValid = RegInit(False)
-  val acceptedStoreIndex = Reg(UInt(config.storeQueueIndexWidth bits))
+  // Cut the oldest-load/store-ordering cone before cache and AXI backpressure.
   val requestCapture = !io.flush && !requestBufferValid &&
     (storeRequest || cacheLoadCandidate)
+  val earlyCachedStoreRelease = requestCapture && storeRequest && !headStore.uncached
   io.dataRequestValid := requestBufferValid && !io.flush
   io.dataRequest := requestBuffer
   val dataRequestFire = io.dataRequestValid && io.dataRequestReady
@@ -859,16 +878,27 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       requestBuffer := requestCandidate
       requestBufferLoadIndex := loadHead
       requestBufferStoreIndex := storeHead
+      // The registered buffer now owns this Load even if the cache is
+      // backpressured.  Retiring it from the scheduler here avoids selecting
+      // the same Load again while preserving one stable external request.
+      when(!storeRequest) {
+        val entry = loads(loadHead)
+        when(entry.valid && entry.robPointer === scheduledLoad.robPointer) {
+          entry.requestSent := True
+        }
+      }
+    }
+    when(earlyCachedStoreRelease) {
+      headStore.valid := False
+      headStore.addressReady := False
+      headStore.dataReady := False
+      headStore.completed := False
+      headStore.committed := False
+      headStore.requestSent := False
+      headStore.translationDone := False
     }
     when(dataRequestFire) {
       requestBufferValid := False
-    }
-    when(acceptedStoreValid) {
-      acceptedStoreValid := False
-    }
-    when(storeRequestFire && !requestBuffer.uncached) {
-      acceptedStoreValid := True
-      acceptedStoreIndex := requestBufferStoreIndex
     }
     completionValid := generatedCompletionValid && !fastStoreCompletionValid
     // responseLoadAccepted and forwardFire already include live LQ identity
@@ -970,11 +1000,11 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       }
     }
   }
-  val failedScReleaseFire = failedScRelease && !acceptedStoreValid
+  val failedScReleaseFire = failedScRelease
   val uncachedStoreRelease = headStore.valid && headStore.uncached &&
     headStore.requestSent && headStore.completed && headStore.committed
   storeReleaseValid(0) := !io.flush &&
-    (acceptedStoreValid || failedScReleaseFire || uncachedStoreRelease)
+    (earlyCachedStoreRelease || failedScReleaseFire || uncachedStoreRelease)
   io.releaseLoadValid := loadReleaseValid
   io.releaseStoreValid := storeReleaseValid
 
@@ -1150,12 +1180,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       }
     }
 
-    when(loadRequestFire) {
-      val entry = loads(requestBufferLoadIndex)
-      when(entry.valid && entry.robPointer === requestBuffer.robPointer) {
-        entry.requestSent := True
-      }
-    }
     when(responseLoadAccepted) {
       loads(responseLoadIndex).completed := True
     }
@@ -1164,15 +1188,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     }
     when(forwardFire) {
       loads(loadHead).completed := True
-    }
-    when(acceptedStoreValid) {
-      stores(acceptedStoreIndex).valid := False
-      stores(acceptedStoreIndex).addressReady := False
-      stores(acceptedStoreIndex).dataReady := False
-      stores(acceptedStoreIndex).completed := False
-      stores(acceptedStoreIndex).committed := False
-      stores(acceptedStoreIndex).requestSent := False
-      stores(acceptedStoreIndex).translationDone := False
     }
     when(failedScReleaseFire) {
       stores(storeHead).valid := False
@@ -1196,7 +1211,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       stores(storeHead).requestSent := False
       stores(storeHead).translationDone := False
     }
-    when((storeRequestFire && !requestBuffer.uncached) || failedScReleaseFire ||
+    when(earlyCachedStoreRelease || failedScReleaseFire ||
       uncachedStoreRelease) {
       storeHead := storeHead + 1
     }
@@ -1241,7 +1256,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   perfObservationV1Word5(33) := io.olderStorePending
   perfObservationV1Word5(34) := io.storeDrainBusy
   perfObservationV1Word5(35) := requestBufferValid
-  perfObservationV1Word5(36) := acceptedStoreValid
+  perfObservationV1Word5(36) := storeRequestFire && !requestBuffer.uncached
   perfObservationV1Word5(37) := loadHeadReady
   perfObservationV1Word5(38) := loadNeedsTranslation
   perfObservationV1Word5(39) := loadHeadReady && unknownOlderStore.orR
@@ -1272,6 +1287,27 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val oldestLoadAddressNotReady = scheduledLoadValid && headLoadState.valid &&
     headLoadState.robPointer === scheduledLoad.robPointer && !headLoadState.addressReady
   val oldestLoadOrderBlocked = loadHeadReady && !loadOrderClear
+  val multipleForwardingStoresBlock = loadHeadReady && scheduledLoad.translationDone &&
+    !scheduledLoad.uncached && !scheduledLoad.isLl && forwardingCount > 1
+  val oldestLoadLocalAliasBlocked = loadHeadReady && scheduledLoad.translationDone &&
+    !scheduledLoad.uncached && !scheduledLoad.isLl && !bufferedCommittedStore &&
+    !unknownOlderStore.orR && !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
+    (partialOverlapStore.orR || pendingDataStore.orR || forwardingCount > 1)
+  val retryRotated =
+    ((alternatePendingLoadAddressReady ## alternatePendingLoadAddressReady) |>> loadHead)
+      .resize(config.loadQueueEntries)
+  val retryAlternateHead =
+    (loadHead + OHToUInt(OHMasking.first(retryRotated))).resized
+  val retryTrigger = oldestLoadLocalAliasBlocked && retryRotated.orR &&
+    !retryCandidatePending
+  when(io.flush) {
+    retryValid := False
+  }.elsewhen(retryCandidatePending) {
+    retryValid := False
+  }.elsewhen(retryTrigger) {
+    retryValid := True
+    retryLoadHead := retryAlternateHead
+  }
   perfObservationV1Word5(49) := rawLoadCompletion
   perfObservationV1Word5(50) := rawOrdinaryLoadCompletion
   perfObservationV1Word5(51) := rawOrdinaryLoadCompletion &&
@@ -1281,5 +1317,18 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   perfObservationV1Word5(54) :=
     (oldestLoadAddressNotReady || oldestLoadOrderBlocked) &&
       alternatePendingLoadAddressReady.orR
+  // Emit configured-capacity and progressively qualified bypass observations
+  // from the DUT so the external monitor never guesses microarchitectural sizes.
+  perfObservationV1Word5(55) := CountOne(observationLoadsValid) === config.loadQueueEntries
+  perfObservationV1Word5(56) := CountOne(observationStoresValid) === config.storeQueueEntries
+  perfObservationV1Word5(57) := oldestLoadAddressNotReady &&
+    alternatePendingLoadAddressReady.orR
+  perfObservationV1Word5(58) := oldestLoadOrderBlocked &&
+    alternatePendingLoadAddressReady.orR
+  perfObservationV1Word5(59) := oldestLoadLocalAliasBlocked &&
+    alternatePendingLoadAddressReady.orR
+  perfObservationV1Word5(60) := multipleForwardingStoresBlock
+  perfObservationV1Word5(61) := multipleForwardingStoresBlock &&
+    alternatePendingLoadAddressReady.orR
   PerfObservationV1.expose(perfObservationV1Word5, 5)
 }

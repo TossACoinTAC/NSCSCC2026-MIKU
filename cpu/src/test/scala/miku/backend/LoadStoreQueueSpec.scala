@@ -48,9 +48,11 @@ private final class LoadStoreQueueProbe(config: OooCoreConfig) extends Component
     val releaseStoreValid = out Bits (config.commitWidth bits)
     val commitMemory = out Vec (MemoryCommitObservation(config), config.commitWidth)
     val storeDrainBusy = out Bool ()
+    val olderStorePending = out Bool ()
     val committedMemoryEpoch = in UInt (config.memoryEpochWidth bits)
     val currentRecoveryEpoch = in UInt (config.recoveryEpochWidth bits)
     val robHeadPointer = in UInt (config.robPointerWidth bits)
+    val orderingRobPointer = in UInt (config.robPointerWidth bits)
     val flush = in Bool ()
   }
   noIoPrefix()
@@ -107,7 +109,7 @@ private final class LoadStoreQueueProbe(config: OooCoreConfig) extends Component
   lsq.io.committedMemoryEpoch := io.committedMemoryEpoch
   lsq.io.currentRecoveryEpoch := io.currentRecoveryEpoch
   lsq.io.robHeadPointer := io.robHeadPointer
-  lsq.io.orderingRobPointer := 0
+  lsq.io.orderingRobPointer := io.orderingRobPointer
 
   io.aguReady := lsq.io.aguReady
   io.translationRequestAddress := lsq.io.translationRequest.virtualAddress
@@ -148,6 +150,7 @@ private final class LoadStoreQueueProbe(config: OooCoreConfig) extends Component
   io.releaseStoreValid := lsq.io.releaseStoreValid
   io.commitMemory := lsq.io.commitObservation
   io.storeDrainBusy := lsq.io.storeDrainBusy
+  io.olderStorePending := lsq.io.olderStorePending
 }
 
 class LoadStoreQueueSpec extends AnyFunSuite {
@@ -175,6 +178,7 @@ class LoadStoreQueueSpec extends AnyFunSuite {
     dut.io.committedMemoryEpoch #= 0
     dut.io.currentRecoveryEpoch #= 0
     dut.io.robHeadPointer #= 0
+    dut.io.orderingRobPointer #= 0
     dut.io.flush #= false
     for (lane <- 0 until config.renameWidth) {
       dut.io.allocate(lane).robPointer #= 0
@@ -890,6 +894,12 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         sample(dut)
         dut.io.commitValid #= 0
 
+        sleep(1)
+        assert(dut.io.releaseStoreValid.toBigInt == 1)
+        sample(dut)
+        assert(dut.io.dataRequestValid.toBoolean)
+        assert(dut.io.releaseStoreValid.toBigInt == 0)
+
         dut.io.flush #= true
         sample(dut)
         dut.io.flush #= false
@@ -1117,15 +1127,18 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         dut.io.commit(0).storeQueueIndex #= 0
         sample(dut)
         dut.io.commitValid #= 0
-        var storeRequestWait = 0
-        while (!dut.io.dataRequestValid.toBoolean && storeRequestWait < 8) {
-          sample(dut)
-          storeRequestWait += 1
-        }
+        sleep(1)
+        assert(dut.io.releaseStoreValid.toBigInt == 1)
+        assert(!dut.io.dataRequestValid.toBoolean)
+        sample(dut)
+        assert(dut.io.releaseStoreValid.toBigInt == 0)
         assert(dut.io.dataRequestValid.toBoolean)
         assert(dut.io.dataRequest.isWrite.toBoolean)
         assert(dut.io.dataRequest.virtualAddress.toBigInt == 0x100)
         assert(dut.io.dataRequest.writeData.toBigInt == BigInt("deadbeef", 16))
+        dut.io.orderingRobPointer #= 1
+        sleep(1)
+        assert(dut.io.olderStorePending.toBoolean)
 
         val heldAddress = dut.io.dataRequest.virtualAddress.toBigInt
         val heldData = dut.io.dataRequest.writeData.toBigInt
@@ -1139,9 +1152,154 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         assert(dut.io.releaseStoreValid.toBigInt == 0)
         sample(dut)
         assert(!dut.io.dataRequestValid.toBoolean)
-        assert(dut.io.releaseStoreValid.toBigInt == 1)
+        assert(!dut.io.olderStorePending.toBoolean)
         sample(dut)
         assert(dut.io.releaseStoreValid.toBigInt == 0)
+      }
+  }
+
+  test("a buffered Load releases the scheduler before cache acceptance") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-lsq-load-buffer-ownership"
+      )
+      .compile(new LoadStoreQueueProbe(config))
+      .doSim("ooo-lsq-load-buffer-ownership", 0x4c81) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.io.translationBypassEligible #= true
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        dut.io.allocateValid #= 3
+        for (lane <- 0 until 2) {
+          dut.io.allocate(lane).robPointer #= lane
+          dut.io.allocate(lane).isLoad #= true
+          dut.io.allocate(lane).loadQueueIndex #= lane
+        }
+        sample(dut)
+        dut.io.allocateValid #= 0
+
+        dut.io.translationBypassPhysicalAddress #= 0x80000100L
+        setLoadAgu(dut, pointer = 0, address = 0x100, loadIndex = 0, pdst = 8)
+        sample(dut)
+        dut.io.aguValid #= false
+        dut.io.translationBypassPhysicalAddress #= 0x80000200L
+        setLoadAgu(dut, pointer = 1, address = 0x200, loadIndex = 1, pdst = 9)
+        sample(dut)
+        dut.io.aguValid #= false
+
+        var firstRequestWait = 0
+        while (!dut.io.dataRequestValid.toBoolean && firstRequestWait < 8) {
+          sample(dut)
+          firstRequestWait += 1
+        }
+        assert(dut.io.dataRequestValid.toBoolean)
+        assert(dut.io.dataRequest.robPointer.toBigInt == 0)
+        assert(dut.io.dataRequest.physicalAddress.toBigInt == 0x80000100L)
+
+        // Backpressure must retain one copy of the first request while the
+        // scheduler advances to the second resident Load.
+        for (_ <- 0 until 3) {
+          sample(dut)
+          assert(dut.io.dataRequestValid.toBoolean)
+          assert(dut.io.dataRequest.robPointer.toBigInt == 0)
+        }
+
+        dut.io.dataRequestReady #= true
+        sample(dut)
+        dut.io.dataRequestReady #= false
+        assert(!dut.io.dataRequestValid.toBoolean)
+
+        // One empty registered-buffer cycle is sufficient.  The old fire-time
+        // ownership update needed another cycle to reselect the first Load.
+        sample(dut)
+        assert(dut.io.dataRequestValid.toBoolean)
+        assert(dut.io.dataRequest.robPointer.toBigInt == 1)
+        assert(dut.io.dataRequest.physicalAddress.toBigInt == 0x80000200L)
+      }
+  }
+
+  test("a buffered committed store blocks younger loads until cache acceptance") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-lsq-buffered-store-order"
+      )
+      .compile(new LoadStoreQueueProbe(config))
+      .doSim("ooo-lsq-buffered-store-order", 0x4c80) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.io.translationBypassEligible #= true
+        dut.io.translationBypassPhysicalAddress #= 0x80000100L
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        dut.io.allocateValid #= 1
+        dut.io.allocate(0).robPointer #= 0
+        dut.io.allocate(0).isStore #= true
+        dut.io.allocate(0).storeQueueIndex #= 0
+        sample(dut)
+        dut.io.allocateValid #= 0
+
+        setStoreAgu(dut, 0, 0x100, BigInt("deadbeef", 16))
+        sample(dut)
+        dut.io.aguValid #= false
+        var completionWait = 0
+        while (!dut.io.completionValid.toBoolean && completionWait < 8) {
+          sample(dut)
+          completionWait += 1
+        }
+        assert(dut.io.completionValid.toBoolean)
+
+        dut.io.commitValid #= 1
+        dut.io.commit(0).robPointer #= 0
+        dut.io.commit(0).isStore #= true
+        dut.io.commit(0).storeQueueIndex #= 0
+        sample(dut)
+        dut.io.commitValid #= 0
+        sleep(1)
+        assert(dut.io.releaseStoreValid.toBigInt == 1)
+        sample(dut)
+        assert(dut.io.dataRequestValid.toBoolean)
+        assert(dut.io.dataRequest.isWrite.toBoolean)
+
+        dut.io.allocateValid #= 1
+        dut.io.allocate(0).robPointer #= 1
+        dut.io.allocate(0).isLoad #= true
+        dut.io.allocate(0).loadQueueIndex #= 0
+        sample(dut)
+        dut.io.allocateValid #= 0
+        dut.io.translationBypassPhysicalAddress #= 0x80000200L
+        setLoadAgu(dut, pointer = 1, address = 0x200, loadIndex = 0, pdst = 8)
+        sample(dut)
+        dut.io.aguValid #= false
+
+        for (_ <- 0 until 4) {
+          assert(dut.io.dataRequestValid.toBoolean)
+          assert(dut.io.dataRequest.isWrite.toBoolean)
+          assert(dut.io.dataRequest.robPointer.toBigInt == 0)
+          assert(!dut.io.completionValid.toBoolean)
+          sample(dut)
+        }
+
+        dut.io.dataRequestReady #= true
+        sample(dut)
+        dut.io.dataRequestReady #= false
+        var loadRequestWait = 0
+        while (!dut.io.dataRequestValid.toBoolean && loadRequestWait < 8) {
+          sample(dut)
+          loadRequestWait += 1
+        }
+        assert(dut.io.dataRequestValid.toBoolean)
+        assert(!dut.io.dataRequest.isWrite.toBoolean)
+        assert(dut.io.dataRequest.robPointer.toBigInt == 1)
+        assert(dut.io.dataRequest.physicalAddress.toBigInt == 0x80000200L)
       }
   }
 

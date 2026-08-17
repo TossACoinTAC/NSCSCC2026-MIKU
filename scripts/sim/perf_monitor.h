@@ -22,7 +22,7 @@ private:
     static constexpr unsigned kCommitObservationLag = 4;
     static constexpr unsigned kWordCount = 8;
     static constexpr unsigned kFrontendOccupancyBins = 17;
-    static constexpr unsigned kLsqEventCount = 46;
+    static constexpr unsigned kLsqEventCount = 53;
 
     struct CycleSnapshot {
         std::uint64_t words[kWordCount] = {};

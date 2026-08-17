@@ -484,8 +484,10 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     const unsigned store_occupancy = static_cast<unsigned>(field(lsq, 5, 4));
     load_queue_occupancy_sum_ += load_occupancy;
     store_queue_occupancy_sum_ += store_occupancy;
-    load_queue_full_cycles_ += bit(load_occupancy >= 16);
-    store_queue_full_cycles_ += bit(store_occupancy >= 8);
+    // Capacity is a DUT configuration property. Read the versioned observation
+    // bits instead of duplicating queue-size assumptions in the harness.
+    load_queue_full_cycles_ += field(lsq, 55, 1);
+    store_queue_full_cycles_ += field(lsq, 56, 1);
     for (unsigned index = 0; index < kLsqEventCount; index++) {
         lsq_events_[index] += field(lsq, 9 + index, 1);
     }
@@ -602,7 +604,7 @@ void PerfMonitor::write_json(const char *path) {
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
 
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v5\",\n");
+    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v7\",\n");
     std::fprintf(file, "  \"observation_abi\": {\"magic\": \"MIKU\", \"version\": 1, \"word_count\": 8},\n");
     std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"nested_counter_read_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
                  roi_marker_seen_ ? "outermost-counter-read-pair" : "full-run",
