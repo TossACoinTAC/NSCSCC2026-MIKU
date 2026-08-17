@@ -89,6 +89,16 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     }
   }
 
+  private def balancedAnd(values: Seq[Bool]): Bool = {
+    require(values.nonEmpty)
+    if (values.size == 1) {
+      values.head
+    } else {
+      val (lower, upper) = values.splitAt(values.size / 2)
+      balancedAnd(lower) && balancedAnd(upper)
+    }
+  }
+
   val io = new Bundle {
     val allocateValid = in Bits (config.renameWidth bits)
     val allocate = in Vec (ReorderBufferAllocate(config), config.renameWidth)
@@ -581,13 +591,25 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     stopAfter(lane) := candidates(lane).exception.valid ||
       candidateRetirementMetadata(lane).serializing || effectiveBranchMispredict(lane)
     if (lane == 0) {
-      canCommit(lane) := candidates(lane).state.valid &&
-        (candidates(lane).state.complete || headCompletionBypass || headBranchBypass) &&
-        candidates(lane).state.payloadReady && predictorHasCapacity
+      canCommit(lane) := balancedAnd(
+        Seq(
+          candidates(lane).state.valid,
+          candidates(lane).state.complete || headCompletionBypass || headBranchBypass,
+          candidates(lane).state.payloadReady,
+          predictorHasCapacity
+        )
+      )
     } else {
-      canCommit(lane) := candidates(lane).state.valid && candidates(lane).state.complete &&
-        candidates(lane).state.payloadReady && canCommit(lane - 1) && !stopAfter(lane - 1) &&
-        predictorHasCapacity
+      canCommit(lane) := balancedAnd(
+        Seq(
+          candidates(lane).state.valid,
+          candidates(lane).state.complete,
+          candidates(lane).state.payloadReady,
+          canCommit(lane - 1),
+          !stopAfter(lane - 1),
+          predictorHasCapacity
+        )
+      )
     }
     io.commitValid(lane) := canCommit(lane)
     io.commit(lane).pc := candidateRetirementMetadata(lane).pc
@@ -936,20 +958,34 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     // Ordinary current-epoch completions and, when enabled, fully resolved branches
     // may bypass the final entry.complete register. Serializing/system operations and
     // either decoded or completion exceptions retain the precise retirement boundary.
-    headCompletionBypass := !io.flush && candidates(0).state.payloadReady &&
-      stagedHeadCompletionBypassValid &&
-      candidates(0).state.valid && !candidates(0).state.complete &&
-      !candidates(0).exception.valid && !candidateRetirementMetadata(0).serializing &&
-      !candidateRetirementMetadata(0).isBranch &&
-      candidateRetirementMetadata(0).systemOperationIsNone
+    headCompletionBypass := balancedAnd(
+      Seq(
+        !io.flush,
+        candidates(0).state.payloadReady,
+        stagedHeadCompletionBypassValid,
+        candidates(0).state.valid,
+        !candidates(0).state.complete,
+        !candidates(0).exception.valid,
+        !candidateRetirementMetadata(0).serializing,
+        !candidateRetirementMetadata(0).isBranch,
+        candidateRetirementMetadata(0).systemOperationIsNone
+      )
+    )
     headCompletionBypassResult := stagedHeadCompletionBypassResult
     if (config.enableBranchHeadCompletionBypass) {
-      headBranchBypass := !io.flush && candidates(0).state.payloadReady &&
-        stagedHeadBranchBypassValid && candidates(0).state.valid &&
-        !candidates(0).state.complete && !candidates(0).exception.valid &&
-        !candidateRetirementMetadata(0).serializing &&
-        candidateRetirementMetadata(0).isBranch &&
-        candidateRetirementMetadata(0).systemOperationIsNone
+      headBranchBypass := balancedAnd(
+        Seq(
+          !io.flush,
+          candidates(0).state.payloadReady,
+          stagedHeadBranchBypassValid,
+          candidates(0).state.valid,
+          !candidates(0).state.complete,
+          !candidates(0).exception.valid,
+          !candidateRetirementMetadata(0).serializing,
+          candidateRetirementMetadata(0).isBranch,
+          candidateRetirementMetadata(0).systemOperationIsNone
+        )
+      )
     } else {
       headBranchBypass := False
     }
