@@ -21,31 +21,46 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
     val flush = in Bool ()
   }
 
-  val registers = Vec.fill(config.physicalRegs)(Reg(Bits(config.xlen bits)))
-  registers(0) := B(0, config.xlen bits)
-  private val writeDataBankCount = 4
-  private val writeDataBankWidth = log2Up(writeDataBankCount)
-  require(config.physicalRegs % writeDataBankCount == 0)
-  val writeTargets = Vec(Bits(config.physicalRegs bits), config.writebackWidth)
-  val writeBankValid = Vec(Bits(writeDataBankCount bits), config.writebackWidth)
-  val writeBankData = Vec.fill(config.writebackWidth)(
-    Vec(Bits(config.xlen bits), writeDataBankCount)
+  // Keep the 8R5W PRF physically partitioned by destination low bits.  A flat
+  // 128-entry Vec makes every completion address/data network cross the whole
+  // PRF footprint; the bank/row form keeps write decode and data enables local
+  // while preserving the same asynchronous read and bypass contract.
+  private val storageBankCount = 4
+  private val storageBankWidth = log2Up(storageBankCount)
+  private val storageBankDepth = config.physicalRegs / storageBankCount
+  require(config.physicalRegs % storageBankCount == 0)
+  val registerBanks = Vec.fill(storageBankCount)(
+    Vec.fill(storageBankDepth)(Reg(Bits(config.xlen bits)))
   )
+  val writeBankValid = Vec(Bits(storageBankCount bits), config.writebackWidth)
+  val writeBankRowTargets = Vec.fill(config.writebackWidth)(
+    Vec(Bits(storageBankDepth bits), storageBankCount)
+  )
+  val writeBankData = Vec.fill(config.writebackWidth)(
+    Vec(Bits(config.xlen bits), storageBankCount)
+  )
+
+  def storageBank(address: UInt): UInt =
+    address(storageBankWidth - 1 downto 0)
+
+  def storageRow(address: UInt): UInt =
+    address(config.physicalRegIndexWidth - 1 downto storageBankWidth)
+
   for (writePort <- 0 until config.writebackWidth) {
-    writeTargets(writePort) := Mux(
-      io.writeValid(writePort) && io.write(writePort).pdst =/= 0,
-      UIntToOh(io.write(writePort).pdst, config.physicalRegs),
-      B(0, config.physicalRegs bits)
-    )
     writeBankValid(writePort) := Mux(
       io.writeValid(writePort) && io.write(writePort).pdst =/= 0,
       UIntToOh(
-        io.write(writePort).pdst(writeDataBankWidth - 1 downto 0),
-        writeDataBankCount
+        storageBank(io.write(writePort).pdst),
+        storageBankCount
       ),
-      B(0, writeDataBankCount bits)
+      B(0, storageBankCount bits)
     )
-    for (bank <- 0 until writeDataBankCount) {
+    for (bank <- 0 until storageBankCount) {
+      writeBankRowTargets(writePort)(bank) := Mux(
+        writeBankValid(writePort)(bank),
+        UIntToOh(storageRow(io.write(writePort).pdst), storageBankDepth),
+        B(0, storageBankDepth bits)
+      )
       writeBankData(writePort)(bank) := Mux(
         writeBankValid(writePort)(bank),
         io.write(writePort).data,
@@ -55,11 +70,15 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
   }
 
   for (readPort <- 0 until config.executionWidth * 2) {
+    val bankReadData = Vec(Bits(config.xlen bits), storageBankCount)
+    for (bank <- 0 until storageBankCount) {
+      bankReadData(bank) := registerBanks(bank)(storageRow(io.readAddress(readPort)))
+    }
     val selected = Bits(config.xlen bits)
     selected := Mux(
       io.readAddress(readPort) === 0,
       B(0, config.xlen bits),
-      registers(io.readAddress(readPort))
+      bankReadData(storageBank(io.readAddress(readPort)))
     )
     for (writePort <- (0 until config.writebackWidth).reverse) {
       when(
@@ -72,10 +91,14 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
     io.readData(readPort) := selected
   }
 
+  val debugBankReadData = Vec(Bits(config.xlen bits), storageBankCount)
+  for (bank <- 0 until storageBankCount) {
+    debugBankReadData(bank) := registerBanks(bank)(storageRow(io.debugReadAddress))
+  }
   io.debugReadData := Mux(
     io.debugReadAddress === 0,
     B(0, config.xlen bits),
-    registers(io.debugReadAddress)
+    debugBankReadData(storageBank(io.debugReadAddress))
   )
   for (writePort <- (0 until config.writebackWidth).reverse) {
     when(
@@ -86,17 +109,20 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
     }
   }
 
-  // Decode each producer address once.  A dynamic Vec write otherwise repeats
-  // the same address comparison across every bit of every physical register.
-  for (registerIndex <- 1 until config.physicalRegs) {
-    for (writePort <- 0 until config.writebackWidth) {
-      when(writeTargets(writePort)(registerIndex)) {
-        registers(registerIndex) :=
-          writeBankData(writePort)(registerIndex % writeDataBankCount)
+  // Completion data only reaches the matching bank/row.  Write-port order is
+  // unchanged: a later port still wins if multiple producers target the same
+  // physical register in the same cycle.
+  for (bank <- 0 until storageBankCount; row <- 0 until storageBankDepth) {
+    if (bank != 0 || row != 0) {
+      for (writePort <- 0 until config.writebackWidth) {
+        when(writeBankRowTargets(writePort)(bank)(row)) {
+          registerBanks(bank)(row) := writeBankData(writePort)(bank)
+        }
       }
     }
   }
-  when(io.flush) { registers(0) := B(0, config.xlen bits) }
+  registerBanks(0)(0) := B(0, config.xlen bits)
+  when(io.flush) { registerBanks(0)(0) := B(0, config.xlen bits) }
 }
 
 final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
