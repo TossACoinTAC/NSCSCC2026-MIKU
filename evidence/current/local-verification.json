@@ -1,0 +1,537 @@
+{
+  "artifact_policy": {
+    "ignored_rebuildable": [
+      {
+        "path": "cpu/target/test-reports",
+        "rebuild": "make cpu-test-all"
+      },
+      {
+        "path": "build/rtl",
+        "rebuild": "make cpu-generate"
+      },
+      {
+        "path": "build/gates",
+        "rebuild": "make cpu-locked-gates"
+      },
+      {
+        "path": "build/evidence",
+        "rebuild": "make cpu-check"
+      }
+    ],
+    "tracked": [
+      "evidence/current/local-verification.json",
+      "evidence/current/python-contract.log"
+    ],
+    "tracked_summary_is_not_hardware_evidence": true
+  },
+  "cpu_identity": {
+    "profile": "disabled",
+    "published_rtl_sha256": "6a08b0dc21d16f9b9b2c2aa6136bd6973ed28184f58345928dda5fd1a47326ec",
+    "raw_rtl_sha256": "b7d62d418c899f04e7d22ed78ff170fc8f968e40f823aed90838d71627c16df6",
+    "source_commit": "2650922a7245ec6dcf97209b3f92720403671f42",
+    "source_tree_sha256": "bec6f629ee667e09d1f4ab81de78aa4cb027e370c4614b46039197844402a5a0"
+  },
+  "evidence_type": "local_cpu_verification",
+  "gates": {
+    "port_contract": {
+      "contract": {
+        "header_sha256": "b2db20e7012ff21e931738a624a964274f779e3f3de664150f3cec40e87b9a79",
+        "input_count": 17,
+        "legacy_backend_absent": true,
+        "module_count": 1,
+        "output_count": 32,
+        "port_count": 49,
+        "tlbnum_default": 32
+      },
+      "evaluator_sha256": "f3f900263da631e529bdcf65dde11bb11a29f541a8a7dc547ef467e27ee810f5",
+      "manifest_sha256": "fb7d5850825f12ae208477495529c065b4726cc4cf76fa33aaccfe1b7a80c4ac",
+      "ports_contract_sha256": "0e140e1d1eb03cd70f5a3cdf5b9ae9355a39e9b598bfb82730ce5e92fc1d6c33",
+      "published_rtl_sha256": "6a08b0dc21d16f9b9b2c2aa6136bd6973ed28184f58345928dda5fd1a47326ec",
+      "status": "passed",
+      "summary_path": "build/gates/port/summary.json",
+      "summary_sha256": "ec14e86bda2ce815027e86e27b17132482475b2879d5f3a6b3129d1762c9140b",
+      "tool": {
+        "name": "yosys",
+        "sha256": "88c0a12bb814a1a8716b1ae10b482e35d3005ed558e1f5f626b3dc983ea3abd0",
+        "version": "Yosys 0.33 (git sha1 2584903a060)"
+      }
+    },
+    "verilator_lint": {
+      "evaluator_sha256": "f3f900263da631e529bdcf65dde11bb11a29f541a8a7dc547ef467e27ee810f5",
+      "manifest_sha256": "fb7d5850825f12ae208477495529c065b4726cc4cf76fa33aaccfe1b7a80c4ac",
+      "ports_contract_sha256": "0e140e1d1eb03cd70f5a3cdf5b9ae9355a39e9b598bfb82730ce5e92fc1d6c33",
+      "published_rtl_sha256": "6a08b0dc21d16f9b9b2c2aa6136bd6973ed28184f58345928dda5fd1a47326ec",
+      "status": "passed",
+      "summary_path": "build/gates/lint/summary.json",
+      "summary_sha256": "d119bc236341be60d336eb41a2e4970aba64365404c473f4478c2a1b9ef99808",
+      "tool": {
+        "name": "verilator",
+        "sha256": "4c6292ab82e57b7f34ab26dbae86ba9c494bacfb088b6ff34be93c553d1301b1",
+        "version": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)"
+      },
+      "warning_count": 0,
+      "warning_policy": "strict-zero"
+    },
+    "yosys": {
+      "evaluator_sha256": "f3f900263da631e529bdcf65dde11bb11a29f541a8a7dc547ef467e27ee810f5",
+      "manifest_sha256": "fb7d5850825f12ae208477495529c065b4726cc4cf76fa33aaccfe1b7a80c4ac",
+      "ports_contract_sha256": "0e140e1d1eb03cd70f5a3cdf5b9ae9355a39e9b598bfb82730ce5e92fc1d6c33",
+      "published_rtl_sha256": "6a08b0dc21d16f9b9b2c2aa6136bd6973ed28184f58345928dda5fd1a47326ec",
+      "status": "passed",
+      "summary_path": "build/gates/yosys/summary.json",
+      "summary_sha256": "ae61dce463afa55b0df189dff8e44764eefd66343b8d7f1ffba7e1faac3ebfc1",
+      "tool": {
+        "name": "yosys",
+        "sha256": "88c0a12bb814a1a8716b1ae10b482e35d3005ed558e1f5f626b3dc983ea3abd0",
+        "version": "Yosys 0.33 (git sha1 2584903a060)"
+      }
+    }
+  },
+  "python_contract": {
+    "command": "make cpu-contract-test",
+    "contract_input_file_count": 109,
+    "contract_input_hash_algorithm": "git-tracked-path-payload-sha256-v1",
+    "contract_input_scope": [
+      ".github/workflows",
+      ".gitignore",
+      ".gitmodules",
+      "CONTRIBUTING.md",
+      "Makefile",
+      "README.md",
+      "config",
+      "cpu/reference",
+      "cpu/tests",
+      "docs",
+      "scripts"
+    ],
+    "contract_input_tree_sha256": "b7d65a212385f34b2a718de4eee3a480e1612d5e5cec1781b3681e89718439f0",
+    "error_count": 0,
+    "failure_count": 0,
+    "log": "evidence/current/python-contract.log",
+    "log_sha256": "5c44b8b33baf69492ffc013792012560fb68088ab74c16ec186ab0782b9b05f5",
+    "passed_count": 82,
+    "runner_sha256": "122a411d9824901d1f13d05f2068e4fde2bfe46605d713abda1c39cbf1f281cc",
+    "skipped_count": 0,
+    "status": "passed",
+    "test_count": 82
+  },
+  "rtl_generation": {
+    "command": "make cpu-locked-gates CUSTOM_PROFILE=disabled",
+    "manifest_path": "build/rtl/generation-manifest.json",
+    "manifest_sha256": "67226aca8b4d7b1fd806393fd093ab700bdfb8f98f65a6d9834c584ea044691b",
+    "raw_artifacts_tracked": false,
+    "status": "passed",
+    "toolchain": {
+      "java": "openjdk version \"17.0.19\" 2026-04-21",
+      "sbt": "sbt runner version: 1.10.11",
+      "verilator": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)",
+      "yosys": "Yosys 0.33 (git sha1 2584903a060)"
+    }
+  },
+  "scala": {
+    "command": "make cpu-test-all",
+    "error_count": 0,
+    "failure_count": 0,
+    "hash_algorithm": "path-payload-sha256-v1",
+    "input_file_count": 120,
+    "input_hash_algorithm": "git-tracked-path-payload-sha256-v1",
+    "input_scope": [
+      "cpu/build.sbt",
+      "cpu/project",
+      "cpu/src/main",
+      "cpu/src/test"
+    ],
+    "input_tree_sha256": "dce6a0095ebfec3b145c8c43e621c1b81f8a3c8feaf332d5580c1b23eed6a824",
+    "raw_reports_tracked": false,
+    "report_directory": "cpu/target/test-reports",
+    "report_tree_sha256": "c4d55d69ffafb66b8abb6c920c97f252cfe2a3c991a5534344dded587171c647",
+    "reports": [
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.DispatchQueueSpec.xml",
+        "sha256": "08affa04d8dc50ea1763ad93923619e67f0a576738e4b0d21e5745798b370199",
+        "skipped": 0,
+        "suite": "miku.backend.DispatchQueueSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.DispatchWindowSpec.xml",
+        "sha256": "42f6f1036a5472312132fa914a9dcbc9144ac344489ea11a804e74e86ff4fd32",
+        "skipped": 0,
+        "suite": "miku.backend.DispatchWindowSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.IssueQueueSpec.xml",
+        "sha256": "8bb5a3209059ac5eecb0ff00444bd592abebd9e0de4800424e03556495e54805",
+        "skipped": 0,
+        "suite": "miku.backend.IssueQueueSpec",
+        "tests": 12
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.LoadStoreQueueSpec.xml",
+        "sha256": "dc4d076e115f760168a56abb09a44e323dc924d3a68f4bf04a2c67462c570331",
+        "skipped": 0,
+        "suite": "miku.backend.LoadStoreQueueSpec",
+        "tests": 34
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.OooBackendDispatchSpec.xml",
+        "sha256": "30fff799909c0e4902899265f37603cdc4cac4b8e6dbe465dc7dd12b362d4780",
+        "skipped": 0,
+        "suite": "miku.backend.OooBackendDispatchSpec",
+        "tests": 21
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.OooBackendWithDataCacheSpec.xml",
+        "sha256": "1702608ddbbd9f9636c133afce937ce7de76d703413c07565fa53fef974eb539",
+        "skipped": 0,
+        "suite": "miku.backend.OooBackendWithDataCacheSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.OooCommitAdapterSpec.xml",
+        "sha256": "6017e078162408a6735c641824a7a09c9d9faea50f9a295c80c2b9f81bd967ee",
+        "skipped": 0,
+        "suite": "miku.backend.OooCommitAdapterSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.RegisterStructuresSpec.xml",
+        "sha256": "06edb5debadef470b98362f5b0584e461547b1b26263064c11110b0e12d92a46",
+        "skipped": 0,
+        "suite": "miku.backend.RegisterStructuresSpec",
+        "tests": 7
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.ReorderBufferSpec.xml",
+        "sha256": "84856a03e14f53fae1123c6e47afdbdbe3ddcc4237d5135d8827a3471537435a",
+        "skipped": 0,
+        "suite": "miku.backend.ReorderBufferSpec",
+        "tests": 17
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.backend.StoreDataQueueSpec.xml",
+        "sha256": "29ed8d76978b8fc8646408cc49a25d41f08da06de6c2435fcb18733fafd0097c",
+        "skipped": 0,
+        "suite": "miku.backend.StoreDataQueueSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.compat.Axi3CompatSpec.xml",
+        "sha256": "b7af2d2b9a8a5ba90371989d1957faef5805f04a236b4305ec5786f72a7de5ff",
+        "skipped": 0,
+        "suite": "miku.compat.Axi3CompatSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.compat.CoreTopCompatGeneratorSpec.xml",
+        "sha256": "13e7b1e712b3c2c2da810e79213e73786fb3310e9ac5a43a70415e005787a653",
+        "skipped": 0,
+        "suite": "miku.compat.CoreTopCompatGeneratorSpec",
+        "tests": 2
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.config.CoreConfigSpec.xml",
+        "sha256": "cc4fdd12ef7231f4f96090bc33487ee3a41b4ed8826187eeb5b1b833c41fbfb8",
+        "skipped": 0,
+        "suite": "miku.config.CoreConfigSpec",
+        "tests": 3
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.core.CustomInstructionProfileSpec.xml",
+        "sha256": "64ffe1f965f7692187fb6695ee58c6907f3a5d6be804aa67dc5b54d8afe58f7a",
+        "skipped": 0,
+        "suite": "miku.core.CustomInstructionProfileSpec",
+        "tests": 13
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.core.OooCoreIntegrationSpec.xml",
+        "sha256": "672ba1418b0a155feeeff462726067873e52691c746a9866141faa40987be6c9",
+        "skipped": 0,
+        "suite": "miku.core.OooCoreIntegrationSpec",
+        "tests": 4
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.core.OooCoreSpec.xml",
+        "sha256": "902e0dfd9de69179fcf52b73b5743bc69335d9daee95e210169986773fc4bfe2",
+        "skipped": 0,
+        "suite": "miku.core.OooCoreSpec",
+        "tests": 14
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.core.OooCoreSystemIntegrationSpec.xml",
+        "sha256": "0d1f5a5bbcbb864891d544ffaed3bebdfbc5d44beaebd4419b9b7fc1b41c529d",
+        "skipped": 0,
+        "suite": "miku.core.OooCoreSystemIntegrationSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.core.PredictorUpdateQueueSpec.xml",
+        "sha256": "56fb3a92bb1529d445bcdcc4d217e8f3ed121f0551167fbbd4cd5f321cc30f2b",
+        "skipped": 0,
+        "suite": "miku.core.PredictorUpdateQueueSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.execute.AluSpec.xml",
+        "sha256": "77d992b82cc12e0fd866899e3eaff7f0e4b3a04a93031ac4eea93e719d8bc2ba",
+        "skipped": 0,
+        "suite": "miku.execute.AluSpec",
+        "tests": 3
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.execute.CustomExecutionSpec.xml",
+        "sha256": "20a5c785049b93ea740bb29d3d7e2c7c5d94390c9b22e1a9e200fcf9722c7ba1",
+        "skipped": 0,
+        "suite": "miku.execute.CustomExecutionSpec",
+        "tests": 8
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.execute.LaccCoreSpec.xml",
+        "sha256": "7dc76d03fa81c993ef5e221b5a8ec08e4af094ab66d5da99af4ee5a375bb9f76",
+        "skipped": 0,
+        "suite": "miku.execute.LaccCoreSpec",
+        "tests": 2
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.execute.LaccDCacheIntegrationSpec.xml",
+        "sha256": "00db4fb02b866181d2b32c568d5024c21d4becea661cf12213d676f60ffa0afe",
+        "skipped": 0,
+        "suite": "miku.execute.LaccDCacheIntegrationSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.execute.OooExecutionClusterSpec.xml",
+        "sha256": "73e37b393a22ecf61fb6bf2803afe1942745c0ede71bc7c6fe5ea046047df6b7",
+        "skipped": 0,
+        "suite": "miku.execute.OooExecutionClusterSpec",
+        "tests": 11
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.execute.RegisteredMultiplierSpec.xml",
+        "sha256": "edd350b8f76c006d389f0bac6f0a16be854a7cbadafd615c193141c9a8cf0da3",
+        "skipped": 0,
+        "suite": "miku.execute.RegisteredMultiplierSpec",
+        "tests": 2
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.frontend.OooFrontendSpec.xml",
+        "sha256": "8e29b44d0b67919fbc2b0a1bdf290443262b7576c803a89edce35c2158ad3c72",
+        "skipped": 0,
+        "suite": "miku.frontend.OooFrontendSpec",
+        "tests": 25
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.memory.AxiLineBridgeSpec.xml",
+        "sha256": "8822cf1187b454137940e8e9bcf8f928c2854038c996819a26da6eca1fa717c6",
+        "skipped": 0,
+        "suite": "miku.memory.AxiLineBridgeSpec",
+        "tests": 8
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.memory.DataCacheHierarchySpec.xml",
+        "sha256": "52a6d9fdc9ac3006fac368c3c6a37e1f2a0685f34d4bae117418a9e37e326981",
+        "skipped": 0,
+        "suite": "miku.memory.DataCacheHierarchySpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.memory.L1DataCacheSpec.xml",
+        "sha256": "2601a6148bc64131e9a30f44dee9d93e58547ebb1059d3123ed8a31ec8b47111",
+        "skipped": 0,
+        "suite": "miku.memory.L1DataCacheSpec",
+        "tests": 12
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.memory.L1InstructionCacheSpec.xml",
+        "sha256": "7b42055d79b239715b2858f0ccf6953c4ebb90bf69efccaa8636837b54eda28e",
+        "skipped": 0,
+        "suite": "miku.memory.L1InstructionCacheSpec",
+        "tests": 10
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.memory.L2CacheSpec.xml",
+        "sha256": "75a4d2d4b6dbd5f09493c116643fbadaec2ff3fdf3abcee975fe4285642d8cca",
+        "skipped": 0,
+        "suite": "miku.memory.L2CacheSpec",
+        "tests": 8
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.memory.LegacyInstructionCacheSpec.xml",
+        "sha256": "6a5e4f2ad72ebd06e3289de1ab21677ddcf65be52617d8fc253bb4891265a3af",
+        "skipped": 0,
+        "suite": "miku.memory.LegacyInstructionCacheSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.memory.MemoryContractsSpec.xml",
+        "sha256": "73b44a11cc3f78d750e99baf67e43260e4f1547a0dcd7e7ab29de078fd29fd05",
+        "skipped": 0,
+        "suite": "miku.memory.MemoryContractsSpec",
+        "tests": 2
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.memory.SharedCacheHierarchySpec.xml",
+        "sha256": "ebc60c6b102974e7e9c0f9c89500c08249d00c5f2ea14934b453f97311193618",
+        "skipped": 0,
+        "suite": "miku.memory.SharedCacheHierarchySpec",
+        "tests": 6
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.memory.SharedReadMshrRouterSpec.xml",
+        "sha256": "0a3666f66eff2e1de9e88f8d091d3fbb541fa2819dbbf726a097b72d5a635b5d",
+        "skipped": 0,
+        "suite": "miku.memory.SharedReadMshrRouterSpec",
+        "tests": 2
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.observe.ChiplabDiffTestAdapterSpec.xml",
+        "sha256": "8f3a8117324528b94340286dd6910ae2bc3535582fd5b26abf0ec0351430265a",
+        "skipped": 0,
+        "suite": "miku.observe.ChiplabDiffTestAdapterSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.observe.ChiplabMultiCommitDiffTestAdapterSpec.xml",
+        "sha256": "036ab99e10e9c7a2bd00cbe68164f422065ed305aaf9d74c74e52d800a791b96",
+        "skipped": 0,
+        "suite": "miku.observe.ChiplabMultiCommitDiffTestAdapterSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.observe.CommitContractsSpec.xml",
+        "sha256": "4ac5d7046aa0dceadb69614dcc5a371afda3f5a836680653398d700a6353e203",
+        "skipped": 0,
+        "suite": "miku.observe.CommitContractsSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.observe.PerformanceCountersSpec.xml",
+        "sha256": "12b8ba95acc3d7945f9a0a2602856c4845ad15e6640d811b74d332c3412026ea",
+        "skipped": 0,
+        "suite": "miku.observe.PerformanceCountersSpec",
+        "tests": 2
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.predict.BranchPredictorSpec.xml",
+        "sha256": "a92b02e3ccee29dbcbdb1d4e8d235266a4e5e6a2615a17862644fc03821a0ea5",
+        "skipped": 0,
+        "suite": "miku.predict.BranchPredictorSpec",
+        "tests": 2
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.privileged.AddressTranslationUnitSpec.xml",
+        "sha256": "1c41c91f968b54ce45d73e0a5911feff0eb61da70d8403e42fa5c86778eeddeb",
+        "skipped": 0,
+        "suite": "miku.privileged.AddressTranslationUnitSpec",
+        "tests": 10
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.privileged.CsrFileSpec.xml",
+        "sha256": "b1e0ca9c52e1f085f043a94693cbadb027761af7ec1f29a96d95cd83a0af3440",
+        "skipped": 0,
+        "suite": "miku.privileged.CsrFileSpec",
+        "tests": 1
+      },
+      {
+        "errors": 0,
+        "failures": 0,
+        "path": "cpu/target/test-reports/TEST-miku.privileged.IdleControllerSpec.xml",
+        "sha256": "ea738c758b18165d692d25e7a68dc560fcf6019904632052c4b700b8cbbe18bb",
+        "skipped": 0,
+        "suite": "miku.privileged.IdleControllerSpec",
+        "tests": 1
+      }
+    ],
+    "run_manifest_path": "build/evidence/scala-run.json",
+    "run_manifest_sha256": "e9df7fd36fff15892b8b754e43b002ec4a445d69988e034ae6a19122d72da484",
+    "skipped_count": 0,
+    "status": "passed",
+    "suite_count": 42,
+    "test_count": 256
+  },
+  "schema_version": 2,
+  "scope": "local_only_no_vivado_or_fpga_claim"
+}

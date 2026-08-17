@@ -6,8 +6,8 @@ MIKU（MIKU IS KINDA UNORDERED）是面向龙芯杯决赛 Linux 目标的 LA32R
 乱序 SoC CPU。CPU 使用 SpinalHDL 实现，SoC、仿真和 FPGA 工程来自锁定的
 Chiplab 快照。
 
-> 当前 CPU 源码基线为 `35c7f5d`，默认 `CUSTOM_PROFILE=disabled`。
-> 本地功能测试和 RTL 静态检查已经通过，但该源码身份尚无与之匹配
+> 当前 CPU 源码基线为 `2650922`，默认 `CUSTOM_PROFILE=disabled`。
+> 本地功能测试和 RTL 静态检查已经通过，并有仓库内验证摘要；但该源码身份尚无与之匹配
 > （matching）的 Vivado
 > implementation 或板上 perf20 结果。最近一次完整硬件实测仍属于
 > `c60dadd`／`8f33144`。详细状态见 [docs/status.md](docs/status.md)。
@@ -19,7 +19,7 @@ Chiplab 快照。
 | CPU 源码 | SpinalHDL，四取指、三译码／重命名／派发／提交，四执行端口 |
 | 默认自定义指令 profile | `disabled`，不生成自定义指令电路 |
 | Scala／Verilator | 42 suites，256 tests passed，0 skipped |
-| Python contract | 73 passed，0 skipped |
+| Python contract | 82 passed，0 skipped |
 | 端口、Verilator lint、Yosys | passed |
 | `vivado_implementation` | `not_run` |
 | `fpga_func` | `not_run` |
@@ -28,8 +28,11 @@ Chiplab 快照。
 | `performance_claim` | `none` |
 | 最近硬件实测参考 | 100 MHz，setup WNS `+0.018 ns`，perf20 `33,393,947` CPU cycles |
 
-机器可读状态保存在 [evidence/index.json](evidence/index.json)。表中的最后一项是历史
-matching 结果，不能自动作为当前 CPU 源码的性能结论。
+机器可读状态保存在 [evidence/index.json](evidence/index.json)，本次本地检查的逐项摘要见
+[evidence/current/local-verification.json](evidence/current/local-verification.json)。原始 Scala
+XML、生成 RTL 和 gate 输出保持忽略并可重新生成。表中的最后一项是 `summary_only` 历史
+matching 结果，其 Vivado 与 LabAgent 原始产物状态均为 `not_in_repository`，不能自动作为
+当前 CPU 源码的性能结论。
 
 ## 证据身份
 
@@ -37,14 +40,19 @@ matching 结果，不能自动作为当前 CPU 源码的性能结论。
 
 | 字段 | 值 |
 | --- | --- |
-| CPU 功能提交 | `35c7f5d97ecef0fb2c6ec6a424f11bdd93077da4` |
+| CPU 功能提交 | `2650922a7245ec6dcf97209b3f92720403671f42` |
 | CPU source tree SHA256 | `bec6f629ee667e09d1f4ab81de78aa4cb027e370c4614b46039197844402a5a0` |
 | raw RTL SHA256 | `b7d62d418c899f04e7d22ed78ff170fc8f968e40f823aed90838d71627c16df6` |
 | published RTL SHA256 | `6a08b0dc21d16f9b9b2c2aa6136bd6973ed28184f58345928dda5fd1a47326ec` |
 | RTL generation | passed |
 | Verilator lint | passed，0 warnings |
 
-最近一次完整硬件实测对应另一份 CPU 源码和 RTL：
+验证摘要还保存 42 个 Scala report 的逐文件 SHA256、确定性的 Python contract 日志、
+generation manifest SHA256，以及 port、lint、Yosys summary 的原始文件 SHA256 和可移植
+关键字段。这些记录支持本地检查结论，不支持 Vivado、FPGA 或 Linux release 结论。
+
+最近一次完整硬件实测对应另一份 CPU 源码和 RTL。该记录的证据级别为 `summary_only`，
+Vivado 与 LabAgent 原始产物均为 `not_in_repository`：
 
 | 字段 | 值 |
 | --- | --- |
@@ -86,6 +94,8 @@ make cpu-check
 | 运行完整 SoC implementation | `make soc-impl` |
 | 查询远程 FPGA 队列 | `make board-queue` |
 | 检查文档和证据入口 | `make docs-check` |
+| 汇总最近一次本地检查 | `make local-evidence` |
+| 更新仓库内本地验证记录 | `make evidence-current` |
 
 运行 `make help` 可以查看全部受支持入口。
 
@@ -119,5 +129,7 @@ make cpu-check
 
 性能数字必须同时绑定 CPU 源码身份、生成 RTL SHA256、Chiplab commit、工具版本、
 频率和测试结果。源码测试通过、RTL 生成成功、Vivado implementation 和 FPGA 板上通过
-是四种不同结论，不能互相替代。具体要求见 [CONTRIBUTING.md](CONTRIBUTING.md) 和
+是四种不同结论，不能互相替代。当前机器可读状态不导入新的硬件通过结论，三个硬件阶段
+保持 `not_run`；后续原始 artifact 格式经过单独评审后再扩展。具体要求见
+[CONTRIBUTING.md](CONTRIBUTING.md) 和
 [docs/release-checklist.md](docs/release-checklist.md)。

@@ -13,6 +13,10 @@ LABAGENT_HOST ?= 10.19.75.72
 LABAGENT_SSH_KEY ?= $(HOME)/.ssh/id_ed25519
 BOARDCTL ?= $(ROOT_DIR)/scripts/board/boardctl
 BUILD_ROOT ?= $(ROOT_DIR)/build
+PYTHON_CONTRACT_LOG ?= $(BUILD_ROOT)/evidence/python-contract.log
+SCALA_RUN_PREPARED ?= $(BUILD_ROOT)/evidence/scala-run-input.json
+SCALA_RUN_MANIFEST ?= $(BUILD_ROOT)/evidence/scala-run.json
+LOCAL_EVIDENCE_OUT ?= $(BUILD_ROOT)/evidence/local-verification.json
 DOCKER_IMAGE ?= nscscc-dev:ubuntu24.04-v1
 DOCKERFILE ?= $(ROOT_DIR)/docker/nscscc-dev.Dockerfile
 DOCKER_CACHE_VOLUME ?= nscscc-sbt-cache-v1
@@ -68,7 +72,7 @@ FUNC58_WORKLOADS := func58
 CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_CACHE_VOLUME=$(DOCKER_CACHE_VOLUME) $(ROOT_DIR)/scripts/env/run-in-container
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-.PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
+.PHONY: help doctor status ide-setup env-build toolchain-check docs-check local-evidence evidence-current experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-contract-test custom-test custom-check cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
@@ -82,6 +86,8 @@ help:
 		'  make ide-setup          生成指向 cpu/build.sbt 的 BSP 配置' \
 		'  make env-build          构建锁定 CPU/仿真工具镜像' \
 		'  make docs-check         验证文档入口与候选账本结构' \
+		'  make local-evidence     汇总最近一次完整本地 CPU 检查' \
+		'  make evidence-current   校验并更新仓库内当前验证证据' \
 		'  make experiment-freeze  冻结源码、RTL、工具和显式证据身份' \
 		'  make experiment-compare 比较两组身份兼容的完整 perf20' \
 		'  make timing-analyze      自动归类 Vivado top timing paths' \
@@ -149,6 +155,21 @@ toolchain-check: env-build
 docs-check:
 	@python3 scripts/common/check_docs.py
 
+local-evidence:
+	@python3 -I scripts/common/write_local_evidence.py --root "$(ROOT_DIR)" \
+		--python-log "$(PYTHON_CONTRACT_LOG)" \
+		--scala-run "$(SCALA_RUN_MANIFEST)" --out "$(LOCAL_EVIDENCE_OUT)"
+
+evidence-current:
+	@mkdir -p "$(ROOT_DIR)/evidence/current"
+	@python3 -I scripts/common/write_local_evidence.py --root "$(ROOT_DIR)" \
+		--python-log "$(PYTHON_CONTRACT_LOG)" \
+		--scala-run "$(SCALA_RUN_MANIFEST)" \
+		--recorded-python-log "$(ROOT_DIR)/evidence/current/python-contract.log" \
+		--out "$(ROOT_DIR)/evidence/current/local-verification.json" \
+		--index "$(ROOT_DIR)/evidence/index.json"
+	@$(MAKE) docs-check
+
 experiment-freeze: cpu-generate
 	@python3 scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
 		--experiment-id "$(EXPERIMENT_ID)" --chiplab-dir "$(CHIPLAB_HOME)" \
@@ -181,11 +202,22 @@ cpu-test:
 	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "testOnly $(CPU_TEST)"'
 
 cpu-test-all:
+	@rm -rf "$(CPU_DIR)/target/test-reports"
+	@rm -f "$(SCALA_RUN_PREPARED)" "$(SCALA_RUN_MANIFEST)"
+	@mkdir -p "$(BUILD_ROOT)/evidence"
+	@python3 -I scripts/common/write_scala_run_manifest.py prepare \
+		--root "$(ROOT_DIR)" --prepared "$(SCALA_RUN_PREPARED)"
 	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch test'
+	@python3 -I scripts/common/write_scala_run_manifest.py finalize \
+		--root "$(ROOT_DIR)" --prepared "$(SCALA_RUN_PREPARED)" \
+		--reports "$(CPU_DIR)/target/test-reports" --out "$(SCALA_RUN_MANIFEST)"
+	@rm -f "$(SCALA_RUN_PREPARED)"
 
 cpu-contract-test:
-	@$(CONTAINER_RUN) python3 -I -m unittest discover \
-		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
+	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/common/run_python_contracts.py" \
+		--root "$(ROOT_DIR)" \
+		--start-directory "$(CPU_DIR)/tests/python" --pattern 'test_*.py' \
+		--log "$(PYTHON_CONTRACT_LOG)"
 
 custom-test:
 	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec \
@@ -234,8 +266,9 @@ cpu-locked-gates: cpu-generate
 cpu-check:
 	@$(MAKE) cpu-test-all
 	@$(MAKE) cpu-locked-gates
-	@$(MAKE) docs-check
 	@$(MAKE) cpu-contract-test
+	@$(MAKE) local-evidence
+	@$(MAKE) docs-check
 
 sim-prepare: cpu-generate
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/prepare" \

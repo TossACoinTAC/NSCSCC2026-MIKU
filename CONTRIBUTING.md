@@ -44,8 +44,13 @@ CPU 或生成器修改：
 make cpu-test-all
 make cpu-contract-test
 make cpu-locked-gates CUSTOM_PROFILE=disabled
+make evidence-current
 git diff --check
 ```
+
+`make evidence-current` 会根据已经存在且通过的 Scala XML、RTL generation manifest、三项
+gate summary 和确定性 Python contract 日志更新仓库内摘要。不要手工填写测试数量或复制旧
+CPU identity。大型原始产物继续保存在被忽略的 `build/` 和 `cpu/target/`。
 
 实际需要运行的定向测试由 `make test-impact` 确定。性能或 release 提交还必须遵循
 [docs/release-checklist.md](docs/release-checklist.md)。
@@ -63,6 +68,9 @@ git diff --check
 
 没有 matching Vivado 结果时，只能报告本地功能和 RTL 检查。没有 matching FPGA 结果时，
 不能报告板上功能或 perf20 通过。
+
+当前机器可读记录只接受三个硬件阶段均为 `not_run`。以后导入新硬件结果时，先单独评审
+原始 artifact 格式和身份关系，再扩展 schema；不能只填写结果数字或复用历史摘要。
 
 ## 自定义指令
 

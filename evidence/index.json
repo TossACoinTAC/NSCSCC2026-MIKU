@@ -1,33 +1,33 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "repository": "https://github.com/TossACoinTAC/NSCSCC2026-MIKU.git",
   "status_document": "docs/status.md",
   "current_cpu": {
-    "source_commit": "35c7f5d97ecef0fb2c6ec6a424f11bdd93077da4",
+    "source_commit": "2650922a7245ec6dcf97209b3f92720403671f42",
     "profile": "disabled",
     "source_tree_sha256": "bec6f629ee667e09d1f4ab81de78aa4cb027e370c4614b46039197844402a5a0",
     "raw_rtl_sha256": "b7d62d418c899f04e7d22ed78ff170fc8f968e40f823aed90838d71627c16df6",
     "published_rtl_sha256": "6a08b0dc21d16f9b9b2c2aa6136bd6973ed28184f58345928dda5fd1a47326ec",
+    "local_evidence": {
+      "path": "evidence/current/local-verification.json",
+      "sha256": "45eb8be030e1b1cb02a016ceb3707570cf0f6339394e8ac422162a2e22fc3836"
+    },
     "verification": {
-      "scala_suites": 42,
-      "scala_tests": 256,
-      "scala_skipped": 0,
-      "scala_status": "passed",
-      "python_contract_passed": 73,
-      "python_contract_skipped": 0,
-      "rtl_generation": "passed",
-      "port_contract": "passed",
-      "verilator_lint": "passed",
-      "verilator_lint_warning_count": 0,
-      "yosys": "passed",
+      "local": "passed",
       "vivado_implementation": "not_run",
       "fpga_func": "not_run",
       "fpga_perf20": "not_run",
       "linux_release": "not_run_for_this_cpu_source"
     },
+    "hardware_evidence": {},
     "performance_claim": "none"
   },
-  "last_measured_hardware_reference": {
+  "latest_hardware_reference": {
+    "evidence_level": "summary_only",
+    "artifact_availability": {
+      "vivado_raw": "not_in_repository",
+      "labagent_raw": "not_in_repository"
+    },
     "repository_commit": "8f33144de808d28bb287cd358afeef02f24c8336",
     "source_commit": "c60dadd4fdc1c2ae3f7eb61a345a515e907ba93a",
     "chiplab_commit": "c398d274812f164d387146fa7d8f612a4a1296d9",
@@ -52,6 +52,7 @@
   "claim_rules": [
     "Local tests do not prove Vivado timing.",
     "Vivado implementation does not prove FPGA functional or perf results.",
-    "Historical measurements do not transfer to a different published RTL SHA256."
+    "Current hardware stages remain not_run until raw artifact import is separately reviewed.",
+    "Summary-only historical measurements cannot support a current performance claim."
   ]
 }

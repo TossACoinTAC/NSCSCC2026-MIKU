@@ -10,6 +10,8 @@ Vivado 或 FPGA 验证时，应先阅读 [status.md](status.md)，不要从历�
 - [migration-validation.md](migration-validation.md)：仓库迁移后的验证记录。
 - [release-checklist.md](release-checklist.md)：进入 `main` 或发布 FPGA 产物前的检查项目。
 - [../CONTRIBUTING.md](../CONTRIBUTING.md)：分支、测试、证据和提交要求。
+- [../evidence/index.json](../evidence/index.json)：当前 CPU、硬件阶段和历史参考的机器可读状态。
+- [../evidence/current/local-verification.json](../evidence/current/local-verification.json)：最近一次完整本地检查的 tracked 摘要。
 
 ## CPU 与 SoC 设计
 

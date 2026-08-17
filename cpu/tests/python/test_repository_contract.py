@@ -64,7 +64,7 @@ class RepositoryContractTest(unittest.TestCase):
 
     def test_documentation_entry_points_and_candidate_ledger(self) -> None:
         result = subprocess.run(
-            ["python3", "scripts/common/check_docs.py"],
+            ["python3", "scripts/common/check_docs.py", "--structure-only"],
             cwd=ROOT,
             check=False,
             text=True,

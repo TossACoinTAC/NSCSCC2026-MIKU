@@ -172,7 +172,14 @@ Slack (MET) : 0.100ns
         self.assertNotIn("miku.backend.LoadStoreQueueSpec", result["scala_suites"])
 
         documentation = calculate_impact(
-            ["evidence/index.json", ".github/workflows/docs.yml", "CONTRIBUTING.md"],
+            [
+                "evidence/index.json",
+                "evidence/current/local-verification.json",
+                ".github/workflows/docs.yml",
+                "CONTRIBUTING.md",
+                "scripts/common/run_python_contracts.py",
+                "scripts/common/write_local_evidence.py",
+            ],
             mapping,
         )
         self.assertEqual(documentation["unmatched_paths"], [])

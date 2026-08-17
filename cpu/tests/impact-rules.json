@@ -81,7 +81,7 @@
     },
     {
       "name": "documentation",
-      "paths": ["README.md", "CONTRIBUTING.md", "docs/*.md", "evidence/*.json", ".github/workflows/*.yml", "scripts/common/check_docs.py"],
+      "paths": ["README.md", "CONTRIBUTING.md", "docs/*.md", "evidence/*.json", ".github/workflows/*.yml", "scripts/common/*.py"],
       "scala_suites": [],
       "python_contracts": ["tests/python/test_repository_contract.py"]
     },
@@ -89,7 +89,7 @@
       "name": "python-contract-suite",
       "paths": ["cpu/tests/python/test_*.py"],
       "scala_suites": [],
-      "python_contracts": ["tests/python/test_cache_memory_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_core_interface.py", "tests/python/test_custom_instruction_word.py", "tests/python/test_experiment_contract.py", "tests/python/test_generation_contract.py", "tests/python/test_perf_observation_contract.py", "tests/python/test_perf_observation_summary.py", "tests/python/test_repository_contract.py", "tests/python/test_sim_contract.py", "tests/python/test_toolchain_contract.py"]
+      "python_contracts": ["tests/python/test_cache_memory_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_core_interface.py", "tests/python/test_custom_instruction_word.py", "tests/python/test_evidence_contract.py", "tests/python/test_experiment_contract.py", "tests/python/test_generation_contract.py", "tests/python/test_perf_observation_contract.py", "tests/python/test_perf_observation_summary.py", "tests/python/test_repository_contract.py", "tests/python/test_sim_contract.py", "tests/python/test_toolchain_contract.py"]
     },
     {
       "name": "generation-identity",

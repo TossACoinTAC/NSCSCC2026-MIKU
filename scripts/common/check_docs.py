@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import argparse
 import ast
 import hashlib
 import io
@@ -18,6 +19,15 @@ from urllib.parse import unquote, urlsplit
 import xml.etree.ElementTree as ET
 
 from content_hash import IGNORED_PARTS, cpu_source_hash
+from evidence_identity import (
+    PYTHON_CONTRACT_INPUT_SCOPE,
+    SCALA_INPUT_SCOPE,
+    TREE_HASH_ALGORITHM,
+    git_tracked_files,
+    parse_python_contract_log as parse_python_contract_log_text,
+    scala_report_snapshot as collect_scala_report_snapshot,
+    tracked_content_tree_sha256,
+)
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,14 +35,17 @@ COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}")
 SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 CPU_INPUT_PATHS = ("cpu/build.sbt", "cpu/project", "cpu/src/main")
 VERIFICATION_STATES = {"not_run", "passed", "failed"}
+HARDWARE_STAGES = ("vivado_implementation", "fpga_func", "fpga_perf20")
 LINUX_VERIFICATION_STATES = {
     "not_run_for_this_cpu_source",
     "passed",
     "failed",
 }
 MARKDOWN_LINK_PATTERN = re.compile(r"!?\[[^\]]*\]\(([^)\n]+)\)")
-
-
+GENERATED_RTL_TEST_ID = (
+    "test_core_interface.CoreInterfaceTest.test_generated_rtl_when_present"
+)
+GENERATED_RTL_SKIP_REASON = "尚未生成发布 RTL"
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
@@ -107,7 +120,9 @@ def require_in_documents(
 
 def count_python_contract_tests() -> int:
     count = 0
-    for path in sorted((ROOT / "cpu/tests/python").glob("test_*.py")):
+    for path in git_tracked_files(ROOT, ("cpu/tests/python",)):
+        if not path.name.startswith("test_") or path.suffix != ".py":
+            continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         count += sum(
             1
@@ -145,6 +160,33 @@ def require_git_diff_clean(arguments: list[str], label: str) -> None:
     detail = result.stderr.strip() or result.stdout.strip()
     require(result.returncode == 0,
             f"unable to compare {label}: {detail or f'git exited {result.returncode}'}")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def repository_file(value: object, label: str, *, tracked: bool = True) -> Path:
+    relative = require_nonempty_string(value, f"{label} path")
+    path = (ROOT / relative).resolve()
+    require(path.is_relative_to(ROOT.resolve()), f"{label} path escapes the repository")
+    require(path.is_file(), f"{label} file does not exist: {relative}")
+    require(path.relative_to(ROOT).as_posix() == relative,
+            f"{label} path must be normalized and repository-relative")
+    if tracked:
+        result = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", "--", relative],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        require(result.returncode == 0, f"{label} file must be tracked: {relative}")
+    return path
 
 
 def git_cpu_source_hash(commit: str) -> str:
@@ -261,6 +303,26 @@ def validate_hardware_git_identity(
             f"{label} Chiplab commit does not match its repository commit")
 
 
+def validate_current_hardware_stages(
+    current_cpu: dict[str, object],
+    verification: dict[str, object],
+    current_commit: str,
+    current_rtl: str,
+    current_profile: str,
+) -> dict[str, dict[str, object]]:
+    del current_commit, current_rtl, current_profile
+    hardware_evidence = current_cpu.get("hardware_evidence")
+    require(hardware_evidence == {},
+            "current CPU hardware evidence must remain empty until raw artifacts are imported")
+    for stage in HARDWARE_STAGES:
+        state = str(verification[stage])
+        require(state == "not_run",
+                f"current CPU {stage} must remain not_run until raw artifacts are imported")
+    require(current_cpu.get("performance_claim") == "none",
+            "current CPU performance claim requires imported raw hardware evidence")
+    return {}
+
+
 def require_passing_hardware(values: dict[str, object], label: str) -> None:
     require(float(values["setup_wns_ns"]) >= 0,
             f"{label} setup WNS must be non-negative")
@@ -281,32 +343,365 @@ def load_optional_json(path: Path) -> Optional[dict[str, object]]:
     return value
 
 
+def parse_python_contract_log(
+    path: Path,
+) -> dict[str, object]:
+    text = path.read_text(encoding="utf-8")
+    parsed = parse_python_contract_log_text(text)
+    return {**parsed, "text": text}
+
+
+def validate_python_contract_log(path: Path, expected: dict[str, object]) -> None:
+    parsed = parse_python_contract_log(path)
+    summary = parsed["summary"]
+    require(isinstance(summary, dict), "tracked Python contract summary is invalid")
+    require(summary["test_count"] == expected["test_count"] and
+            summary["passed_count"] == expected["passed_count"] and
+            summary["failure_count"] == expected["failure_count"] and
+            summary["error_count"] == expected["error_count"] and
+            summary["skipped_count"] == expected["skipped_count"],
+            "tracked Python log summary does not match local evidence")
+    require(summary["expected_failure_count"] == 0 and
+            summary["unexpected_success_count"] == 0,
+            "tracked Python log contains unsupported unittest outcomes")
+    require(parsed["result"] == "PASS", "tracked Python contract log is not passing")
+    expected_input = {
+        "hash_algorithm": expected["contract_input_hash_algorithm"],
+        "file_count": expected["contract_input_file_count"],
+        "tree_sha256": expected["contract_input_tree_sha256"],
+    }
+    require(parsed["input"] == expected_input,
+            "tracked Python log input identity does not match local evidence")
+
+
+def validate_optional_python_contract_log(
+    path: Path,
+    expected: dict[str, object],
+) -> None:
+    if sha256_file(path) == expected["log_sha256"]:
+        validate_python_contract_log(path, expected)
+        return
+
+    published_rtl = ROOT / "build/rtl/mycpu_top.v"
+    require(not published_rtl.is_file(),
+            "local Python contract log differs from tracked evidence")
+    require(int(expected["passed_count"]) >= 1,
+            "local Python contract log differs from tracked evidence")
+    clean_clone_expected = dict(expected)
+    clean_clone_expected["passed_count"] = int(expected["passed_count"]) - 1
+    clean_clone_expected["skipped_count"] = int(expected["skipped_count"]) + 1
+    validate_python_contract_log(path, clean_clone_expected)
+
+    local = parse_python_contract_log(path)
+    entries = local["entries"]
+    local_text = local["text"]
+    require(isinstance(entries, list) and isinstance(local_text, str),
+            "clean-clone Python contract log is invalid")
+    require(
+        f"SKIP {GENERATED_RTL_TEST_ID} | {GENERATED_RTL_SKIP_REASON}" in
+        local_text.splitlines(),
+        "clean-clone Python contract log has an unexpected skip reason",
+    )
+
+    tracked_path = ROOT / "evidence/current/python-contract.log"
+    require(tracked_path.is_file(),
+            "tracked Python contract log is missing")
+    tracked = parse_python_contract_log(tracked_path)
+    tracked_entries = tracked["entries"]
+    require(isinstance(tracked_entries, list), "tracked Python entries are invalid")
+    require([test_id for _, test_id, _ in entries] ==
+            [test_id for _, test_id, _ in tracked_entries],
+            "clean-clone Python contract log has a different test set")
+    for local_entry, tracked_entry in zip(entries, tracked_entries):
+        _, test_id, _ = local_entry
+        if test_id == GENERATED_RTL_TEST_ID:
+            require(tracked_entry[0] == "PASS" and local_entry == (
+                "SKIP", GENERATED_RTL_TEST_ID, GENERATED_RTL_SKIP_REASON
+            ), "clean-clone generated RTL outcome is invalid")
+        else:
+            require(local_entry == tracked_entry,
+                    "clean-clone Python contract log changed an unrelated outcome")
+
+
+def scala_report_snapshot(report_directory: Path) -> Optional[dict[str, object]]:
+    if not any(report_directory.glob("TEST-*.xml")):
+        return None
+    return collect_scala_report_snapshot(ROOT, report_directory)
+
+
+def validate_local_evidence_reference(
+    reference: object,
+    current_cpu: dict[str, object],
+) -> dict[str, object]:
+    require(isinstance(reference, dict), "current CPU local_evidence must be an object")
+    require(set(reference) == {"path", "sha256"},
+            "current CPU local_evidence has an unsupported schema")
+    path = repository_file(reference.get("path"), "current local verification evidence")
+    expected_sha256 = require_hash(reference.get("sha256"), SHA256_PATTERN,
+                                   "current local verification evidence SHA256")
+    require(sha256_file(path) == expected_sha256,
+            "current local verification evidence SHA256 does not match")
+    document = json.loads(path.read_text(encoding="utf-8"))
+    require(isinstance(document, dict), "current local verification evidence must be an object")
+    require(set(document) == {
+        "schema_version", "evidence_type", "scope", "cpu_identity",
+        "artifact_policy", "scala", "python_contract", "rtl_generation", "gates",
+    }, "current local verification evidence has an unsupported schema")
+    require(document.get("schema_version") == 2,
+            "current local verification evidence must use schema version 2")
+    require(document.get("evidence_type") == "local_cpu_verification",
+            "current local verification evidence has the wrong type")
+    require(document.get("scope") == "local_only_no_vivado_or_fpga_claim",
+            "current local verification evidence has the wrong scope")
+
+    identity = document.get("cpu_identity")
+    require(isinstance(identity, dict), "current local evidence has no CPU identity")
+    expected_identity = {
+        "source_commit": current_cpu["source_commit"],
+        "profile": current_cpu["profile"],
+        "source_tree_sha256": current_cpu["source_tree_sha256"],
+        "raw_rtl_sha256": current_cpu["raw_rtl_sha256"],
+        "published_rtl_sha256": current_cpu["published_rtl_sha256"],
+    }
+    require(identity == expected_identity, "current local evidence uses a different CPU identity")
+
+    policy = document.get("artifact_policy")
+    require(isinstance(policy, dict), "current local evidence has no artifact policy")
+    require(policy.get("tracked") == [
+        "evidence/current/local-verification.json",
+        "evidence/current/python-contract.log",
+    ], "current local evidence tracked artifact policy is incorrect")
+    require(policy.get("ignored_rebuildable") == [
+        {"path": "cpu/target/test-reports", "rebuild": "make cpu-test-all"},
+        {"path": "build/rtl", "rebuild": "make cpu-generate"},
+        {"path": "build/gates", "rebuild": "make cpu-locked-gates"},
+        {"path": "build/evidence", "rebuild": "make cpu-check"},
+    ], "current local evidence ignored artifact policy is incorrect")
+    require(policy.get("tracked_summary_is_not_hardware_evidence") is True,
+            "current local evidence must not claim hardware verification")
+
+    scala = document.get("scala")
+    require(isinstance(scala, dict), "current local evidence has no Scala result")
+    require(scala.get("status") == "passed", "current Scala evidence is not passing")
+    require(scala.get("command") == "make cpu-test-all",
+            "current Scala evidence command is incorrect")
+    require(scala.get("report_directory") == "cpu/target/test-reports",
+            "current Scala evidence report directory is incorrect")
+    require(scala.get("hash_algorithm") == "path-payload-sha256-v1",
+            "current Scala evidence hash algorithm is incorrect")
+    require(scala.get("raw_reports_tracked") is False,
+            "current Scala raw reports must remain ignored")
+    require(scala.get("run_manifest_path") == "build/evidence/scala-run.json",
+            "current Scala run manifest path is incorrect")
+    require_hash(scala.get("run_manifest_sha256"), SHA256_PATTERN,
+                 "current Scala run manifest SHA256")
+    require(scala.get("input_hash_algorithm") == TREE_HASH_ALGORITHM,
+            "current Scala input hash algorithm is incorrect")
+    require(scala.get("input_scope") == list(SCALA_INPUT_SCOPE),
+            "current Scala input scope is incorrect")
+    scala_input_sha256, scala_input_file_count = tracked_content_tree_sha256(
+        ROOT, SCALA_INPUT_SCOPE
+    )
+    require(scala.get("input_file_count") == scala_input_file_count,
+            "current Scala input file count does not match")
+    require(scala.get("input_tree_sha256") == scala_input_sha256,
+            "current Scala input tree SHA256 does not match")
+    reports = scala.get("reports")
+    require(isinstance(reports, list) and bool(reports),
+            "current Scala evidence must list report hashes")
+    require(len(reports) == require_int(scala.get("suite_count"), "Scala suite count", 1),
+            "current Scala report list does not match suite count")
+    seen_paths = set()
+    seen_suites = set()
+    report_totals = {"tests": 0, "errors": 0, "failures": 0, "skipped": 0}
+    for entry in reports:
+        require(isinstance(entry, dict), "Scala report evidence must be an object")
+        report_path = require_nonempty_string(entry.get("path"), "Scala report path")
+        suite_name = require_nonempty_string(entry.get("suite"), "Scala report suite")
+        require(report_path == f"cpu/target/test-reports/TEST-{suite_name}.xml",
+                "Scala report path does not match suite name")
+        require(report_path not in seen_paths and suite_name not in seen_suites,
+                "Scala report evidence contains duplicates")
+        seen_paths.add(report_path)
+        seen_suites.add(suite_name)
+        require_hash(entry.get("sha256"), SHA256_PATTERN, "Scala report SHA256")
+        for source, target in (
+            ("tests", "tests"), ("errors", "errors"),
+            ("failures", "failures"), ("skipped", "skipped"),
+        ):
+            report_totals[target] += require_int(
+                entry.get(source), f"Scala report {source} count"
+            )
+    require(report_totals == {
+        "tests": scala.get("test_count"),
+        "errors": scala.get("error_count"),
+        "failures": scala.get("failure_count"),
+        "skipped": scala.get("skipped_count"),
+    }, "Scala per-report counts do not match aggregate evidence")
+    require(scala.get("error_count") == 0 and scala.get("failure_count") == 0,
+            "current Scala evidence contains failures")
+    require_hash(scala.get("report_tree_sha256"), SHA256_PATTERN,
+                 "Scala report tree SHA256")
+
+    python_contract = document.get("python_contract")
+    require(isinstance(python_contract, dict),
+            "current local evidence has no Python contract result")
+    require(python_contract.get("status") == "passed",
+            "current Python contract evidence is not passing")
+    require(python_contract.get("command") == "make cpu-contract-test",
+            "current Python contract command is incorrect")
+    total = require_int(python_contract.get("test_count"), "Python test count", 1)
+    passed = require_int(python_contract.get("passed_count"), "Python passed count")
+    skipped = require_int(python_contract.get("skipped_count"), "Python skipped count")
+    require(python_contract.get("failure_count") == 0 and
+            python_contract.get("error_count") == 0,
+            "current Python contract evidence contains failures")
+    require(passed + skipped == total, "Python contract counts do not conserve tests")
+    require(total == count_python_contract_tests(),
+            "Python evidence count does not match discovered contract tests")
+    log_path = repository_file(python_contract.get("log"),
+                               "current Python contract log")
+    require(log_path.relative_to(ROOT).as_posix() ==
+            "evidence/current/python-contract.log",
+            "current Python contract log path is incorrect")
+    require(sha256_file(log_path) == require_hash(
+        python_contract.get("log_sha256"), SHA256_PATTERN,
+        "current Python contract log SHA256",
+    ), "current Python contract log SHA256 does not match")
+    runner_path = ROOT / "scripts/common/run_python_contracts.py"
+    require(sha256_file(runner_path) == require_hash(
+        python_contract.get("runner_sha256"), SHA256_PATTERN,
+        "current Python contract runner SHA256",
+    ), "current Python contract runner SHA256 does not match")
+    require(python_contract.get("contract_input_hash_algorithm") ==
+            TREE_HASH_ALGORITHM,
+            "current Python contract input hash algorithm is incorrect")
+    require(python_contract.get("contract_input_scope") ==
+            list(PYTHON_CONTRACT_INPUT_SCOPE),
+            "current Python contract input scope is incorrect")
+    input_tree_sha256, input_file_count = tracked_content_tree_sha256(
+        ROOT, PYTHON_CONTRACT_INPUT_SCOPE
+    )
+    require(python_contract.get("contract_input_file_count") == input_file_count,
+            "current Python contract input file count does not match")
+    require(python_contract.get("contract_input_tree_sha256") == input_tree_sha256,
+            "current Python contract input tree SHA256 does not match")
+    validate_python_contract_log(log_path, python_contract)
+
+    generation = document.get("rtl_generation")
+    require(isinstance(generation, dict), "current local evidence has no RTL generation")
+    require(generation.get("status") == "passed",
+            "current RTL generation evidence is not passing")
+    require(generation.get("command") ==
+            "make cpu-locked-gates CUSTOM_PROFILE=disabled",
+            "current RTL generation command is incorrect")
+    require(generation.get("manifest_path") == "build/rtl/generation-manifest.json",
+            "current RTL generation manifest path is incorrect")
+    require_hash(generation.get("manifest_sha256"), SHA256_PATTERN,
+                 "current RTL generation manifest SHA256")
+    require(generation.get("raw_artifacts_tracked") is False,
+            "current generated RTL must remain ignored")
+    toolchain = generation.get("toolchain")
+    require(isinstance(toolchain, dict) and
+            all(isinstance(value, str) and value for value in toolchain.values()),
+            "current RTL generation toolchain is incomplete")
+
+    gates = document.get("gates")
+    require(isinstance(gates, dict) and
+            set(gates) == {"port_contract", "verilator_lint", "yosys"},
+            "current local evidence has an unsupported gate set")
+    expected_paths = {
+        "port_contract": "build/gates/port/summary.json",
+        "verilator_lint": "build/gates/lint/summary.json",
+        "yosys": "build/gates/yosys/summary.json",
+    }
+    for name, gate in gates.items():
+        require(isinstance(gate, dict), f"current {name} evidence must be an object")
+        require(gate.get("status") == "passed", f"current {name} evidence is not passing")
+        require(gate.get("summary_path") == expected_paths[name],
+                f"current {name} summary path is incorrect")
+        require_hash(gate.get("summary_sha256"), SHA256_PATTERN,
+                     f"current {name} summary SHA256")
+        require(gate.get("published_rtl_sha256") == current_cpu["published_rtl_sha256"],
+                f"current {name} evidence uses a different published RTL")
+        for field in ("evaluator_sha256", "manifest_sha256", "ports_contract_sha256"):
+            require_hash(gate.get(field), SHA256_PATTERN, f"current {name} {field}")
+        tool = gate.get("tool")
+        require(isinstance(tool, dict) and
+                set(tool) == {"name", "version", "sha256"},
+                f"current {name} tool identity is incomplete")
+        require_nonempty_string(tool.get("name"), f"current {name} tool name")
+        require_nonempty_string(tool.get("version"), f"current {name} tool version")
+        require_hash(tool.get("sha256"), SHA256_PATTERN, f"current {name} tool SHA256")
+    current_provenance = {
+        "evaluator_sha256": sha256_file(ROOT / "scripts/cpu/rtl_contract.py"),
+        "manifest_sha256": sha256_file(ROOT / "cpu/reference/manifest.lock"),
+        "ports_contract_sha256": sha256_file(
+            ROOT / "cpu/reference/core-top.ports.json"
+        ),
+    }
+    for name, gate in gates.items():
+        for field, expected in current_provenance.items():
+            require(gate.get(field) == expected,
+                    f"current {name} {field} does not match the repository")
+    port_contract = gates["port_contract"].get("contract")
+    require(isinstance(port_contract, dict), "current port evidence has no contract")
+    require(port_contract.get("port_count") == 49 and
+            port_contract.get("tlbnum_default") == 32 and
+            port_contract.get("legacy_backend_absent") is True,
+            "current port evidence does not match the public CPU contract")
+    lint = gates["verilator_lint"]
+    require(lint.get("warning_policy") == "strict-zero" and
+            lint.get("warning_count") == 0,
+            "current lint evidence must use strict zero warnings")
+
+    return document
+
+
 def validate_optional_local_artifacts(
     current_cpu: dict[str, object],
-    verification: dict[str, object],
+    local_evidence: dict[str, object],
 ) -> None:
     report_directory = ROOT / "cpu/target/test-reports"
-    reports = sorted(report_directory.glob("TEST-*.xml"))
-    if reports:
-        suite_count = len(reports)
-        test_count = 0
-        error_count = 0
-        failure_count = 0
-        skipped_count = 0
-        for report in reports:
-            suite = ET.parse(report).getroot()
-            test_count += int(suite.attrib.get("tests", "0"))
-            error_count += int(suite.attrib.get("errors", "0"))
-            failure_count += int(suite.attrib.get("failures", "0"))
-            skipped_count += int(suite.attrib.get("skipped", "0"))
-        require(suite_count == verification["scala_suites"],
-                "local Scala XML suite count does not match evidence")
-        require(test_count == verification["scala_tests"],
-                "local Scala XML test count does not match evidence")
-        require(skipped_count == verification["scala_skipped"],
-                "local Scala XML skipped count does not match evidence")
-        require(error_count == 0 and failure_count == 0,
-                "local Scala XML reports contain failures")
+    report_snapshot = scala_report_snapshot(report_directory)
+    if report_snapshot is not None:
+        scala = local_evidence["scala"]
+        require(isinstance(scala, dict), "tracked Scala evidence is invalid")
+        for field in (
+            "suite_count", "test_count", "error_count", "failure_count",
+            "skipped_count",
+        ):
+            require(report_snapshot[field] == scala[field],
+                    f"local Scala {field} does not match tracked evidence")
+        stable_fields = ("path", "suite", "tests", "errors", "failures", "skipped")
+        local_reports = [
+            {field: entry[field] for field in stable_fields}
+            for entry in report_snapshot["reports"]
+        ]
+        tracked_reports = [
+            {field: entry[field] for field in stable_fields}
+            for entry in scala["reports"]
+        ]
+        require(local_reports == tracked_reports,
+                "local Scala suite results do not match tracked evidence")
+        scala_run_path = ROOT / "build/evidence/scala-run.json"
+        scala_run = load_optional_json(scala_run_path)
+        require(scala_run is not None, "local Scala reports have no run manifest")
+        require(scala_run.get("schema_version") == 1 and
+                scala_run.get("evidence_type") == "scala_test_run" and
+                scala_run.get("command") == "make cpu-test-all",
+                "local Scala run manifest has an unsupported schema")
+        require(scala_run.get("input") == {
+            "hash_algorithm": scala["input_hash_algorithm"],
+            "scope": scala["input_scope"],
+            "file_count": scala["input_file_count"],
+            "tree_sha256": scala["input_tree_sha256"],
+        }, "local Scala run manifest input does not match tracked evidence")
+        require(scala_run.get("reports") == report_snapshot,
+                "local Scala run manifest reports do not match local XML reports")
+    else:
+        require(not (ROOT / "build/evidence/scala-run.json").is_file(),
+                "local Scala run manifest exists without XML reports")
 
     manifest = load_optional_json(ROOT / "build/rtl/generation-manifest.json")
     if manifest is not None:
@@ -319,15 +714,27 @@ def validate_optional_local_artifacts(
         ):
             require(manifest.get(field) == expected,
                     f"local RTL generation manifest {field} does not match evidence")
-        require(verification.get("rtl_generation") == "passed",
-                "an RTL generation manifest is present but evidence is not passed")
+        generation = local_evidence["rtl_generation"]
+        require(isinstance(generation, dict), "tracked RTL generation evidence is invalid")
+        require(manifest.get("toolchain") == generation.get("toolchain"),
+                "local RTL generation toolchain does not match tracked evidence")
+        raw_rtl = ROOT / "build/rtl/raw/core_top.v"
+        published_rtl = ROOT / "build/rtl/mycpu_top.v"
+        require(raw_rtl.is_file() and published_rtl.is_file(),
+                "local RTL generation manifest exists without both RTL outputs")
+        require(sha256_file(raw_rtl) == current_cpu["raw_rtl_sha256"],
+                "local raw RTL SHA256 does not match tracked evidence")
+        require(sha256_file(published_rtl) == current_cpu["published_rtl_sha256"],
+                "local published RTL SHA256 does not match tracked evidence")
 
-    gate_artifacts = (
-        ("port_contract", ROOT / "build/gates/port/summary.json"),
-        ("verilator_lint", ROOT / "build/gates/lint/summary.json"),
-        ("yosys", ROOT / "build/gates/yosys/summary.json"),
-    )
-    for evidence_field, path in gate_artifacts:
+    gates = local_evidence["gates"]
+    require(isinstance(gates, dict), "tracked gate evidence is invalid")
+    gate_artifacts = {
+        "port_contract": ROOT / "build/gates/port/summary.json",
+        "verilator_lint": ROOT / "build/gates/lint/summary.json",
+        "yosys": ROOT / "build/gates/yosys/summary.json",
+    }
+    for evidence_field, path in gate_artifacts.items():
         summary = load_optional_json(path)
         if summary is None:
             continue
@@ -339,19 +746,96 @@ def validate_optional_local_artifacts(
         require(input_section.get("complete_rtl_sha256") ==
                 current_cpu["published_rtl_sha256"],
                 f"local {path.relative_to(ROOT)} uses a different published RTL")
-        require(verification.get(evidence_field) == "passed",
-                f"local {path.relative_to(ROOT)} passes but evidence does not")
+        gate_evidence = gates[evidence_field]
+        require(isinstance(gate_evidence, dict), f"tracked {evidence_field} is invalid")
+        require(summary.get("scope") == "complete-spinal-rtl" and
+                summary.get("target") == "core-top-compat",
+                f"local {path.relative_to(ROOT)} has the wrong scope or target")
+        require(input_section.get("snapshot_sha256") == current_cpu["published_rtl_sha256"] and
+                input_section.get("stable") is True,
+                f"local {path.relative_to(ROOT)} does not use a stable RTL snapshot")
+        provenance = summary.get("provenance")
+        require(isinstance(provenance, dict),
+                f"local {path.relative_to(ROOT)} has no provenance")
+        for source, target in (
+            ("evaluator_sha256", "evaluator_sha256"),
+            ("manifest_sha256", "manifest_sha256"),
+            ("ports_contract_sha256", "ports_contract_sha256"),
+        ):
+            require(provenance.get(source) == gate_evidence.get(target),
+                    f"local {path.relative_to(ROOT)} {source} does not match evidence")
+        for source, current_path in (
+            ("evaluator_sha256", ROOT / "scripts/cpu/rtl_contract.py"),
+            ("manifest_sha256", ROOT / "cpu/reference/manifest.lock"),
+            ("ports_contract_sha256", ROOT / "cpu/reference/core-top.ports.json"),
+        ):
+            require(provenance.get(source) == sha256_file(current_path),
+                    f"local {path.relative_to(ROOT)} {source} is stale")
+
+        tool_evidence = gate_evidence.get("tool")
+        require(isinstance(tool_evidence, dict),
+                f"tracked {evidence_field} tool identity is invalid")
+        if evidence_field == "verilator_lint":
+            tool_result = summary.get("verilator")
+            require(summary.get("skip_markers") == [] and
+                    summary.get("unexpected_errors") == [],
+                    "local Verilator gate contains skipped or unexpected results")
+        else:
+            yosys_result = summary.get("yosys")
+            require(isinstance(yosys_result, dict),
+                    f"local {evidence_field} has no Yosys result")
+            require(yosys_result.get("skip_markers") == [] and
+                    yosys_result.get("returncode") == 0 and
+                    yosys_result.get("timed_out") is False,
+                    f"local {evidence_field} Yosys did not complete cleanly")
+            tool_result = yosys_result.get("tool")
+        require(isinstance(tool_result, dict),
+                f"local {evidence_field} has no tool result")
+        require(tool_result.get("returncode", 0) == 0 and
+                tool_result.get("timed_out", False) is False,
+                f"local {evidence_field} tool did not complete cleanly")
+        require(tool_result.get("version") == tool_evidence.get("version") and
+                tool_result.get("sha256") == tool_evidence.get("sha256"),
+                f"local {evidence_field} tool identity does not match evidence")
+        if evidence_field == "port_contract":
+            require(input_section.get("contract") == gate_evidence.get("contract"),
+                    "local port contract summary does not match tracked evidence")
 
     lint_summary = load_optional_json(ROOT / "build/gates/lint/summary.json")
     if lint_summary is not None:
         warning_policy = lint_summary.get("warning_policy")
         require(isinstance(warning_policy, dict),
                 "local lint summary has no warning policy")
-        require(warning_policy.get("actual_warning_count") ==
-                verification["verilator_lint_warning_count"],
+        require(warning_policy.get("mode") == "strict-zero" and
+                warning_policy.get("actual_warning_count") == 0,
                 "local Verilator warning count does not match evidence")
 
+    build_python_log = ROOT / "build/evidence/python-contract.log"
+    if build_python_log.is_file():
+        python_contract = local_evidence["python_contract"]
+        require(isinstance(python_contract, dict), "tracked Python evidence is invalid")
+        validate_optional_python_contract_log(build_python_log, python_contract)
+
+    tracked_raw = git_output(["ls-files", "--", "build", "cpu/target"],
+                             "check ignored raw artifacts")
+    require(not tracked_raw, "raw build or Scala report artifacts must not be tracked")
+    for probe in (
+        "build/rtl/.evidence-probe",
+        "build/gates/.evidence-probe",
+        "build/evidence/.evidence-probe",
+        "cpu/target/test-reports/.evidence-probe",
+    ):
+        result = subprocess.run(
+            ["git", "check-ignore", "-q", "--no-index", probe],
+            cwd=ROOT,
+            check=False,
+        )
+        require(result.returncode == 0, f"raw artifact path must remain ignored: {probe}")
+
 def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--structure-only", action="store_true")
+    args = parser.parse_args()
     readme_path = ROOT / "README.md"
     docs_index_path = ROOT / "docs/README.md"
     status_path = ROOT / "docs/status.md"
@@ -383,6 +867,7 @@ def main() -> int:
         "docs/third-party-sources.md",
         "CONTRIBUTING.md",
         "evidence/index.json",
+        "evidence/current/local-verification.json",
     ):
         require_link(readme, readme_path, target)
 
@@ -402,6 +887,8 @@ def main() -> int:
         "current-optimization-plan.md",
         "research-20260816-execution-log.md",
         "third-party-sources.md",
+        "../evidence/index.json",
+        "../evidence/current/local-verification.json",
     ):
         require_link(docs_index, docs_index_path, target)
 
@@ -434,19 +921,43 @@ def main() -> int:
     require("make custom-check CUSTOM_PROFILE=" in custom_instructions,
             "custom-instruction guide must document profile RTL checks")
 
-    require(evidence.get("schema_version") == 1,
-            "evidence index must use schema version 1")
+    if args.structure_only:
+        print(f"documentation structure: {len(ids)} unique candidate IDs")
+        return 0
+
+    require(evidence.get("schema_version") == 2,
+            "evidence index must use schema version 2")
+    require(set(evidence) == {
+        "schema_version", "repository", "status_document", "current_cpu",
+        "latest_hardware_reference", "claim_rules",
+    }, "evidence index has an unsupported top-level schema")
     require(evidence.get("repository") ==
             "https://github.com/TossACoinTAC/NSCSCC2026-MIKU.git",
             "evidence index repository is incorrect")
     require(evidence.get("status_document") == "docs/status.md",
             "evidence index must reference docs/status.md")
+    claim_rules = evidence.get("claim_rules")
+    require(isinstance(claim_rules, list) and len(claim_rules) >= 4 and
+            all(isinstance(rule, str) and rule for rule in claim_rules),
+            "evidence index claim_rules are incomplete")
 
     current_cpu = evidence.get("current_cpu")
-    hardware_reference = evidence.get("last_measured_hardware_reference")
+    hardware_reference = evidence.get("latest_hardware_reference")
     require(isinstance(current_cpu, dict), "evidence index current_cpu must be an object")
     require(isinstance(hardware_reference, dict),
             "evidence index hardware reference must be an object")
+    require(set(current_cpu) == {
+        "source_commit", "profile", "source_tree_sha256", "raw_rtl_sha256",
+        "published_rtl_sha256", "local_evidence", "verification",
+        "hardware_evidence", "performance_claim",
+    }, "evidence index current_cpu has an unsupported schema")
+    require(set(hardware_reference) == {
+        "evidence_level", "artifact_availability", "repository_commit",
+        "source_commit", "chiplab_commit", "published_rtl_sha256",
+        "vivado_version", "part", "profile", "frequency_mhz",
+        "setup_wns_ns", "hold_wns_ns", "drc_errors", "perf20",
+        "package_sha256", "evidence_document",
+    }, "evidence index hardware reference has an unsupported schema")
 
     current_commit = require_hash(current_cpu.get("source_commit"), COMMIT_PATTERN,
                                   "current CPU source commit")
@@ -474,35 +985,19 @@ def main() -> int:
     verification = current_cpu.get("verification")
     require(isinstance(verification, dict),
             "current CPU verification must be an object")
-    scala_suites = require_int(verification.get("scala_suites"),
-                               "Scala suite count", minimum=1)
-    scala_tests = require_int(verification.get("scala_tests"),
-                              "Scala test count", minimum=1)
-    scala_skipped = require_int(verification.get("scala_skipped"),
-                                "Scala skipped count")
-    python_passed = require_int(verification.get("python_contract_passed"),
-                                "Python passed count", minimum=1)
-    python_skipped = require_int(verification.get("python_contract_skipped"),
-                                 "Python skipped count")
-    discovered_python_tests = count_python_contract_tests()
-    require(python_passed + python_skipped == discovered_python_tests,
-            "Python passed and skipped counts do not match discovered contract tests")
-    warning_count = require_int(verification.get("verilator_lint_warning_count"),
-                                "Verilator lint warning count")
-    for field in ("scala_status", "rtl_generation", "port_contract",
-                  "verilator_lint", "yosys"):
-        require(verification.get(field) == "passed",
-                f"current CPU {field} must match the recorded passing evidence")
-    hardware_state_fields = ("vivado_implementation", "fpga_func", "fpga_perf20")
-    for field in hardware_state_fields:
+    require(set(verification) == {
+        "local", "vivado_implementation", "fpga_func", "fpga_perf20",
+        "linux_release",
+    }, "current CPU verification has an unsupported schema")
+    require(verification.get("local") == "passed",
+            "current CPU local verification must be passed")
+    for field in HARDWARE_STAGES:
         require(verification.get(field) in VERIFICATION_STATES,
                 f"current CPU {field} has an unsupported state")
     require(verification.get("linux_release") in LINUX_VERIFICATION_STATES,
             "current CPU linux_release has an unsupported state")
 
     performance_claim = current_cpu.get("performance_claim")
-    require(performance_claim in {"none", "matching_hardware"},
-            "current CPU performance claim has an unsupported state")
     forbidden_top_level_hardware_fields = {
         "repository_commit",
         "chiplab_commit",
@@ -521,36 +1016,32 @@ def main() -> int:
             "current CPU contains hardware fields outside hardware_evidence: " +
             ", ".join(unexpected))
 
-    current_hardware = current_cpu.get("hardware_evidence")
-    current_hardware_values: Optional[dict[str, object]] = None
-    if performance_claim == "none":
-        require(current_hardware is None,
-                "current CPU with no performance claim must not contain hardware_evidence")
-        passed_hardware_states = [
-            field for field in hardware_state_fields
-            if verification.get(field) == "passed"
-        ]
-        require(not passed_hardware_states,
-                "passed hardware states require matching hardware evidence: " +
-                ", ".join(passed_hardware_states))
-    else:
-        require(isinstance(current_hardware, dict),
-                "matching hardware performance requires a hardware_evidence object")
-        require(verification.get("vivado_implementation") == "passed",
-                "matching hardware performance requires passed Vivado implementation")
-        require(verification.get("fpga_perf20") == "passed",
-                "matching hardware performance requires passed FPGA perf20")
-        current_hardware_values = validate_hardware_record(
-            current_hardware, "current CPU hardware evidence")
-        require(current_hardware_values["source_commit"] == current_commit,
-                "current hardware evidence uses a different CPU source commit")
-        require(current_hardware_values["published_rtl_sha256"] == current_rtl,
-                "current hardware evidence uses a different published RTL")
-        require_passing_hardware(current_hardware_values,
-                                 "current CPU hardware evidence")
-        validate_hardware_git_identity(current_hardware_values,
-                                       "current CPU hardware evidence")
+    local_evidence = validate_local_evidence_reference(
+        current_cpu.get("local_evidence"), current_cpu
+    )
+    scala = local_evidence["scala"]
+    python_contract = local_evidence["python_contract"]
+    gates = local_evidence["gates"]
+    require(isinstance(scala, dict) and isinstance(python_contract, dict) and
+            isinstance(gates, dict), "current local evidence sections are invalid")
+    scala_suites = int(scala["suite_count"])
+    scala_tests = int(scala["test_count"])
+    scala_skipped = int(scala["skipped_count"])
+    python_passed = int(python_contract["passed_count"])
+    python_skipped = int(python_contract["skipped_count"])
+    lint_gate = gates["verilator_lint"]
+    require(isinstance(lint_gate, dict), "current lint evidence is invalid")
+    warning_count = int(lint_gate["warning_count"])
+    current_hardware_values = validate_current_hardware_stages(
+        current_cpu, verification, current_commit, current_rtl, current_profile
+    )
 
+    require(hardware_reference.get("evidence_level") == "summary_only",
+            "hardware reference must be marked summary_only")
+    require(hardware_reference.get("artifact_availability") == {
+        "vivado_raw": "not_in_repository",
+        "labagent_raw": "not_in_repository",
+    }, "hardware reference artifact availability must be explicit")
     reference_values = validate_hardware_record(hardware_reference, "hardware reference")
     reference_repository_commit = str(reference_values["repository_commit"])
     reference_commit = str(reference_values["source_commit"])
@@ -569,10 +1060,6 @@ def main() -> int:
     cpu_count = int(reference_values["cpu_count"])
     soc_count = int(reference_values["soc_count"])
     job_id = str(reference_values["job_id"])
-    require(current_commit != reference_commit,
-            "current CPU and historical hardware reference must remain distinct")
-    require(current_rtl != reference_rtl,
-            "current and historical published RTL hashes must remain distinct")
     require_passing_hardware(reference_values, "hardware reference")
     evidence_document = hardware_reference.get("evidence_document")
     require(evidence_document == "docs/research-20260816-execution-log.md",
@@ -596,7 +1083,7 @@ def main() -> int:
     ):
         require_in_documents(current_documents, f"`{value}`", label)
 
-    for field in (*hardware_state_fields, "linux_release"):
+    for field in (*HARDWARE_STAGES, "linux_release"):
         value = str(verification[field])
         require_in_documents(
             current_documents,
@@ -609,39 +1096,26 @@ def main() -> int:
         "current CPU performance claim",
     )
 
-    if current_hardware_values is not None:
-        current_hardware_documents = (
-            (str(current_hardware_values["repository_commit"]),
-             "current hardware repository commit"),
-            (str(current_hardware_values["source_commit"]),
-             "current hardware source commit"),
-            (str(current_hardware_values["chiplab_commit"]),
-             "current hardware Chiplab commit"),
-            (str(current_hardware_values["published_rtl_sha256"]),
-             "current hardware published RTL SHA256"),
-            (str(current_hardware_values["package_sha256"]),
-             "current hardware package SHA256"),
-            (str(current_hardware_values["job_id"]),
-             "current hardware job ID"),
-        )
-        for value, label in current_hardware_documents:
-            require_in_documents(current_documents, f"`{value}`", label)
+    if performance_claim == "matching_hardware":
+        vivado = current_hardware_values["vivado_implementation"]
+        perf20_record = current_hardware_values["fpga_perf20"]
+        vivado_result = vivado["result"]
+        perf20_result = perf20_record["result"]
+        require(isinstance(vivado_result, dict) and isinstance(perf20_result, dict),
+                "current matching hardware result is invalid")
         for value, label in (
-            (f"{float(current_hardware_values['frequency_mhz']):g} MHz",
+            (f"{float(vivado_result['frequency_mhz']):g} MHz",
              "current hardware frequency"),
-            (f"`{float(current_hardware_values['setup_wns_ns']):+.3f} ns`",
+            (f"`{float(vivado_result['setup_wns_ns']):+.3f} ns`",
              "current hardware setup WNS"),
-            (f"`{float(current_hardware_values['hold_wns_ns']):+.3f} ns`",
+            (f"`{float(vivado_result['hold_wns_ns']):+.3f} ns`",
              "current hardware hold WNS"),
-            (f"{int(current_hardware_values['perf_passed'])}／"
-             f"{int(current_hardware_values['perf_total'])} passed",
+            (f"{int(perf20_result['passed'])}／{int(perf20_result['total'])} passed",
              "current hardware perf20 result"),
-            (f"`{int(current_hardware_values['cpu_count']):,}`",
+            (f"`{int(perf20_result['cpu_count']):,}`",
              "current hardware CPU cycles"),
-            (f"`{int(current_hardware_values['soc_count']):,}`",
+            (f"`{int(perf20_result['soc_count']):,}`",
              "current hardware SoC cycles"),
-            (f"{int(current_hardware_values['drc_errors'])} Error",
-             "current hardware DRC result"),
         ):
             require_in_documents(current_documents, value, label)
 
@@ -658,6 +1132,13 @@ def main() -> int:
         "docs/status.md": status,
         str(evidence_document): evidence_document_text,
     }
+    for marker, label in (
+        ("`summary_only`", "hardware reference evidence level"),
+        ("`not_in_repository`", "hardware reference raw artifact availability"),
+    ):
+        require_in_documents(
+            {"README.md": readme, "docs/status.md": status}, marker, label
+        )
     for value, label in (
         (reference_repository_commit, "hardware reference repository commit"),
         (reference_commit, "hardware reference source commit"),
@@ -683,7 +1164,7 @@ def main() -> int:
     require_in_documents(historical_documents, f"{drc_errors} Error",
                          "hardware reference DRC result")
 
-    validate_optional_local_artifacts(current_cpu, verification)
+    validate_optional_local_artifacts(current_cpu, local_evidence)
 
     print(
         f"documentation contract: {len(ids)} unique candidate IDs; "
