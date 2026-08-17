@@ -58,6 +58,7 @@ ROUTE_ALLOW_PARTIAL ?= 0
 PERF_OBSERVATION_MATRIX ?=
 PERF_OBSERVATION_OUT ?= $(BUILD_ROOT)/reports/observations/perf20-$(shell date +%Y%m%d-%H%M%S).json
 TEST_BASE ?= HEAD
+TEST_IMPACT_PATHS ?=
 TEST_IMPACT_OUT ?= $(BUILD_ROOT)/reports/test-impact/$(shell date +%Y%m%d-%H%M%S).json
 YOSYS_RTL ?= $(BUILD_ROOT)/rtl/mycpu_top.v
 YOSYS_LABEL ?= $(notdir $(basename $(YOSYS_RTL)))
@@ -212,7 +213,8 @@ perf-observation-summary:
 
 test-impact:
 	@python3 scripts/experiment/test_impact.py --root "$(ROOT_DIR)" \
-		--manifest "$(CPU_DIR)/tests/manifest.yml" --base "$(TEST_BASE)" --out "$(TEST_IMPACT_OUT)"
+		--manifest "$(CPU_DIR)/tests/manifest.yml" --base "$(TEST_BASE)" \
+		$(foreach path,$(TEST_IMPACT_PATHS),--path "$(path)") --out "$(TEST_IMPACT_OUT)"
 
 cpu-test:
 	@test -n "$(strip $(CPU_TEST))" || { printf 'CPU_TEST 必须是完整 suite 名称\n' >&2; exit 2; }

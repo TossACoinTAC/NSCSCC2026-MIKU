@@ -20,6 +20,12 @@
       "python_contracts": ["tests/python/test_core_interface.py", "tests/python/test_generation_contract.py"]
     },
     {
+      "name": "register-structures",
+      "paths": ["cpu/src/main/scala/miku/backend/RegisterStructures.scala"],
+      "scala_suites": ["miku.backend.RegisterStructuresSpec", "miku.backend.OooBackendDispatchSpec", "miku.core.OooCoreIntegrationSpec", "miku.core.OooCoreSpec"],
+      "python_contracts": ["tests/python/test_core_interface.py", "tests/python/test_generation_contract.py"]
+    },
+    {
       "name": "execution",
       "paths": ["cpu/src/main/scala/miku/execute/*.scala"],
       "scala_suites": ["miku.execute.AluSpec", "miku.execute.LaccCoreSpec", "miku.execute.LaccLegacyDataCacheIntegrationSpec", "miku.execute.OooExecutionClusterSpec", "miku.execute.RegisteredMultiplierSpec", "miku.backend.OooBackendWithDataCacheSpec", "miku.core.OooCoreIntegrationSpec", "miku.core.OooCoreSpec"],

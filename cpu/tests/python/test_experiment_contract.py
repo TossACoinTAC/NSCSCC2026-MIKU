@@ -171,6 +171,16 @@ Slack (MET) : 0.100ns
         self.assertIn("miku.backend.IssueQueueSpec", result["scala_suites"])
         self.assertNotIn("miku.backend.LoadStoreQueueSpec", result["scala_suites"])
 
+    def test_register_structures_impact_includes_prf_contracts(self) -> None:
+        mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
+        result = calculate_impact(
+            ["cpu/src/main/scala/miku/backend/RegisterStructures.scala"], mapping
+        )
+        self.assertEqual(result["unmatched_paths"], [])
+        self.assertIn("miku.backend.RegisterStructuresSpec", result["scala_suites"])
+        self.assertIn("miku.backend.OooBackendDispatchSpec", result["scala_suites"])
+        self.assertIn("tests/python/test_generation_contract.py", result["python_contracts"])
+
     def test_translation_impact_includes_owner_and_system_contracts(self) -> None:
         mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
         path = "cpu/src/main/scala/miku/privileged/AddressTranslationUnit.scala"
