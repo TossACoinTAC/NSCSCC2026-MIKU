@@ -7,7 +7,8 @@ final class CacheArray(
     geometry: CoreCacheGeometry,
     addressWidth: Int = 32,
     decoupleDataReadEnable: Boolean = false,
-    decoupleTagReadEnable: Boolean = false
+    decoupleTagReadEnable: Boolean = false,
+    alwaysEnableDataRead: Boolean = false
 ) extends Component {
   require(geometry.lineBytes == CacheContract.LineBytes)
 
@@ -125,7 +126,9 @@ final class CacheArray(
       address = Mux(io.maintenanceReadValid, io.maintenanceReadIndex, requestIndex),
       enable = tagReadEnable
     )
-    val dataReadEnable = if (decoupleDataReadEnable) {
+    val dataReadEnable = if (alwaysEnableDataRead) {
+      True
+    } else if (decoupleDataReadEnable) {
       lookupFire || maintenanceFire
     } else {
       (lookupFire || maintenanceFire) && !externalWrite

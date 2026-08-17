@@ -648,26 +648,29 @@ class L1InstructionCacheSpec extends AnyFunSuite {
   }
 
   test("speculative instruction-array read preserves one-cycle hit turnover and miss recovery") {
-    for ((enabled, dataDecoupled, tagDecoupled) <- Seq(
-        (false, false, false),
-        (true, false, false),
-        (true, true, false),
-        (true, true, true)
+    for ((enabled, dataDecoupled, tagDecoupled, alwaysOnData) <- Seq(
+        (false, false, false, false),
+        (true, false, false, false),
+        (true, true, false, false),
+        (true, true, true, false),
+        (true, true, true, true)
       )) {
       val testConfig = config.copy(
         enableSpeculativeInstructionArrayRead = enabled,
         enableInstructionArrayDataReadDecoupling = dataDecoupled,
-        enableInstructionArrayTagReadDecoupling = tagDecoupled
+        enableInstructionArrayTagReadDecoupling = tagDecoupled,
+        enableInstructionArrayAlwaysOnDataRead = alwaysOnData
       )
       SimConfig.withVerilator
         .workspacePath(
           sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
-            s"/sim-workspace-ooo-l1i-array-read-$enabled-$dataDecoupled-$tagDecoupled"
+            s"/sim-workspace-ooo-l1i-array-read-$enabled-$dataDecoupled-$tagDecoupled-$alwaysOnData"
         )
         .compile(new L1InstructionCacheProbe(testConfig))
         .doSim(
-          s"ooo-l1i-array-read-$enabled-$dataDecoupled-$tagDecoupled",
-          if (tagDecoupled) 0x4c93 else if (dataDecoupled) 0x4c92 else if (enabled) 0x4c91
+          s"ooo-l1i-array-read-$enabled-$dataDecoupled-$tagDecoupled-$alwaysOnData",
+          if (alwaysOnData) 0x4c94 else if (tagDecoupled) 0x4c93
+          else if (dataDecoupled) 0x4c92 else if (enabled) 0x4c91
           else 0x4c90
         ) { dut =>
           dut.clockDomain.forkStimulus(period = 10)

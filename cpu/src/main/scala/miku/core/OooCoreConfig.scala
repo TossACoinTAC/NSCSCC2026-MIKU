@@ -190,6 +190,9 @@ final case class OooCoreConfig(
     // data-array read enable independent of the install write qualifier so the BRAM CE cone is
     // driven by lookup/maintenance acceptance only.
     enableInstructionArrayDataReadDecoupling: Boolean = true,
+    // L1I data reads have no architectural side effect and are observed only behind a qualified
+    // tag response. Tie their read enable high to remove hit-turnover control from the BRAM CE.
+    enableInstructionArrayAlwaysOnDataRead: Boolean = true,
     // The same L1I controller exclusion applies to tag reads and installs. Do not feed a tag-read
     // result through miss/install control and back into another tag RAM's read enable.
     enableInstructionArrayTagReadDecoupling: Boolean = true,
