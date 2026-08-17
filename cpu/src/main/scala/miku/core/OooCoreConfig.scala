@@ -141,6 +141,9 @@ final case class OooCoreConfig(
     enableFrontendTranslationResponseBypass: Boolean = true,
     enableFrontendTranslationTurnover: Boolean = true,
     enableFrontendHistoryTurnover: Boolean = true,
+    // Count the four visible response lanes with a balanced population count instead of a
+    // lane-serial prefix adder. Enqueue timing and the visible taken-prefix are unchanged.
+    enableBalancedFrontendResponseCount: Boolean = true,
     enableBalancedFrontendPredictionSelect: Boolean = true,
     // B02-F: widen the gshare history/PHT.  Its deterministic background initialization keeps
     // fetch active on BTFNT and does not propagate startup latency into predictor-update commit.

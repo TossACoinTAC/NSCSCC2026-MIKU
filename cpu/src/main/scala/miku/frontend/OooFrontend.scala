@@ -691,12 +691,22 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     if (!config.enableLargeGshare) {
       responsePredictorMetadata(lane)(15 downto 13) := predecode.branchType.asBits
     }
-    responsePrefix(lane + 1) :=
-      responsePrefix(lane) + responseSlotCandidateValid(lane).asUInt
+    if (config.enableBalancedFrontendResponseCount) {
+      responsePrefix(lane + 1) := 0
+    } else {
+      responsePrefix(lane + 1) :=
+        responsePrefix(lane) + responseSlotCandidateValid(lane).asUInt
+    }
+  }
+  val responseCandidateCount = UInt(enqueueCountWidth bits)
+  if (config.enableBalancedFrontendResponseCount) {
+    responseCandidateCount := CountOne(responseSlotCandidateValid.asBits).resized
+  } else {
+    responseCandidateCount := responsePrefix(config.fetchWidth)
   }
   val enqueueCount = Mux(
     responseFire,
-    responsePrefix(config.fetchWidth),
+    responseCandidateCount,
     U(0, enqueueCountWidth bits)
   )
   val overlapRequiredSlots = U(config.fetchWidth * 2, countWidth bits)
