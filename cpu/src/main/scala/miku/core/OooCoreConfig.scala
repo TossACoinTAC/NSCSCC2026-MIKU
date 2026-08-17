@@ -114,6 +114,9 @@ final case class OooCoreConfig(
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableBalancedIssueSelection: Boolean = true,
     enableBankedLoadForwardCompletion: Boolean = true,
+    // Select the scheduled Load payload with its binary queue index.  The legacy one-hot decode
+    // followed by conditional bundle overrides forms a wide priority mux after the age selector.
+    enableIndexedScheduledLoadSelection: Boolean = true,
     // Retry one younger, already translated cached Load when the oldest pending Load is blocked
     // only by a local Store alias.  The alternate still traverses the ordinary LSQ order checks.
     enableYoungerReadyLoadBypass: Boolean = true,

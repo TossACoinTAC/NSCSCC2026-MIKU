@@ -288,11 +288,15 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val oldestPendingLoadHead =
     (loadBase + loadHeadOffset).resize(config.loadQueueIndexWidth)
   val selectedLoadHead = Mux(selectYoungerLoad, youngerRetryIndex, oldestPendingLoadHead)
-  val selectedLoadMask = UIntToOh(selectedLoadHead, config.loadQueueEntries)
   val selectedLoad = LoadQueueEntry(config)
-  selectedLoad := loads(0)
-  for (entry <- 0 until config.loadQueueEntries) {
-    when(selectedLoadMask(entry)) { selectedLoad := loads(entry) }
+  if (config.enableIndexedScheduledLoadSelection) {
+    selectedLoad := loads(selectedLoadHead)
+  } else {
+    val selectedLoadMask = UIntToOh(selectedLoadHead, config.loadQueueEntries)
+    selectedLoad := loads(0)
+    for (entry <- 0 until config.loadQueueEntries) {
+      when(selectedLoadMask(entry)) { selectedLoad := loads(entry) }
+    }
   }
   val selectedLoadValid = pendingLoads.orR
   // Keep the registered scheduler payload resident while the same queue slot

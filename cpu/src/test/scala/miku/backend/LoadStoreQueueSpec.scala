@@ -420,11 +420,15 @@ class LoadStoreQueueSpec extends AnyFunSuite {
   }
 
   test("a local Store alias may retry one younger independent cached Load") {
-    for ((enabled, name, seed) <- Seq(
-        (false, "oldest-only", 0x4c80),
-        (true, "younger-retry", 0x4c81)
+    for ((enabled, indexedSelection, name, seed) <- Seq(
+        (false, true, "oldest-only", 0x4c80),
+        (true, false, "younger-retry-legacy-select", 0x4c81),
+        (true, true, "younger-retry-indexed-select", 0x4c86)
       )) {
-      val testConfig = config.copy(enableYoungerReadyLoadBypass = enabled)
+      val testConfig = config.copy(
+        enableYoungerReadyLoadBypass = enabled,
+        enableIndexedScheduledLoadSelection = indexedSelection
+      )
       SimConfig.withVerilator
         .workspacePath(
           sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
