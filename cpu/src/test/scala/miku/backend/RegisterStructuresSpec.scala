@@ -130,6 +130,46 @@ class RegisterStructuresSpec extends AnyFunSuite {
       }
   }
 
+  test("physical register bypass selects the matching bank and row") {
+    val config = OooCoreConfig.ExpandedWindow
+    val destinations = Seq(1, 34, 67, 100, 5)
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+        "/sim-workspace-ooo-registers-banked-bypass")
+      .compile(new PhysicalRegisterFile(config))
+      .doSim("ooo-prf-banked-bypass", 0x50524643) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        dut.io.writeValid #= 0
+        dut.io.flush #= false
+        dut.io.debugReadAddress #= destinations(3)
+        for (port <- 0 until config.executionWidth * 2) {
+          dut.io.readAddress(port) #= destinations(port % destinations.size)
+        }
+        for (port <- 0 until config.writebackWidth) {
+          dut.io.write(port).pdst #= destinations(port)
+          dut.io.write(port).data #= BigInt(0x6200 + port)
+        }
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+
+        dut.io.writeValid #= (BigInt(1) << config.writebackWidth) - 1
+        sleep(1)
+        for (port <- 0 until config.executionWidth * 2) {
+          assert(dut.io.readData(port).toBigInt == BigInt(0x6200 + port % destinations.size))
+        }
+        assert(dut.io.debugReadData.toBigInt == BigInt(0x6203))
+
+        dut.clockDomain.waitSampling()
+        dut.io.writeValid #= 0
+        sleep(1)
+        for (port <- 0 until config.executionWidth * 2) {
+          assert(dut.io.readData(port).toBigInt == BigInt(0x6200 + port % destinations.size))
+        }
+        assert(dut.io.debugReadData.toBigInt == BigInt(0x6203))
+      }
+  }
+
   private def clearFreeListInputs(dut: PhysicalRegisterFreeList, config: OooCoreConfig): Unit = {
     dut.io.allocateValid #= 0
     dut.io.allocateAccept #= false

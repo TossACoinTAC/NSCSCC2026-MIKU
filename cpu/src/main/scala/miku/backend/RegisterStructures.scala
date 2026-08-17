@@ -73,41 +73,38 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
     val bankReadData = Vec(Bits(config.xlen bits), storageBankCount)
     for (bank <- 0 until storageBankCount) {
       bankReadData(bank) := registerBanks(bank)(storageRow(io.readAddress(readPort)))
+      // Keep bypass selection inside the destination bank.  The preceding
+      // write decode already produces bank-local row tokens and data, so a
+      // full pdst comparator plus 32-bit mux at every PRF read port merely
+      // reconstructs a global completion network.  Retain reverse port
+      // ordering to preserve the existing same-cycle bypass priority.
+      for (writePort <- (0 until config.writebackWidth).reverse) {
+        when(writeBankRowTargets(writePort)(bank)(storageRow(io.readAddress(readPort)))) {
+          bankReadData(bank) := writeBankData(writePort)(bank)
+        }
+      }
     }
-    val selected = Bits(config.xlen bits)
-    selected := Mux(
+    io.readData(readPort) := Mux(
       io.readAddress(readPort) === 0,
       B(0, config.xlen bits),
       bankReadData(storageBank(io.readAddress(readPort)))
     )
-    for (writePort <- (0 until config.writebackWidth).reverse) {
-      when(
-        io.writeValid(writePort) && io.write(writePort).pdst =/= 0 &&
-          io.write(writePort).pdst === io.readAddress(readPort)
-      ) {
-        selected := io.write(writePort).data
-      }
-    }
-    io.readData(readPort) := selected
   }
 
   val debugBankReadData = Vec(Bits(config.xlen bits), storageBankCount)
   for (bank <- 0 until storageBankCount) {
     debugBankReadData(bank) := registerBanks(bank)(storageRow(io.debugReadAddress))
+    for (writePort <- (0 until config.writebackWidth).reverse) {
+      when(writeBankRowTargets(writePort)(bank)(storageRow(io.debugReadAddress))) {
+        debugBankReadData(bank) := writeBankData(writePort)(bank)
+      }
+    }
   }
   io.debugReadData := Mux(
     io.debugReadAddress === 0,
     B(0, config.xlen bits),
     debugBankReadData(storageBank(io.debugReadAddress))
   )
-  for (writePort <- (0 until config.writebackWidth).reverse) {
-    when(
-      io.writeValid(writePort) && io.write(writePort).pdst =/= 0 &&
-        io.write(writePort).pdst === io.debugReadAddress
-    ) {
-      io.debugReadData := io.write(writePort).data
-    }
-  }
 
   // Completion data only reaches the matching bank/row.  Write-port order is
   // unchanged: a later port still wins if multiple producers target the same
