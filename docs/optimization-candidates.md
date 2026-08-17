@@ -161,6 +161,10 @@ CT05 的 isolated perf20 已完成；最终组合的 func58 三个 random-AXI se
 | RF03 | PRF 本地捕获 completion data | execution completion 与 ROB staged identity 同拍到达时，在 PRF 消费侧并行保存每 lane 的 32-bit data；下一拍仍由 ROB 的 epoch、flush、writes-pdst 和 pdst 资格唯一决定写入，只把数据端从远端 `stagedResult` 换成本地副本 | lane data 与 ROB qualification 必须严格同拍；flush、旧 epoch、空拍、连续 completion、p0 和同址多写不得错配。额外五个数据寄存器会增加 160 FF，但不得引入 completion-valid 宽 CE | RegisterStructures、OooBackend completion/flush/epoch、连续多 lane、完整门禁、perf20 精确相等、ROB-to-PRF top-N 与 route delay | 已实现并默认启用；定向与 Yosys 通过，待组合软件和 direct route | RegisterStructures 13/13、OooBackendDispatch 25/25；Yosys 仅 `+5 cells/+160 word-bits`，全核 cells `+0.008%`，PRF 与 ROB 组合结构不变。旧 matching top-50 中 45/50 条 ROB/CSR 路径的最差端点正是 `stagedResult -> PRF D`，物理改善须由下一次 direct route 确认。 |
 | RF06 | completion pdst 在 backend 消费侧本地化 | 已有 RF04/03 在 completion 输入边界捕获 pdst/data；让 dispatch readiness、registered IQ wake、Store fallback 与 RenameMap 在同一 ROB-qualified valid 下使用本地 pdst，避免 `stagedPdst` 跨 ROB 回送到 backend 广播 | valid、epoch、flush、writes-pdst 仍只能由 ROB 资格化；本地 pdst 与 acceptance lane 必须同拍，direct wake 的优先级不能改变 | poison completion tuple、direct/registered wake、Store/PRF forwarding、stale epoch/flush、完整 cpu-check、perf20 exact、matching ROB-to-IQ top-N | 已实现；等待 matching direct route | `5727016`；OooBackendDispatch 25/25、RegisterStructures 13/13、完整 cpu-check 41 suites/264 tests 与 Python 95/95 通过。Yosys cells/word bits/post-flat 均精确不变；default perf20 20/20 逐项精确等于 3,879,728 cycles，比较见 `build/reports/comparisons/RF06-default-vs-R13-default.json`。 |
 | RF07 | PRF bank-local read bypass | 将 8R5W PRF 的同拍 bypass 比较和 data mux 下推到 bank/row token，试图减少跨 bank `pdst/data` 网络 | 动态 row bit select 可能被综合为更深 mux；读口、debug、p0 与原有多写优先级必须保持 | RegisterStructures banked bypass、fresh RTL Yosys；仅结构不退化才允许完整软件/Vivado | 已实验并否决，默认 RTL 已回退 | `a7b588a` 定向 14/14 通过，fresh Yosys 却显示 PRF `1,314 -> 1,449` cells、全核 word bits `389,771 -> 396,341`、PRF raw LTP `9 -> 12`；`shiftx/procmux` 深链抵消局部性。`2edc9d6` 已回退，比较见 `build/reports/yosys/RF07-bank-local-bypass-fresh-vs-RF06-default-local-tag.json`。 |
+| RT22 | completion 目标状态局部资格化 | 每个 completion 先以 pointer 读取唯一 resident state，再验证 valid/incomplete/generation；既有 bank-local target token 只负责 entry update，不再让 producer 对全部 entry state 做扫描资格 | 同拍多 completion 和 Store completion 的既有优先级、epoch、flush、wrap/reuse 与 exactly-once completion 必须保持 | ROB completion/epoch/wrap/head-bypass、完整门禁、perf20 exact、Yosys ROB cells/LTP、matching completion top-N | 已实现；软件与结构门禁通过，待 matching direct route | `b5d1b65`；ROB 19/19。相对 RF06，ROB cells `6,067 -> 5,548`（`-8.55%`）、word bits `25,461 -> 25,381`，raw LTP 保持 40；它提供本批次主要规模下降。 |
+| RT23 | completion-source 紧凑编码与平衡读取 | 保留 3-bit source state，在 commit 读侧一次解码为 producer mask并平衡选择 control/result memory，避免线性 producer 比较链 | applied-completion bypass、Store/decoded 特殊 source、lane tie-break 和 commit payload 必须保持；不能用宽 one-hot resident state换取浅逻辑 | ROB source priority/commit/head-bypass、完整门禁、perf20 exact、Yosys word bits/LTP | 已实现；紧凑版本进入组合，待 matching direct route | `9678a7d`；替代 word-bit 代价更高的 `485a900` 初版。ROB raw LTP `40 -> 39`，局部 cells `+24`、word bits `+1,041`；物理保留性须由 matching top-N 裁决。 |
+| RT24 | head commit 资格平衡化 | 将 commit0/1/2、head completion bypass 和 branch bypass 的串行布尔资格改为平衡 AND，不改变三宽 retirement prefix、异常或 recovery 时刻 | stop-after、predictor capacity、serializing、exception、branch recovery 与 head bypass 必须维持原优先级 | ROB commit/branch/exception/predictor-capacity、完整门禁、perf20 exact、Yosys LTP、matching commit top-N | 已实现；软件与结构门禁通过，待 matching direct route | `1732ef5`；cell/word-bit/post-flat 相对 RT23 精确不变，ROB raw LTP `39 -> 33`。 |
+| RT26 | head-bypass payload 平衡优先选择 | 五路 normal/branch completion payload 用最高 writeback lane 优先的二叉选择树，替代 ascending-lane `when` 的串行覆盖；不改变 bypass 可见拍数 | 多 lane tie-break、result/taken/target/mispredict 配对、Store bypass 优先级、flush/epoch/exception 边界必须保持 | ROB 双 lane priority、branch metadata、完整门禁、perf20 exact、Yosys cells/LTP、matching bypass top-N | 已实现；软件与结构门禁通过，待 matching direct route | `e04edc8`；ROB 20/20，新增最高 lane payload/branch metadata 合同。ROB raw LTP `33 -> 32`；相对 RT24 全核 cells `+40`、word bits `+478`，属于有记录的小型面积换深度。 |
 | MT10 | LSQ rename allocation payload 分 bank | 对 LQ/SQ 每个 rename lane 只做一次 one-hot target decode，并按 entry 低位形成四份 bank-local allocation payload；entry-local write 只接收所属 bank 的 `ROB pointer/recovery epoch/memory epoch`，移除动态 Vec 写产生的全队列地址与数据广播 | one-hot 必须与 accepted prefix、LQ/SQ index、flush 和 epoch 同拍对齐；不得改变 allocate 可见拍数、队列容量或 load/store 顺序。综合可能重新合并等价局部网络，最终仍需高扇出与拥塞报告验证 | LSQ allocation/flush/wrap/epoch/forwarding、完整门禁、组合 perf20、Yosys LSQ cells/LTP、rename allocation fanout、route overlap/耗时和 LSQ top-N | 已实现并默认启用；组合 partial route 已停止 | `4890747`；LSQ 36/36、完整门禁 41 suites/256 tests、Python 合同 92/92 均通过。相对 RT10+RF02，LSQ cells `8,031 -> 7,470`（`-6.985%`），整核 post-flatten cells `60,118 -> 59,557`（`-0.933%`），LSQ LTP 保持 51。三项组合 perf20 20 项逐项相等，总周期 `4,167,970`；func58 seeds `240/255/141` 均为 58/58。partial route `complete=false`，中间 WNS/TNS 为 `-0.751/-291.347 ns`，不能作为正式 WNS。 |
 | IT01 | IQ oldest-ready 选择树平衡化 | 旧 `selectLowest` 是反向覆盖形成的串行优先链；按连续年龄区间递归归约 valid/index，在每级保持 lower half 优先，把 8-entry oldest-ready 选择改为对数深度。它直接针对 R3 rank 6 的 wake/source-ready 经年龄选择到 issue payload 路径 | 必须保持 oldest-ready、无 ready、backpressure、flush、enqueue 与 direct/registered wake 语义；不同综合映射和布线拥塞可能抵消逻辑级数改善 | legacy/balanced 双配置、随机 compaction/wakeup、完整门禁、逐项 perf20、IQ top-N 与 matching WNS | 已实现并默认启用；R4 matching 后仍有 IQ 主导路径，需与 wake/select 解耦候选联合判断 | `71e36ee`；双配置 oldest-ready 定向测试及完整门禁通过。R4 组合 perf20 为 `5,014,520`（20 项精确相等）；matching direct full 的 IQ top-50 仍为 18 条，最差为 `rob/stagedPdst -> issueQueues_0/ageOrder_0`，`-0.106 ns`、route 80.17%，不能将该路径归因给 IT01 单项。 |
 | MT06 | forwarded Load completion data 分 bank 寄存 | 每个 SQ entry 以同一个 scheduled Load context 预先形成格式化 data bank，实际 forwarding owner 只在下一拍以窄 one-hot/index 选择已注册数据；从宽 completion data 的 D 端移除 Store PA alias、年龄比较和 forwarding owner 选择链 | 会增加约 `SQ entries x XLEN` 的寄存与翻转；forward、普通 load response、Store/异常 completion 碰撞优先级、epoch/flush 和 load wake 身份必须不变 | banked/legacy 双配置 forwarding、collision/flush/epoch、完整门禁、逐项 perf20、LSQ completion top-N、FF/LUT | 已实现并默认启用；R4 matching 后 LSQ 已退出负 slack top-50 | `6011bd5`；LSQ 双配置 forwarding 和完整门禁通过。R4 组合 perf20 为 `5,014,520`；LSQ top-50 6 条均为正 slack，最差 `+0.041 ns`。这是 MT06 与其组合的物理结果，不能声称为单项增益。 |
@@ -358,7 +362,28 @@ bitstream 成功，但 setup 未闭合，只归档为 candidate。default route 
 共同证明扩容是拥挤失控的主要放大因素，而不是所有时序路径的唯一根因。三种容量配置的 current
 perf20/Yosys A/B、路径族和后续微架构边界见 [rob-prf-capacity-review.md](rob-prf-capacity-review.md)。
 
-## 8. 当前优先级与下一步
+## 8. Default ROB/PRF 时序削减批次
+
+扩容对照结束后，先在 32 ROB / 64 PRF 的 default 配置上验证 RF06、RT22、RT23、RT24、RT26，
+以便把集中状态网络自身的时序问题和容量导致的拥挤放大分开。最终源码提交为 `e04edc8`，source
+tree SHA-256 为 `20201323aab549087c36b42fad6f11ed763aec53ce22231496164b4bf48f26b9`，发布 RTL
+SHA-256 为 `4739957500dd83a03b7a95a57cc5444cf0d3deb63ab9394fdf62fd606248dfc3`。
+
+完整 `cpu-check` 为 40 suites / 263 tests，Python contracts 95/95。perf20 20/20 与 default
+baseline 逐项精确相等，总周期 `3,879,728`；func58 random-AXI seeds `240/255/141` 均为
+58/58。矩阵分别为：
+
+- `build/sim/runs/cpu_20201323aab5_chiplab_c398d274812f/clean-perf20_model_d53c6fe04216_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`
+- `build/sim/runs/cpu_20201323aab5_chiplab_c398d274812f/clean-func58_model_a66cdd41b7d7_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`
+
+相对 RF06 baseline，同配置 Yosys 的全核 cells 为 `57,660 -> 57,205`（`-0.789%`）、word bits
+为 `389,771 -> 391,210`（`+0.369%`）、post-flat cells 为 `51,638 -> 51,183`（`-0.881%`），
+ROB cells 为 `6,067 -> 5,612`（`-7.50%`），ROB raw LTP 为 `40 -> 32`。比较证据是
+`build/reports/yosys/RT26-final-vs-RF06-default-local-tag.json`。这组结果只证明候选在结构代理和
+软件层面可接受；matching 100 MHz direct full 尚未完成，因而没有新的 WNS、拥挤、器件资源、
+DRC 或 bitstream 结论。
+
+## 9. 当前优先级与下一步
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
@@ -380,11 +405,11 @@ perf20/Yosys A/B、路径族和后续微架构边界见 [rob-prf-capacity-review
 7. 当前阶段以 CT05 的 isolated perf20、最终组合通过的 func58 三 seed 和 B02-F 的完整软件门禁为准。任何
    post-route physopt 仅用于路径探索，不是 matching direct full，不能作为正式时序、资源、组合收益或板测归因证据。
 
-## 9. 详细说明的维护边界
+## 10. 详细说明的维护边界
 
 上表保存每个候选的完整机制、风险、决策指标、当前状态和效果。涉及流水级行为、示例和理论推导的长篇说明继续保留在 [architecture.md](architecture.md) 对应的十二阶段章节，以免把教学主线拆碎；这些章节不再维护第二份状态列。候选状态发生变化时只更新本文，并把不可变的 cycles、RTL hash、工具版本、WNS/资源和报告路径写入对应实验 manifest。
 
-## 10. 证据入口
+## 11. 证据入口
 
 - 当前 RTL：`build/rtl/generation-manifest.json`。
 - R6 L11 perf20：`build/sim/runs/cpu_1548f170c573_chiplab_c398d274812f/clean-perf20_model_858465589681_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`；逐项比较为 `build/reports/comparisons/R6-L11.json`。

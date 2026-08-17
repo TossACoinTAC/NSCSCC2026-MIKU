@@ -73,15 +73,23 @@ R13 的 `RF05/RT18-RT21` 已使 expanded-window 的 Yosys 总 cells、ROB cells 
 | --- | --- | --- | --- |
 | RF06 | 在已有本地 completion capture 边界内，让 dispatch、registered IQ wake、Store fallback 与 RenameMap 消费本地 pdst；ROB 仍唯一产生 valid/epoch/flush 资格 | 移除 ROB `stagedPdst` 到 backend/IQ 的 tag 广播，且不增加拍数 | poison completion tuple、stale epoch、flush、direct/registered wake 优先级、PRF bypass；完整 cpu-check、perf20 exact 与 matching top-N |
 | RF07 | 尝试以 PRF bank/row 作为同拍 bypass 的物理边界 | 已否决：动态 row-bit 选择映射为 `shiftx/procmux`，PRF cells `+135`、raw LTP `9 -> 12`；未进入 perf20/Vivado | 保留 `a7b588a` 后由 `2edc9d6` 回退；证据为 `build/reports/yosys/RF07-bank-local-bypass-fresh-vs-RF06-default-local-tag.json` |
-| RT22 | 将 ROB completion hot state 的 indexed update 与 64-entry扫描式资格进一步按 bank 局部化 | 减少 completion 到 entry CE 的宽选择和 control fanout | 多 completion 同拍优先级、epoch、wrap/reuse、flush、三宽 allocate/commit；先扩展 ROB 定向回归 |
+| RT22 | completion 只读取目标 pointer 的 resident state，再由既有 target token 写回 | ROB cells `6,067 -> 5,548`，移除 producer 对全 entry state 的扫描资格，不增加 completion/wakeup/commit 拍数 | `b5d1b65`；ROB 19/19、完整组合门禁通过；matching completion/commit top-N |
+| RT23 | completion source 保持 3-bit 紧凑状态，commit 读侧用平衡 mask 选择 producer payload | ROB raw LTP `40 -> 39`；初版 one-hot state 的 word-bit 代价已由紧凑版本收回 | `9678a7d`；ROB 19/19；matching source/control top-N |
+| RT24 | 三宽 commit 和 head-bypass 资格使用平衡 AND 树 | cell/word-bit 精确不变，ROB raw LTP `39 -> 33` | `1732ef5`；ROB 19/19；matching commit/head-bypass top-N |
+| RT26 | 五路 head completion/branch payload 保持最高 lane 优先级的平衡选择 | ROB raw LTP `33 -> 32`；全核 cells `+40`、word bits `+478`，以小规模代价替换串行 mux 链 | `e04edc8`；ROB 20/20，新增双 lane payload/branch metadata 优先级合同；matching bypass top-N |
 | RT25 | 把完整 exception metadata 移到“最老已知异常”sidecar，正常 ROB entry 仅保留必要 hot state | 降低 completion/commit 异常 payload mux 与每 entry 冷字段负担 | 精确异常、BADV、TLB refill、同拍多异常的 oldest 选择、branch recovery；这是高风险微架构改造，先设计/测试后实现 |
 
-RF06 已完成：backend/PRF 定向测试、完整 `cpu-check`（41 suites / 264 tests）、95 项 Python
-合同和 default perf20 20/20 均通过，后者逐项精确等于 `3,879,728` cycles。其 Yosys cells、
-word bits 和 post-flat cells 均不变，符合它只改变跨区网络归属的预期；是否保留仍取决于下一份
-matching direct route 的 ROB-to-IQ 路径。RF07 已由 Yosys 否决，不再进入实现批次；RT22 需要先用
-Yosys 检查 completion hot-state 的 mux、word-bits 和 LTP，RT25 是研究候选，不能与轻量时序候选
-混作一次无归因的修改。
+RF06+RT22+RT23+RT24+RT26 的最终 default 批次为 `e04edc8`。完整 `cpu-check` 为
+40 suites / 263 tests、Python contracts 95/95；perf20 20/20 逐项精确等于 `3,879,728`
+cycles，func58 seeds `240/255/141` 均为 58/58。相对 RF06 的同配置 Yosys 为：全核 cells
+`57,660 -> 57,205`、word bits `389,771 -> 391,210`、post-flat cells `51,638 -> 51,183`、ROB
+cells `6,067 -> 5,612`，ROB raw LTP `40 -> 32`。比较见
+`build/reports/yosys/RT26-final-vs-RF06-default-local-tag.json`。这些结果证明 RTL 结构和软件门禁
+均可接受，但是否保留仍取决于 matching direct route 的 ROB/PRF、commit 和 IQ 路径。
+
+RF07 已由 Yosys 否决，不进入实现批次。RT25 sidecar 仍是下一轮高风险研究项，不与当前轻量候选
+混写；若本批次仍无法让 default 在 100 MHz 闭合，再并行评估 RT25 与 `64 ROB / 64 PRF`，而不是
+继续给 64/128 的集中式状态网络叠加局部补丁。
 
 ## 设计依据
 

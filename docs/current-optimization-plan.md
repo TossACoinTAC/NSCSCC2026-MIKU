@@ -309,9 +309,30 @@ row-bit 选择被映射为 `shiftx/procmux` 深链，不能作为物理优化保
 `build/reports/yosys/RF07-bank-local-bypass-fresh-vs-RF06-default-local-tag.json`；它未进入
 perf20 或 Vivado。
 
-下一批按 [rob-prf-capacity-review.md](rob-prf-capacity-review.md) 的边界筛选 RT22 和 RT25。
-`64 ROB / 64 PRF` 是待验证的中间点，不预设为默认或回退；任何容量配置必须重新完成 matching
-software、Yosys 与 direct full，不能继承 R13 或 default 的时序证据。
+随后在 default 32 ROB / 64 PRF 上形成五项周期透明批次：RF06、RT22、RT23、RT24 和 RT26。
+RT22（`b5d1b65`）以目标 pointer 读取局部 resident state 后再资格化 completion，移除每个 producer
+对 32 项完整状态的扫描；RT23（`9678a7d`）保留紧凑 completion-source 编码，在 commit 读侧使用
+平衡选择；RT24（`1732ef5`）将三宽提交与 head-bypass 资格改为平衡 AND；RT26（`e04edc8`）把五路
+head completion/branch bypass payload 的串行覆盖改为保持最高 lane 优先级的平衡树。RT23 的初版
+one-hot state（`485a900`）已由紧凑版本替代；exception-valid OR 的等价表达实验（`109b873`）在
+Yosys 中与 RT24 完全相同，已由 `58c3b48` 回退，不计入净候选。
+
+最终批次源码为 `e04edc8`，source tree SHA-256 为
+`20201323aab549087c36b42fad6f11ed763aec53ce22231496164b4bf48f26b9`，发布 RTL SHA-256 为
+`4739957500dd83a03b7a95a57cc5444cf0d3deb63ab9394fdf62fd606248dfc3`。完整 `cpu-check` 为
+40 suites / 263 tests，Python contracts 95/95；perf20 20/20 逐项精确等于 `3,879,728`
+cycles，matrix 为
+`build/sim/runs/cpu_20201323aab5_chiplab_c398d274812f/clean-perf20_model_d53c6fe04216_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；
+func58 random-AXI seeds `240/255/141` 均为 58/58，matrix 为
+`build/sim/runs/cpu_20201323aab5_chiplab_c398d274812f/clean-func58_model_a66cdd41b7d7_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`。
+
+同配置 Yosys 相对 RF06 baseline 显示全核 cells `57,660 -> 57,205`（`-0.789%`）、word bits
+`389,771 -> 391,210`（`+0.369%`）、post-flat cells `51,638 -> 51,183`（`-0.881%`），ROB
+cells `6,067 -> 5,612`（`-7.50%`）。ROB raw LTP 从 40 降至 32；其中 RT22 贡献主要规模下降，
+RT23/RT24/RT26 依次将 completion-source、commit 资格与 head-bypass 选择的逻辑深度压缩。
+这些是综合前结构代理；该批次仍须完成 matching 100 MHz direct full，不能继承 default 的
+`-0.527 ns`。`64 ROB / 64 PRF` 仍是待验证的中间点，不预设为默认或回退；任何容量配置必须
+重新完成 matching software、Yosys 与 direct full。
 
 ## R0：实验合同
 
