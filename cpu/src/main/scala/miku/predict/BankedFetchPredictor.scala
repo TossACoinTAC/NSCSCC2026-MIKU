@@ -157,21 +157,21 @@ final class BankedFetchPredictor(
   }
 
   val architecturalRasCountOneHot = Vec(Bits((rasDepth + 1) bits), config.commitWidth + 1)
-  val architecturalRasPushAccepted = Bits(config.commitWidth bits)
-  val architecturalRasPopAccepted = Bits(config.commitWidth bits)
+  val architecturalRasPushAccepted = Vec(Bool(), config.commitWidth)
   architecturalRasCountOneHot(0) := UIntToOh(architecturalRasCount, rasDepth + 1)
   for (lane <- 0 until config.commitWidth) {
     val pushOnly = io.architecturalRasPush(lane) && !io.architecturalRasPop(lane)
     val popOnly = io.architecturalRasPop(lane) && !io.architecturalRasPush(lane)
-    architecturalRasPushAccepted(lane) := pushOnly &&
+    val pushAccepted = pushOnly &&
       !architecturalRasCountOneHot(lane)(rasDepth)
-    architecturalRasPopAccepted(lane) := popOnly &&
+    val popAccepted = popOnly &&
       !architecturalRasCountOneHot(lane)(0)
+    architecturalRasPushAccepted(lane) := pushAccepted
     architecturalRasCountOneHot(lane + 1) := architecturalRasCountOneHot(lane)
-    when(architecturalRasPushAccepted(lane)) {
+    when(pushAccepted) {
       architecturalRasCountOneHot(lane + 1) :=
         (architecturalRasCountOneHot(lane) |<< 1).resize(rasDepth + 1)
-    }.elsewhen(architecturalRasPopAccepted(lane)) {
+    }.elsewhen(popAccepted) {
       architecturalRasCountOneHot(lane + 1) :=
         (architecturalRasCountOneHot(lane) |>> 1).resize(rasDepth + 1)
     }
