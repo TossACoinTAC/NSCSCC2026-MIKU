@@ -226,8 +226,8 @@ python3 scripts/cpu/custom_instruction_word.py \
 
 ```text
 make custom-test
+make cpu-locked-gates CUSTOM_PROFILE=disabled
 make custom-check CUSTOM_PROFILE=final-2026
-make cpu-check CUSTOM_PROFILE=disabled
 git diff --check
 ```
 
@@ -236,7 +236,8 @@ branch link、动态位域边界、Load/Store、predecode、ROB predictor metada
 `VerificationCases` 和 `.word` 工具。`custom-check` 还会为指定 profile 生成完整
 `CoreTopCompat` RTL，并运行端口、Verilator lint 和 Yosys 结构检查。
 生成的 `build/rtl/generation-manifest.json` 必须记录规范化后的 `custom_profile`，用于确认 RTL
-实际包含所选 profile。
+实际包含所选 profile。`make cpu-check CUSTOM_PROFILE=disabled` 属于发布检查，包含完整测试和证据检查，
+应在提交源码并更新证据后执行。
 
 正式提交前还应执行题面提供的全部汇编样例和边界值。测试至少覆盖零寄存器、相同源和目的
 寄存器、最大与最小立即数、位域宽度边界、分支 taken/not-taken、未对齐或越界访存，以及异常

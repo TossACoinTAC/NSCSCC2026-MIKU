@@ -121,6 +121,7 @@ make cpu-check
 - [验证流程](docs/verification-workflow.md)
 - [性能候选记录](docs/optimization-candidates.md)
 - [Linux 系统要求](docs/linux-system-requirements.md)
+- [决赛自定义指令单文件实现指南](docs/custom-instruction-quickstart.md)
 - [自定义指令使用手册](docs/custom-instructions.md)
 - [release 检查清单](docs/release-checklist.md)
 - [外部依赖与来源说明](docs/third-party-sources.md)

@@ -89,7 +89,7 @@
   },
   "python_contract": {
     "command": "make cpu-contract-test",
-    "contract_input_file_count": 108,
+    "contract_input_file_count": 109,
     "contract_input_hash_algorithm": "git-tracked-path-payload-sha256-v1",
     "contract_input_scope": [
       ".gitignore",
@@ -103,11 +103,11 @@
       "docs",
       "scripts"
     ],
-    "contract_input_tree_sha256": "85a3c9f915fd92048195071e3fb4ba7f9fcd0d616bf52c92a63b4056d0c9a917",
+    "contract_input_tree_sha256": "92076e0b1f975b175db53b5587cc0aa720ecb98c2b68c0972fa35d16b2068f71",
     "error_count": 0,
     "failure_count": 0,
     "log": "evidence/current/python-contract.log",
-    "log_sha256": "b445023c45bc04fef21ee707ac2e6570bd7445c0e591cd229a253f3e253fc032",
+    "log_sha256": "d101bd07f5c2b0f7556ca304759d3d2a8a2e444a6824c769cffa44a89ca17da4",
     "passed_count": 82,
     "runner_sha256": "122a411d9824901d1f13d05f2068e4fde2bfe46605d713abda1c39cbf1f281cc",
     "skipped_count": 0,
