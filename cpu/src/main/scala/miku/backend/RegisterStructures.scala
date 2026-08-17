@@ -29,12 +29,8 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
   private val storageBankWidth = log2Up(storageBankCount)
   private val storageBankDepth = config.physicalRegs / storageBankCount
   require(config.physicalRegs % storageBankCount == 0)
-  // Keep asynchronous reads and all write ports explicit, but expose the bank
-  // as a memory primitive so implementation can choose LUTRAM instead of
-  // placing every physical-register bit as a separate flip-flop.  The write
-  // decoder and same-cycle bypass below preserve the old observable contract.
-  val registerBanks = Array.fill(storageBankCount)(
-    Mem(Bits(config.xlen bits), storageBankDepth)
+  val registerBanks = Vec.fill(storageBankCount)(
+    Vec.fill(storageBankDepth)(Reg(Bits(config.xlen bits)))
   )
   val writeBankValid = Vec(Bits(storageBankCount bits), config.writebackWidth)
   val writeBankRowTargets = Vec.fill(config.writebackWidth)(
@@ -76,7 +72,7 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
   for (readPort <- 0 until config.executionWidth * 2) {
     val bankReadData = Vec(Bits(config.xlen bits), storageBankCount)
     for (bank <- 0 until storageBankCount) {
-      bankReadData(bank) := registerBanks(bank).readAsync(storageRow(io.readAddress(readPort)))
+      bankReadData(bank) := registerBanks(bank)(storageRow(io.readAddress(readPort)))
     }
     val selected = Bits(config.xlen bits)
     selected := Mux(
@@ -97,7 +93,7 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
 
   val debugBankReadData = Vec(Bits(config.xlen bits), storageBankCount)
   for (bank <- 0 until storageBankCount) {
-    debugBankReadData(bank) := registerBanks(bank).readAsync(storageRow(io.debugReadAddress))
+    debugBankReadData(bank) := registerBanks(bank)(storageRow(io.debugReadAddress))
   }
   io.debugReadData := Mux(
     io.debugReadAddress === 0,
@@ -116,17 +112,17 @@ final class PhysicalRegisterFile(config: OooCoreConfig = OooCoreConfig.FourIssue
   // Completion data only reaches the matching bank/row.  Write-port order is
   // unchanged: a later port still wins if multiple producers target the same
   // physical register in the same cycle.
-  for (bank <- 0 until storageBankCount) {
-    for (writePort <- 0 until config.writebackWidth) {
-      registerBanks(bank).write(
-        address = storageRow(io.write(writePort).pdst),
-        data = writeBankData(writePort)(bank),
-        enable = writeBankRowTargets(writePort)(bank).orR && !io.flush
-      )
+  for (bank <- 0 until storageBankCount; row <- 0 until storageBankDepth) {
+    if (bank != 0 || row != 0) {
+      for (writePort <- 0 until config.writebackWidth) {
+        when(writeBankRowTargets(writePort)(bank)(row)) {
+          registerBanks(bank)(row) := writeBankData(writePort)(bank)
+        }
+      }
     }
   }
-  // The architectural zero remains a constant at the read boundary; avoid a
-  // special storage write that would add an otherwise global clear enable.
+  registerBanks(0)(0) := B(0, config.xlen bits)
+  when(io.flush) { registerBanks(0)(0) := B(0, config.xlen bits) }
 }
 
 final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
