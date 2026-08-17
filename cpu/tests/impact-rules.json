@@ -81,7 +81,7 @@
     },
     {
       "name": "documentation",
-      "paths": ["README.md", "docs/*.md", "scripts/common/check_docs.py"],
+      "paths": ["README.md", "CONTRIBUTING.md", "docs/*.md", "evidence/*.json", ".github/workflows/*.yml", "scripts/common/check_docs.py"],
       "scala_suites": [],
       "python_contracts": ["tests/python/test_repository_contract.py"]
     },

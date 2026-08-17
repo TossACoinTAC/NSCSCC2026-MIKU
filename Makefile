@@ -231,7 +231,11 @@ cpu-locked-gates: cpu-generate
 		--ports "$(CPU_DIR)/reference/core-top.ports.json" --rtl "$(BUILD_ROOT)/rtl/mycpu_top.v" \
 		--out-dir "$(BUILD_ROOT)/gates/yosys" --yosys /usr/bin/yosys
 
-cpu-check: cpu-test-all cpu-generate cpu-locked-gates docs-check cpu-contract-test
+cpu-check:
+	@$(MAKE) cpu-test-all
+	@$(MAKE) cpu-locked-gates
+	@$(MAKE) docs-check
+	@$(MAKE) cpu-contract-test
 
 sim-prepare: cpu-generate
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/prepare" \
