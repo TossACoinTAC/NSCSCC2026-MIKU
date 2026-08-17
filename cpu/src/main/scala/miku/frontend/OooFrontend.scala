@@ -372,12 +372,10 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   // The predictor can fold this group's speculative GHR update into a same-cycle lookup; its RAS
   // update reaches the synchronous lookup response on the following edge.  The history-turnover
   // switch retains the earlier conservative mode for timing and cycle A/B.
-  val requestPredictedNextPc = UInt(config.xlen bits)
-  requestPredictedNextPc := Mux(
-    requestPredictedTaken,
-    requestPredictedTarget,
-    translatedGroupBase + fetchGroupBytes
-  )
+  // requestPredictedTarget already defaults to the sequential group and is overridden only by the
+  // earliest taken lane. Reusing it avoids rebuilding the same 32-bit successor mux on the
+  // predictor-to-translation path.
+  val requestPredictedNextPc = requestPredictedTarget
   val translationTurnoverEligible = if (config.enableFrontendTranslationTurnover) {
     if (config.enableFrontendHistoryTurnover) {
       translationResponseBypassValid
@@ -940,11 +938,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       for (lane <- 0 until config.fetchWidth) {
         cachePrediction(lane) := requestPrediction(lane)
       }
-      nextFetchPc := Mux(
-        requestPredictedTaken,
-        requestPredictedTarget,
-        translatedGroupBase + fetchGroupBytes
-      )
+      nextFetchPc := requestPredictedTarget
     }
     when(responseFire) {
       // A cached wrong-path handoff is accepted to keep response decode out of the L1I lookup
