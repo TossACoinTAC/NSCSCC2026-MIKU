@@ -127,6 +127,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   private val payloadBankCount = 4
   private val payloadBankWidth = log2Up(payloadBankCount)
   private val payloadDepth = config.robEntries / payloadBankCount
+  private val stateWidth = ReorderBufferState(config).getBitsWidth
   private val payloadWidth = ReorderBufferPayload(config).getBitsWidth
   private val retirementMetadataWidth = ReorderBufferRetirementMetadata(config).getBitsWidth
   private val completionPayloadWidth = ReorderBufferCompletionPayload(config).getBitsWidth
@@ -240,18 +241,41 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     allocationRetirementMetadata(lane).loadQueueIndex := io.allocate(lane).uop.loadQueueIndex
     allocationRetirementMetadata(lane).storeQueueIndex := io.allocate(lane).uop.storeQueueIndex
 
-    when(acceptedMask(lane)) {
-      val destination = allocationDestination(lane)
-      entries(destination(config.robIndexWidth - 1 downto 0)).valid := True
-      entries(destination(config.robIndexWidth - 1 downto 0)).complete :=
-        io.allocate(lane).uop.decoded.exception.valid
-      entries(destination(config.robIndexWidth - 1 downto 0)).payloadReady := False
-      entries(destination(config.robIndexWidth - 1 downto 0)).decodedExceptionValid :=
-        io.allocate(lane).uop.decoded.exception.valid
-      entries(destination(config.robIndexWidth - 1 downto 0)).generation := destination.msb
-      entries(destination(config.robIndexWidth - 1 downto 0)).completionExceptionValid := False
-      entries(destination(config.robIndexWidth - 1 downto 0)).completionSource :=
-        U(decodedCompletionSource, log2Up(config.writebackWidth + 2) bits)
+  }
+
+  val allocationStateBankTargets = Vec(Bits(payloadBankCount bits), config.renameWidth)
+  val allocationStateRowTargets = Vec(Bits(payloadDepth bits), config.renameWidth)
+  for (lane <- 0 until config.renameWidth) {
+    allocationStateBankTargets(lane) := UIntToOh(
+      allocationDestination(lane)(payloadBankWidth - 1 downto 0),
+      payloadBankCount
+    )
+    allocationStateRowTargets(lane) := Mux(
+      acceptedMask(lane),
+      UIntToOh(
+        allocationDestination(lane)(config.robIndexWidth - 1 downto payloadBankWidth),
+        payloadDepth
+      ),
+      B(0, payloadDepth bits)
+    )
+  }
+  for (entryIndex <- 0 until config.robEntries) {
+    val entryBank = entryIndex % payloadBankCount
+    val entryRow = entryIndex / payloadBankCount
+    for (lane <- 0 until config.renameWidth) {
+      when(
+        allocationStateBankTargets(lane)(entryBank) &&
+          allocationStateRowTargets(lane)(entryRow)
+      ) {
+        entries(entryIndex).valid := True
+        entries(entryIndex).complete := io.allocate(lane).uop.decoded.exception.valid
+        entries(entryIndex).payloadReady := False
+        entries(entryIndex).decodedExceptionValid := io.allocate(lane).uop.decoded.exception.valid
+        entries(entryIndex).generation := allocationDestination(lane).msb
+        entries(entryIndex).completionExceptionValid := False
+        entries(entryIndex).completionSource :=
+          U(decodedCompletionSource, log2Up(config.writebackWidth + 2) bits)
+      }
     }
   }
 
@@ -270,14 +294,33 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       stagedAllocationPointer(lane) := allocationDestination(lane)
     }
   }
+  val stagedAllocationBankTargets = Vec(Bits(payloadBankCount bits), config.renameWidth)
+  val stagedAllocationRowTargets = Vec(Bits(payloadDepth bits), config.renameWidth)
   for (lane <- 0 until config.renameWidth) {
-    val pointer = stagedAllocationPointer(lane)
-    val state = entries(pointer(config.robIndexWidth - 1 downto 0))
-    when(
-      !io.flush && stagedAllocationValid(lane) && state.valid &&
-        state.generation === pointer.msb
-    ) {
-      state.payloadReady := True
+    stagedAllocationBankTargets(lane) := UIntToOh(
+      stagedAllocationPointer(lane)(payloadBankWidth - 1 downto 0),
+      payloadBankCount
+    )
+    stagedAllocationRowTargets(lane) := Mux(
+      stagedAllocationValid(lane),
+      UIntToOh(
+        stagedAllocationPointer(lane)(config.robIndexWidth - 1 downto payloadBankWidth),
+        payloadDepth
+      ),
+      B(0, payloadDepth bits)
+    )
+  }
+  for (entryIndex <- 0 until config.robEntries) {
+    val entryBank = entryIndex % payloadBankCount
+    val entryRow = entryIndex / payloadBankCount
+    for (lane <- 0 until config.renameWidth) {
+      when(
+        !io.flush && stagedAllocationBankTargets(lane)(entryBank) &&
+          stagedAllocationRowTargets(lane)(entryRow) && entries(entryIndex).valid &&
+          entries(entryIndex).generation === stagedAllocationPointer(lane).msb
+      ) {
+        entries(entryIndex).payloadReady := True
+      }
     }
   }
 
@@ -387,7 +430,17 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val pointer = candidatePointer(lane)
     val candidateIndex = pointer(config.robIndexWidth - 1 downto 0)
     val bank = candidateIndex(payloadBankWidth - 1 downto 0)
-    candidates(lane).state := entries(candidateIndex)
+    val candidateStateBankRead = Vec(Bits(stateWidth bits), payloadBankCount)
+    for (readBank <- 0 until payloadBankCount) {
+      val bankRows = Vec(Bits(stateWidth bits), payloadDepth)
+      for (row <- 0 until payloadDepth) {
+        bankRows(row) := entries(row * payloadBankCount + readBank).asBits
+      }
+      candidateStateBankRead(readBank) := bankRows(
+        candidatePointer(lane)(config.robIndexWidth - 1 downto payloadBankWidth)
+      )
+    }
+    candidates(lane).state.assignFromBits(candidateStateBankRead(bank))
     candidates(lane).payload.assignFromBits(payloadBankRead(bank))
     candidateRetirementMetadata(lane).assignFromBits(retirementMetadataBankRead(bank))
     val selectedCompletionPayload = Bits(completionPayloadWidth bits)
@@ -598,41 +651,57 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val stagedStoreCompletionValid = RegInit(False)
   val stagedStoreCompletionCurrent = RegInit(False)
   val stagedStoreCompletionRobPointer = Reg(UInt(config.robPointerWidth bits))
-  val stagedCompletionTargets = Vec(Bits(config.robEntries bits), config.writebackWidth)
-  // The low pointer bits select exactly one payload bank. Predecode that
-  // narrow domain once instead of rebuilding a bank comparator in every
-  // completion-memory write port.
+  // Completion identity is a bank-local row token.  Avoid broadcasting a
+  // 64-bit one-hot pointer from every writeback lane across the expanded ROB.
+  // The low pointer bits select one bank; the remaining bits only traverse
+  // that bank's 16-entry local qualification domain.
   val stagedCompletionBankTargets = Vec(Bits(payloadBankCount bits), config.writebackWidth)
+  val stagedCompletionRowTargets = Vec(Bits(payloadDepth bits), config.writebackWidth)
   for (lane <- 0 until config.writebackWidth) {
-    val stagedIndex = stagedRobPointer(lane)(config.robIndexWidth - 1 downto 0)
-    stagedCompletionTargets(lane) := Mux(
-      stagedCompletionValid(lane) && stagedCompletionCurrent(lane),
-      UIntToOh(stagedIndex, config.robEntries),
-      B(0, config.robEntries bits)
-    )
     stagedCompletionBankTargets(lane) := UIntToOh(
       stagedRobPointer(lane)(payloadBankWidth - 1 downto 0),
       payloadBankCount
     )
+    stagedCompletionRowTargets(lane) := Mux(
+      stagedCompletionValid(lane) && stagedCompletionCurrent(lane),
+      UIntToOh(
+        stagedRobPointer(lane)(config.robIndexWidth - 1 downto payloadBankWidth),
+        payloadDepth
+      ),
+      B(0, payloadDepth bits)
+    )
   }
-  val stagedStoreCompletionTarget = Bits(config.robEntries bits)
-  stagedStoreCompletionTarget := Mux(
+  val stagedStoreCompletionBankTarget = Bits(payloadBankCount bits)
+  val stagedStoreCompletionRowTarget = Bits(payloadDepth bits)
+  stagedStoreCompletionBankTarget := Mux(
     stagedStoreCompletionValid && stagedStoreCompletionCurrent,
     UIntToOh(
-      stagedStoreCompletionRobPointer(config.robIndexWidth - 1 downto 0),
-      config.robEntries
+      stagedStoreCompletionRobPointer(payloadBankWidth - 1 downto 0),
+      payloadBankCount
     ),
-    B(0, config.robEntries bits)
+    B(0, payloadBankCount bits)
+  )
+  stagedStoreCompletionRowTarget := Mux(
+    stagedStoreCompletionValid && stagedStoreCompletionCurrent,
+    UIntToOh(
+      stagedStoreCompletionRobPointer(config.robIndexWidth - 1 downto payloadBankWidth),
+      payloadDepth
+    ),
+    B(0, payloadDepth bits)
   )
   val stagedCompletionMatches = Vec(Bits(config.writebackWidth bits), config.robEntries)
   val stagedStoreCompletionMatches = Bits(config.robEntries bits)
   for (entryIndex <- 0 until config.robEntries) {
+    val entryBank = entryIndex % payloadBankCount
+    val entryRow = entryIndex / payloadBankCount
     for (lane <- 0 until config.writebackWidth) {
-      stagedCompletionMatches(entryIndex)(lane) := stagedCompletionTargets(lane)(entryIndex) &&
+      stagedCompletionMatches(entryIndex)(lane) :=
+        stagedCompletionBankTargets(lane)(entryBank) && stagedCompletionRowTargets(lane)(entryRow) &&
         entries(entryIndex).valid && !entries(entryIndex).complete &&
         entries(entryIndex).generation === stagedRobPointer(lane).msb
     }
-    stagedStoreCompletionMatches(entryIndex) := stagedStoreCompletionTarget(entryIndex) &&
+    stagedStoreCompletionMatches(entryIndex) :=
+      stagedStoreCompletionBankTarget(entryBank) && stagedStoreCompletionRowTarget(entryRow) &&
       entries(entryIndex).valid && !entries(entryIndex).complete &&
       entries(entryIndex).generation === stagedStoreCompletionRobPointer.msb
   }
@@ -839,6 +908,24 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     headBranchBypass := False
   }
 
+  val retireStateBankTargets = Vec(Bits(payloadBankCount bits), config.commitWidth)
+  val retireStateRowTargets = Vec(Bits(payloadDepth bits), config.commitWidth)
+  for (lane <- 0 until config.commitWidth) {
+    val retirePointer = (commitPointer + U(lane, config.robPointerWidth bits)).resized
+    retireStateBankTargets(lane) := UIntToOh(
+      retirePointer(payloadBankWidth - 1 downto 0),
+      payloadBankCount
+    )
+    retireStateRowTargets(lane) := Mux(
+      io.commitValid(lane),
+      UIntToOh(
+        retirePointer(config.robIndexWidth - 1 downto payloadBankWidth),
+        payloadDepth
+      ),
+      B(0, payloadDepth bits)
+    )
+  }
+
   when(io.flush) {
     // Keep the next-free pointer across a flush so delayed completions from
     // the discarded window cannot alias the first entry of the new window.
@@ -855,10 +942,15 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     when(acceptedMask.orR) {
       allocatePointer := allocatePointer + CountOne(acceptedMask)
     }
-    for (lane <- 0 until config.commitWidth) {
-      when(io.commitValid(lane)) {
-        val pointer = (commitPointer + U(lane, config.robPointerWidth bits)).resized
-        entries(pointer(config.robIndexWidth - 1 downto 0)).valid := False
+    for (entryIndex <- 0 until config.robEntries) {
+      val entryBank = entryIndex % payloadBankCount
+      val entryRow = entryIndex / payloadBankCount
+      for (lane <- 0 until config.commitWidth) {
+        when(
+          retireStateBankTargets(lane)(entryBank) && retireStateRowTargets(lane)(entryRow)
+        ) {
+          entries(entryIndex).valid := False
+        }
       }
     }
     commitPointer := commitPointer + committedCount
