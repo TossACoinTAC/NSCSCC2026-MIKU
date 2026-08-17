@@ -57,7 +57,7 @@
     },
     {
       "name": "experiment-harness",
-      "paths": ["scripts/experiment/*.py", "scripts/vivado/archive.py", "Makefile", "cpu/tests/manifest.yml", "cpu/tests/impact-rules.json", "cpu/tests/python/test_experiment_contract.py", "cpu/tests/python/test_yosys_analysis_contract.py"],
+      "paths": ["scripts/experiment/*.py", "scripts/vivado/*.py", "scripts/vivado/*.tcl", "scripts/vivado/*.sh", "Makefile", "cpu/tests/manifest.yml", "cpu/tests/impact-rules.json", "cpu/tests/python/test_experiment_contract.py", "cpu/tests/python/test_yosys_analysis_contract.py"],
       "scala_suites": [],
       "python_contracts": ["tests/python/test_experiment_contract.py", "tests/python/test_yosys_analysis_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_repository_contract.py"]
     },
