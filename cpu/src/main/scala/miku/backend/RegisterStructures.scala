@@ -166,7 +166,7 @@ final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
     val pendingPdst = Vec.fill(config.commitWidth)(
       Reg(UInt(config.physicalRegIndexWidth bits)) init (0)
     )
-    pendingValid := io.commitValid
+    pendingValid := Mux(io.flush, B(0, config.commitWidth bits), io.commitValid)
     for (lane <- 0 until config.commitWidth) {
       pendingArch(lane) := io.commitArch(lane)
       pendingPdst(lane) := io.commitPdst(lane)

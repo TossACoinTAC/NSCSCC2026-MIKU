@@ -297,9 +297,15 @@ class RegisterStructuresSpec extends AnyFunSuite {
 
         // The following recovery edge applies the pending batch before restoring speculation.
         dut.io.flush #= true
+        dut.io.commitValid #= 1
+        dut.io.commitArch(0) #= 8
+        dut.io.commitPdst(0) #= 22
         sample(dut)
         clearInputs(dut, config)
         dut.io.renameSource1(0) #= 8
+        sleep(1)
+        assert(dut.io.renamePsrc1(0).toBigInt == 21)
+        dut.clockDomain.waitSampling()
         sleep(1)
         assert(dut.io.renamePsrc1(0).toBigInt == 21)
       }
