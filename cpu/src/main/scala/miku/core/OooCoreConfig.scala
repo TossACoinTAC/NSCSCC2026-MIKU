@@ -89,7 +89,7 @@ final case class OooCoreConfig(
     enableOneHotRobAllocationState: Boolean = true,
     // Carry the prefetched commit pointer's bank/row ownership as local one-hot sidecars so ROB
     // state selection does not decode the binary pointer again on the commit prefix.
-    enableOneHotRobCandidateStateRead: Boolean = true,
+    enableOneHotRobCandidateStateRead: Boolean = false,
     instructionBufferEntries: Int = 16,
     dispatchQueueEntries: Int = 8,
     issueQueueEntriesPerPort: Int = 8,
