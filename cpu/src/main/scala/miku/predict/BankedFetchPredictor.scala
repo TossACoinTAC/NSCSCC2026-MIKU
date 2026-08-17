@@ -54,6 +54,9 @@ final class BankedFetchPredictor(
   require(btbEntriesPerBank == 128)
   require(rasDepth == 8)
 
+  private def lutTreeEqual(a: Bits, b: Bits): Bool =
+    !((a.asUInt ^ b.asUInt).asBits.orR)
+
   val io = new Bundle {
     val lookupValid = in Bool ()
     val lookupPc = in UInt (config.xlen bits)
@@ -352,7 +355,7 @@ final class BankedFetchPredictor(
 
     val entryTag = btbRead(bank)(btbTagLsb + btbTagWidth - 1 downto btbTagLsb)
     io.prediction(bank).hit := io.responseValid && btbRead(bank)(btbValidBit) &&
-      entryTag === capturedTag
+      lutTreeEqual(entryTag, capturedTag)
     if (config.enableLargeGshare) {
       io.prediction(bank).phtValid := io.prediction(bank).hit && !phtInvalidating
     } else {

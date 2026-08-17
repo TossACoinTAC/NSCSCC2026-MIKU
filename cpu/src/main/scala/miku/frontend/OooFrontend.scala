@@ -33,6 +33,11 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   private val fetchGroupOffsetWidth = log2Up(fetchGroupBytes)
   require(fetchGroupBytes == 16)
 
+  // These identity checks sit on response-owner, correction, and request-control
+  // cones. Keep their FPGA mapping as an XOR/NOR LUT tree rather than a carry chain.
+  private def lutTreeEqual(a: UInt, b: UInt): Bool =
+    !((a ^ b).asBits.orR)
+
   val io = new Bundle {
     val translationRequest = master(Stream(TranslationRequest(config)))
     val translationResponse = slave(Stream(TranslationResponse(config)))
@@ -207,7 +212,7 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   // protects the virtual-PC tag from being paired with a physical address from a stale request
   // after a redirect or a translator response race.
   val translationResponseMatches =
-    io.translationResponse.virtualAddress === translationPc
+    lutTreeEqual(io.translationResponse.virtualAddress, translationPc)
   val translationResponseBypassValid = if (config.enableFrontendTranslationResponseBypass) {
     translationResponseFire && translationOutstanding && translationResponseMatches &&
       !io.translationResponse.cancelled && !io.translationResponse.exception.valid &&
@@ -402,8 +407,9 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   // Cached requests can be killed at the L1 boundary, but an already accepted uncached AXI burst
   // still completes.  Do not let that stale response satisfy a newer request after redirect.
   val pendingCacheResponseMatches =
-    io.cacheResponse.virtualAddress === pendingResponsePc
-  val activeCacheResponseMatches = io.cacheResponse.virtualAddress === cachePc
+    lutTreeEqual(io.cacheResponse.virtualAddress, pendingResponsePc)
+  val activeCacheResponseMatches =
+    lutTreeEqual(io.cacheResponse.virtualAddress, cachePc)
   // Responses are ordered at the single-request L1I boundary.  Select the wide prediction owner
   // from registered state; address matching qualifies acceptance without feeding the comparator
   // result back through every prediction lane.
@@ -707,7 +713,8 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
   val earlyLanePredictionTarget = responsePredictionTarget(responseContextPredictedLane)
   val responsePredictionMatchesRequest = Mux(
     responseContextPredictedTaken,
-    earlyLanePredictionTaken && responseContextPredictedTarget === earlyLanePredictionTarget,
+    earlyLanePredictionTaken &&
+      lutTreeEqual(responseContextPredictedTarget, earlyLanePredictionTarget),
     !responsePredictedTaken
   )
   predictionCorrectionOnResponse := responseFire && !responsePredictionMatchesRequest

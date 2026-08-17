@@ -16,6 +16,9 @@ final class CacheArray(
   private val tagWidth = addressWidth - indexWidth - offsetWidth
   private val tagEntryWidth = tagWidth + 2
 
+  private def lutTreeEqual(a: UInt, b: UInt): Bool =
+    !((a ^ b).asBits.orR)
+
   val io = new Bundle {
     val lookupValid = in Bool ()
     val lookupAddress = in UInt (addressWidth bits)
@@ -136,7 +139,7 @@ final class CacheArray(
   for (way <- 0 until geometry.ways) {
     val valid = tagRead(way)(1)
     val tag = tagRead(way)(tagEntryWidth - 1 downto 2).asUInt
-    hitMask(way) := responseValid && valid && tag === capturedTag
+    hitMask(way) := responseValid && valid && lutTreeEqual(tag, capturedTag)
     invalidMask(way) := responseValid && !valid
   }
 
