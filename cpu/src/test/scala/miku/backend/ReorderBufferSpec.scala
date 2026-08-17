@@ -784,6 +784,78 @@ class ReorderBufferSpec extends AnyFunSuite {
     }
   }
 
+  test("head bypass retains highest writeback-lane priority for payload and branch metadata") {
+    val config = OooCoreConfig.FourIssueThreeCommit.copy(
+      enableHeadCompletionCommitBypass = true,
+      enableBranchHeadCompletionBypass = true
+    )
+    val lastLane = config.writebackWidth - 1
+    val twoLaneMask = (BigInt(1) << lastLane) | 1
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+        "/sim-workspace-ooo-rob-head-priority")
+      .compile(new ReorderBufferProbe(config))
+      .doSim("ooo-rob-head-priority", 0x4f4f5a) { dut =>
+        def sample(): Unit = {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+        }
+
+        dut.clockDomain.forkStimulus(period = 10)
+        initialize(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample()
+
+        dut.io.allocateValid #= 1
+        dut.io.allocateAccept #= true
+        sleep(1)
+        val ordinaryPointer = dut.io.allocatedPointer(0).toBigInt
+        sample()
+
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.completionRobPointer(0) #= ordinaryPointer
+        dut.io.completionRobPointer(lastLane) #= ordinaryPointer
+        dut.io.completionData(0) #= 0x11111111L
+        dut.io.completionData(lastLane) #= 0x55555555L
+        dut.io.completionValid #= twoLaneMask
+        sample()
+        assert((dut.io.commitValid.toBigInt & 1) == 1)
+        assert(dut.io.commitResult(0).toBigInt == 0x55555555L)
+
+        dut.io.completionValid #= 0
+        sample()
+        assert(dut.io.empty.toBoolean)
+
+        dut.io.allocateValid #= 1
+        dut.io.allocateAccept #= true
+        dut.io.allocateIsBranch #= 1
+        sleep(1)
+        val branchPointer = dut.io.allocatedPointer(0).toBigInt
+        sample()
+
+        dut.io.allocateValid #= 0
+        dut.io.allocateAccept #= false
+        dut.io.allocateIsBranch #= 0
+        dut.io.completionRobPointer(0) #= branchPointer
+        dut.io.completionRobPointer(lastLane) #= branchPointer
+        dut.io.completionData(0) #= 0x22222222L
+        dut.io.completionData(lastLane) #= 0x66666666L
+        dut.io.completionBranchResolved #= twoLaneMask
+        dut.io.completionBranchTaken #= BigInt(1) << lastLane
+        dut.io.completionBranchTarget(0) #= 0x1c000040L
+        dut.io.completionBranchTarget(lastLane) #= 0x1c000080L
+        dut.io.completionValid #= twoLaneMask
+        sample()
+        assert((dut.io.commitValid.toBigInt & 1) == 1)
+        assert(dut.io.commitResult(0).toBigInt == 0x66666666L)
+        assert((dut.io.commitBranchTaken.toBigInt & 1) == 1)
+        assert(dut.io.commitBranchTarget(0).toBigInt == 0x1c000080L)
+      }
+  }
+
   test("head bypass tracks the next head while an older entry retires") {
     val config = OooCoreConfig.FourIssueThreeCommit.copy(
       enableHeadCompletionCommitBypass = true

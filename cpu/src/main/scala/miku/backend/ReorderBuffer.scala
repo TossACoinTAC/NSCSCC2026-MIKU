@@ -99,6 +99,25 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     }
   }
 
+  // Preserve the existing ascending-lane assignment behavior: the highest
+  // matching writeback lane owns the bypass payload, but select it with a
+  // balanced tree instead of a serial chain of priority muxes.
+  private def selectHighestPriority(valid: Seq[Bool], values: Seq[Bits]): Bits = {
+    require(valid.nonEmpty && valid.size == values.size)
+    if (values.size == 1) {
+      Mux(valid.head, values.head, B(0, values.head.getWidth bits))
+    } else {
+      val split = values.size / 2
+      val (lowerValid, upperValid) = valid.splitAt(split)
+      val (lowerValues, upperValues) = values.splitAt(split)
+      Mux(
+        balancedOr(upperValid.map(_.asBits)).asBool,
+        selectHighestPriority(upperValid, upperValues),
+        selectHighestPriority(lowerValid, lowerValues)
+      )
+    }
+  }
+
   val io = new Bundle {
     val allocateValid = in Bits (config.renameWidth bits)
     val allocate = in Vec (ReorderBufferAllocate(config), config.renameWidth)
@@ -886,8 +905,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val incomingHeadStoreCompletionBypass = io.storeCompletionBypassValid &&
       io.storeCompletionBypass.recoveryEpoch === io.currentEpoch &&
       io.storeCompletionBypass.robPointer === payloadReadPointer(0)
-    val incomingHeadCompletionBypassResult = Bits(config.xlen bits)
-    incomingHeadCompletionBypassResult := 0
     for (lane <- 0 until config.writebackWidth) {
       incomingHeadCompletionBypassMask(lane) := io.completionValid(lane) &&
         io.completion(lane).recoveryEpoch === io.currentEpoch &&
@@ -897,10 +914,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.completion(lane).recoveryEpoch === io.currentEpoch &&
         io.completion(lane).robPointer === payloadReadPointer(0) &&
         !io.completion(lane).exception.valid && io.completion(lane).branchResolved
-      when(incomingHeadCompletionBypassMask(lane)) {
-        incomingHeadCompletionBypassResult := io.completion(lane).data
-      }
     }
+    val incomingHeadCompletionBypassResult = selectHighestPriority(
+      (0 until config.writebackWidth).map(incomingHeadCompletionBypassMask(_)),
+      (0 until config.writebackWidth).map(io.completion(_).data)
+    )
     when(io.flush) {
       stagedHeadCompletionBypassValid := False
       stagedHeadBranchBypassValid := False
@@ -914,13 +932,23 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       )
       if (config.enableBranchHeadCompletionBypass) {
         stagedHeadBranchBypassValid := incomingHeadBranchBypassMask.orR
-        for (lane <- 0 until config.writebackWidth) {
-          when(incomingHeadBranchBypassMask(lane)) {
-            stagedHeadBranchBypassResult := io.completion(lane).data
-            stagedHeadBranchBypassTaken := io.completion(lane).branchTaken
-            stagedHeadBranchBypassTarget := io.completion(lane).branchTarget
-            stagedHeadBranchBypassMispredict := io.completion(lane).branchMispredict
-          }
+        when(incomingHeadBranchBypassMask.orR) {
+          stagedHeadBranchBypassResult := selectHighestPriority(
+            (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
+            (0 until config.writebackWidth).map(io.completion(_).data)
+          )
+          stagedHeadBranchBypassTaken := selectHighestPriority(
+            (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
+            (0 until config.writebackWidth).map(lane => io.completion(lane).branchTaken.asBits)
+          ).asBool
+          stagedHeadBranchBypassTarget := selectHighestPriority(
+            (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
+            (0 until config.writebackWidth).map(lane => io.completion(lane).branchTarget.asBits)
+          ).asUInt
+          stagedHeadBranchBypassMispredict := selectHighestPriority(
+            (0 until config.writebackWidth).map(incomingHeadBranchBypassMask(_)),
+            (0 until config.writebackWidth).map(lane => io.completion(lane).branchMispredict.asBits)
+          ).asBool
         }
       } else {
         stagedHeadBranchBypassValid := False
