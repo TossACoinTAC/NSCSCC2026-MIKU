@@ -470,7 +470,16 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     eligibleHitResponseMask(entry) := hitResponseMask(entry) &&
       !(hitCaptureValid && hitCaptureMshrId === U(entry, mshrIdWidth bits))
   }
-  val hitResponseId = selectLowest(eligibleHitResponseMask, config.mshrEntries)
+  // Keep the selected hit owner one-hot until the existing output register
+  // boundary.  The binary ID used to select a beat otherwise fans back into
+  // every MSHR update and then crosses the shared refill hierarchy.
+  val hitResponseGrant = Bits(config.mshrEntries bits)
+  hitResponseGrant(0) := eligibleHitResponseMask(0)
+  for (entry <- 1 until config.mshrEntries) {
+    hitResponseGrant(entry) := eligibleHitResponseMask(entry) &&
+      !eligibleHitResponseMask(entry - 1 downto 0).orR
+  }
+  val hitResponseId = OHToUInt(hitResponseGrant)
   val hitResponseBeats = Vec(Bits(CacheContract.BeatBits bits), CacheContract.BeatsPerLine)
   for (beat <- 0 until CacheContract.BeatsPerLine) {
     hitResponseBeats(beat) := lineMemories(beat).readAsync(hitResponseId)
@@ -482,16 +491,24 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
   val refillOutputValid = RegInit(False)
   val refillOutput = Reg(LineReadBeat(config))
   val hitOutputValid = RegInit(False)
-  val hitOutput = Reg(LineReadBeat(config))
+  val hitOutputGrant = Reg(Bits(config.mshrEntries bits)) init (0)
+  val hitOutputBeat = Reg(UInt(CacheContract.BeatIndexWidth bits))
+  val hitOutputData = Reg(Bits(CacheContract.BeatBits bits))
+  val hitOutputLast = Reg(Bool())
+  val hitOutputError = Reg(Bool())
   io.readBeatValid := refillOutputValid || hitOutputValid
-  io.readBeat := hitOutput
+  io.readBeat.mshrId := OHToUInt(hitOutputGrant)
+  io.readBeat.beat := hitOutputBeat
+  io.readBeat.data := hitOutputData
+  io.readBeat.last := hitOutputLast
+  io.readBeat.error := hitOutputError
   when(refillOutputValid) { io.readBeat := refillOutput }
 
   val refillOutputFire = refillOutputValid && io.readBeatReady
   val refillOutputReady = !refillOutputValid || refillOutputFire
   val hitOutputFire = !refillOutputValid && hitOutputValid && io.readBeatReady
   val hitOutputReady = !hitOutputValid || hitOutputFire
-  val hitResponseLoad = eligibleHitResponseMask.orR && hitOutputReady
+  val hitResponseLoad = hitResponseGrant.orR && hitOutputReady
   io.memoryReadBeatReady := !hitCaptureValid && refillOutputReady
   val memoryRefillFire = io.memoryReadBeatValid && io.memoryReadBeatReady
 
@@ -500,14 +517,14 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     when(memoryRefillFire) { refillOutput := io.memoryReadBeat }
   }
   when(hitOutputReady) {
-    hitOutputValid := eligibleHitResponseMask.orR
-    when(eligibleHitResponseMask.orR) {
-      hitOutput.mshrId := hitResponseId
-      hitOutput.beat := misses(hitResponseId).returnBeat
-      hitOutput.data := hitResponseBeats(misses(hitResponseId).returnBeat)
-      hitOutput.last := misses(hitResponseId).returnCount ===
+    hitOutputValid := hitResponseGrant.orR
+    when(hitResponseGrant.orR) {
+      hitOutputGrant := hitResponseGrant
+      hitOutputBeat := misses(hitResponseId).returnBeat
+      hitOutputData := hitResponseBeats(misses(hitResponseId).returnBeat)
+      hitOutputLast := misses(hitResponseId).returnCount ===
         CacheContract.BeatsPerLine - 1
-      hitOutput.error := misses(hitResponseId).error
+      hitOutputError := misses(hitResponseId).error
     }
   }
 
@@ -548,11 +565,15 @@ final class L2Cache(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     }
   }
   when(hitResponseLoad) {
-    when(misses(hitResponseId).returnCount === CacheContract.BeatsPerLine - 1) {
-      misses(hitResponseId).valid := False
-    }.otherwise {
-      misses(hitResponseId).returnBeat := misses(hitResponseId).returnBeat + 1
-      misses(hitResponseId).returnCount := misses(hitResponseId).returnCount + 1
+    for (entry <- 0 until config.mshrEntries) {
+      when(hitResponseGrant(entry)) {
+        when(misses(entry).returnCount === CacheContract.BeatsPerLine - 1) {
+          misses(entry).valid := False
+        }.otherwise {
+          misses(entry).returnBeat := misses(entry).returnBeat + 1
+          misses(entry).returnCount := misses(entry).returnCount + 1
+        }
+      }
     }
   }
 

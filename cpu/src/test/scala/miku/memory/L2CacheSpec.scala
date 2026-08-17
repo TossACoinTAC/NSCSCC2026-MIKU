@@ -516,6 +516,29 @@ class L2CacheSpec extends AnyFunSuite {
         dut.io.read.mshrId #= 3
         dut.clockDomain.waitSampling()
         dut.io.readValid #= false
+        // The L2 hit path uses the same registered response boundary as a refill.
+        // Hold the first beat to prove its selected MSHR identity remains stable
+        // before the downstream L1 accepts it.
+        dut.io.readBeatReady #= false
+        var firstHitWaitCycles = 0
+        while (!dut.io.readBeatValid.toBoolean && firstHitWaitCycles < 8) {
+          assert(!dut.io.memoryReadValid.toBoolean)
+          dut.clockDomain.waitSampling()
+          firstHitWaitCycles += 1
+        }
+        assert(dut.io.readBeatValid.toBoolean)
+        assert(dut.io.readBeat.mshrId.toBigInt == 3)
+        assert(dut.io.readBeat.beat.toBigInt == 0)
+        assert(dut.io.readBeat.data.toBigInt == beats(0))
+        for (_ <- 0 until 2) {
+          dut.clockDomain.waitSampling()
+          sleep(1)
+          assert(dut.io.readBeatValid.toBoolean)
+          assert(dut.io.readBeat.mshrId.toBigInt == 3)
+          assert(dut.io.readBeat.beat.toBigInt == 0)
+          assert(dut.io.readBeat.data.toBigInt == beats(0))
+        }
+        dut.io.readBeatReady #= true
         for (beat <- beats.indices) {
           var waitCycles = 0
           while (!dut.io.readBeatValid.toBoolean && waitCycles < 8) {
