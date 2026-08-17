@@ -1,6 +1,6 @@
 # MIKU
 
-<img width="418" height="235" alt="MIKU project mark" src="https://github.com/user-attachments/assets/7b1726f8-774a-4a3e-bcec-55cc33ed3f3f" />
+<img width="418" height="235" alt="MIKU project mark" src="docs/assets/miku-project-mark.png" />
 
 MIKU（MIKU IS KINDA UNORDERED）是面向龙芯杯决赛 Linux 目标的 LA32R
 乱序 SoC CPU。CPU 使用 SpinalHDL 实现，SoC、仿真和 FPGA 工程来自锁定的

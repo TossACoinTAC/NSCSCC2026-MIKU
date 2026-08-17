@@ -368,6 +368,10 @@ def main() -> int:
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
 
     validate_relative_markdown_links()
+    project_mark = ROOT / "docs/assets/miku-project-mark.png"
+    require(project_mark.is_file(), "README project mark does not exist")
+    require('src="docs/assets/miku-project-mark.png"' in readme,
+            "README must use the repository-local project mark")
 
     for target in (
         "docs/README.md",
