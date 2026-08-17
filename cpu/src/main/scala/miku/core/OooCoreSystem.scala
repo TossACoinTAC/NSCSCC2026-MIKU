@@ -13,6 +13,31 @@ import miku.privileged._
 import spinal.core._
 import spinal.lib._
 
+private[core] final class PrivilegedRedirectPipeline(config: OooCoreConfig) extends Component {
+  val io = new Bundle {
+    val request = in Bool ()
+    val ertn = in Bool ()
+    val serialPc = in UInt (config.xlen bits)
+    val ertnTarget = in UInt (config.xlen bits)
+    val redirectValid = out Bool ()
+    val redirectTarget = out UInt (config.xlen bits)
+  }
+
+  val capturedValid = RegNext(io.request) init (False)
+  val capturedTarget = Reg(UInt(config.xlen bits)) init (0)
+  when(io.request) {
+    capturedTarget := Mux(io.ertn, io.ertnTarget, io.serialPc + 4)
+  }
+
+  val redirectValid = RegNext(capturedValid) init (False)
+  val redirectTarget = Reg(UInt(config.xlen bits)) init (0)
+  when(capturedValid) {
+    redirectTarget := capturedTarget
+  }
+  io.redirectValid := redirectValid
+  io.redirectTarget := redirectTarget
+}
+
 /** OoO core with architectural CSR/TLB state and the 64-byte AXI3 line bridge. */
 final class OooCoreSystem(
     config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
@@ -141,22 +166,19 @@ final class OooCoreSystem(
     val privilegedRedirectRequest = core.io.ertnValid || core.io.refetchValid ||
       core.io.tlbSearchValid || core.io.tlbReadValid || core.io.tlbWriteValid ||
       core.io.tlbFillValid || core.io.tlbInvalidateValid
-    val privilegedRedirectPending = RegNext(privilegedRedirectRequest) init (False)
-    val privilegedRedirectTarget = Reg(UInt(config.xlen bits))
-    when(privilegedRedirectRequest) {
-      privilegedRedirectTarget := Mux(
-        core.io.ertnValid,
-        csr.io.era_out.asUInt,
-        core.io.serialCommitPc + 4
-      )
-    }
+    val privilegedRedirect = new PrivilegedRedirectPipeline(config)
+    privilegedRedirect.io.request := privilegedRedirectRequest
+    privilegedRedirect.io.ertn := core.io.ertnValid
+    privilegedRedirect.io.serialPc := core.io.serialCommitPc
+    privilegedRedirect.io.ertnTarget := csr.io.era_out.asUInt
     idleController.io.enterValid := core.io.idleValid
     idleController.io.enterPc := core.io.serialCommitPc
     idleController.io.interruptPending := csr.io.has_int
-    core.io.externalRedirectValid := privilegedRedirectPending || idleController.io.redirectValid
+    core.io.externalRedirectValid :=
+      privilegedRedirect.io.redirectValid || idleController.io.redirectValid
     core.io.externalRedirectTarget := Mux(
-      privilegedRedirectPending,
-      privilegedRedirectTarget,
+      privilegedRedirect.io.redirectValid,
+      privilegedRedirect.io.redirectTarget,
       idleController.io.redirectTarget
     )
     core.io.exceptionEntryTarget := csr.io.eentry_out.asUInt
