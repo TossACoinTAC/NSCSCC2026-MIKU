@@ -308,6 +308,12 @@ final class BankedFetchPredictor(
 
   val btbRead = Vec(Bits(btbEntryWidth bits), config.fetchWidth)
   val phtRead = Vec(Bits(2 bits), config.fetchWidth)
+  val speculativeRasTop = UInt(config.xlen bits)
+  speculativeRasTop := 0
+  when(speculativeRasCount =/= 0) {
+    speculativeRasTop :=
+      speculativeRas(speculativeRasCount(rasIndexWidth - 1 downto 0) - 1)
+  }
   for (bank <- 0 until config.fetchWidth) {
     val btbWrite = io.btbUpdateValid && btbUpdateBankMask(bank) && !invalidating
     btbBanks(bank).write(
@@ -362,8 +368,7 @@ final class BankedFetchPredictor(
       io.prediction(bank).branchType === PredictedBranchType.ret &&
         speculativeRasCount =/= 0
     ) {
-      io.prediction(bank).target :=
-        speculativeRas(speculativeRasCount(rasIndexWidth - 1 downto 0) - 1)
+      io.prediction(bank).target := speculativeRasTop
     }
   }
 }
