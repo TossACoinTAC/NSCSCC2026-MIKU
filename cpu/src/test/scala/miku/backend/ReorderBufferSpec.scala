@@ -17,6 +17,9 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     val allocateIsBranch = in Bits (config.renameWidth bits)
     val allocateLoadQueueIndex = in Vec (UInt(config.loadQueueIndexWidth bits), config.renameWidth)
     val allocateStoreQueueIndex = in Vec (UInt(config.storeQueueIndexWidth bits), config.renameWidth)
+    val allocateCsrAddress = in Vec (UInt(14 bits), config.renameWidth)
+    val allocateCsrWrite = in Bits (config.renameWidth bits)
+    val allocateCsrMask = in Bits (config.renameWidth bits)
     val allocateSystemOperation =
       in Vec (UInt(SystemOperation.Width bits), config.renameWidth)
     val allocateReady = out Bool ()
@@ -60,6 +63,9 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     val commitIsBranch = out Bits (config.commitWidth bits)
     val commitLoadQueueIndex = out Vec (UInt(config.loadQueueIndexWidth bits), config.commitWidth)
     val commitStoreQueueIndex = out Vec (UInt(config.storeQueueIndexWidth bits), config.commitWidth)
+    val commitCsrAddress = out Vec (UInt(14 bits), config.commitWidth)
+    val commitCsrWrite = out Bits (config.commitWidth bits)
+    val commitCsrMask = out Bits (config.commitWidth bits)
     val commitBranchTaken = out Bits (config.commitWidth bits)
     val commitBranchTarget = out Vec (UInt(config.xlen bits), config.commitWidth)
     val recoveryValid = out Bool ()
@@ -89,8 +95,14 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     rob.io.allocate(lane).uop.decoded.systemOperation := io.allocateSystemOperation(lane)
     rob.io.allocate(lane).uop.loadQueueIndex.allowOverride()
     rob.io.allocate(lane).uop.storeQueueIndex.allowOverride()
+    rob.io.allocate(lane).uop.decoded.csrAddress.allowOverride()
+    rob.io.allocate(lane).uop.decoded.csrWrite.allowOverride()
+    rob.io.allocate(lane).uop.decoded.csrMask.allowOverride()
     rob.io.allocate(lane).uop.loadQueueIndex := io.allocateLoadQueueIndex(lane)
     rob.io.allocate(lane).uop.storeQueueIndex := io.allocateStoreQueueIndex(lane)
+    rob.io.allocate(lane).uop.decoded.csrAddress := io.allocateCsrAddress(lane)
+    rob.io.allocate(lane).uop.decoded.csrWrite := io.allocateCsrWrite(lane)
+    rob.io.allocate(lane).uop.decoded.csrMask := io.allocateCsrMask(lane)
   }
   rob.io.currentEpoch := io.currentEpoch
   rob.io.predictorUpdateCapacity := io.predictorUpdateCapacity
@@ -143,6 +155,9 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
     io.commitIsBranch(lane) := rob.io.commit(lane).isBranch
     io.commitLoadQueueIndex(lane) := rob.io.commit(lane).loadQueueIndex
     io.commitStoreQueueIndex(lane) := rob.io.commit(lane).storeQueueIndex
+    io.commitCsrAddress(lane) := rob.io.commit(lane).csrAddress
+    io.commitCsrWrite(lane) := rob.io.commit(lane).csrWrite
+    io.commitCsrMask(lane) := rob.io.commit(lane).csrMask
     io.commitBranchTaken(lane) := rob.io.commit(lane).branchTaken
     io.commitBranchTarget(lane) := rob.io.commit(lane).branchTarget
   }
@@ -193,6 +208,9 @@ class ReorderBufferSpec extends AnyFunSuite {
       dut.io.allocatePc(lane) #= 0
       dut.io.allocateLoadQueueIndex(lane) #= 0
       dut.io.allocateStoreQueueIndex(lane) #= 0
+      dut.io.allocateCsrAddress(lane) #= 0
+      dut.io.allocateCsrWrite(lane) #= false
+      dut.io.allocateCsrMask(lane) #= false
       dut.io.allocateSystemOperation(lane) #= 0
     }
   }
@@ -1354,6 +1372,11 @@ class ReorderBufferSpec extends AnyFunSuite {
         dut.io.allocatePc(0) #= 0x100
         dut.io.allocatePc(1) #= 0x104
         dut.io.allocatePc(2) #= 0x108
+        dut.io.allocateCsrAddress(0) #= 0x100
+        dut.io.allocateCsrAddress(1) #= 0x101
+        dut.io.allocateCsrAddress(2) #= 0x102
+        dut.io.allocateCsrWrite #= 5
+        dut.io.allocateCsrMask #= 6
         dut.io.allocateValid #= 7
         dut.io.allocateAccept #= true
         sample()
@@ -1376,6 +1399,9 @@ class ReorderBufferSpec extends AnyFunSuite {
         for (lane <- 0 until 3) {
           assert(dut.io.commitResult(lane).toBigInt == BigInt(0xa000 + lane))
           assert(dut.io.commitSideEffectData(lane).toBigInt == BigInt(0xb000 + lane))
+          assert(dut.io.commitCsrAddress(lane).toBigInt == BigInt(0x100 + lane))
+          assert(dut.io.commitCsrWrite.toBigInt.testBit(lane) == (lane != 1))
+          assert(dut.io.commitCsrMask.toBigInt.testBit(lane) == (lane != 0))
         }
         sample()
         assert(dut.io.occupancy.toBigInt == 0)
