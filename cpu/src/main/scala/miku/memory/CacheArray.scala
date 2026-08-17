@@ -6,7 +6,8 @@ import spinal.core._
 final class CacheArray(
     geometry: CoreCacheGeometry,
     addressWidth: Int = 32,
-    decoupleDataReadEnable: Boolean = false
+    decoupleDataReadEnable: Boolean = false,
+    decoupleTagReadEnable: Boolean = false
 ) extends Component {
   require(geometry.lineBytes == CacheContract.LineBytes)
 
@@ -115,9 +116,14 @@ final class CacheArray(
       data = io.writeData,
       enable = externalWrite
     )
+    val tagReadEnable = if (decoupleTagReadEnable) {
+      lookupFire || maintenanceFire
+    } else {
+      (lookupFire || maintenanceFire) && !tagWriteEnable
+    }
     tagRead(way) := tagMemories(way).readSync(
       address = Mux(io.maintenanceReadValid, io.maintenanceReadIndex, requestIndex),
-      enable = (lookupFire || maintenanceFire) && !tagWriteEnable
+      enable = tagReadEnable
     )
     val dataReadEnable = if (decoupleDataReadEnable) {
       lookupFire || maintenanceFire

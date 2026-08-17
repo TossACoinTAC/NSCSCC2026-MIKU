@@ -94,7 +94,8 @@ final class L1InstructionCache(
 
   val cacheArray = new CacheArray(
     geometry,
-    decoupleDataReadEnable = config.enableInstructionArrayDataReadDecoupling
+    decoupleDataReadEnable = config.enableInstructionArrayDataReadDecoupling,
+    decoupleTagReadEnable = config.enableInstructionArrayTagReadDecoupling
   )
   val state = RegInit(L1InstructionCacheState.idle)
   val invalidateSeen = RegInit(False)
