@@ -104,6 +104,9 @@ final case class OooCoreConfig(
     // Capture completion data beside the PRF while the ROB stages the same lane identity.
     // ROB epoch/flush qualification remains the sole write-valid authority one cycle later.
     enableLocalPrfCompletionDataCapture: Boolean = true,
+    // Stage architectural RenameMap updates at its local boundary.  The map exposes the pending
+    // batch combinationally so consecutive retirement and recovery keep their original semantics.
+    enableRegisteredArchitecturalCommit: Boolean = true,
     enableStoreDataDirectWakeup: Boolean = true,
     enableLsuRegisteredWakeSelectDecoupling: Boolean = true,
     // Registered wakeups still update resident source-ready state, but only direct/early

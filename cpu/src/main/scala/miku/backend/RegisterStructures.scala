@@ -155,8 +155,48 @@ final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
   speculative(0).init(U(0, config.physicalRegIndexWidth bits))
   architectural(0).init(U(0, config.physicalRegIndexWidth bits))
 
+  val architecturalCommitValid = Bits(config.commitWidth bits)
+  val architecturalCommitArch = Vec(UInt(config.archRegIndexWidth bits), config.commitWidth)
+  val architecturalCommitPdst = Vec(UInt(config.physicalRegIndexWidth bits), config.commitWidth)
+  if (config.enableRegisteredArchitecturalCommit) {
+    val pendingValid = Reg(Bits(config.commitWidth bits)) init (0)
+    val pendingArch = Vec.fill(config.commitWidth)(
+      Reg(UInt(config.archRegIndexWidth bits)) init (0)
+    )
+    val pendingPdst = Vec.fill(config.commitWidth)(
+      Reg(UInt(config.physicalRegIndexWidth bits)) init (0)
+    )
+    pendingValid := io.commitValid
+    for (lane <- 0 until config.commitWidth) {
+      pendingArch(lane) := io.commitArch(lane)
+      pendingPdst(lane) := io.commitPdst(lane)
+    }
+    architecturalCommitValid := pendingValid
+    architecturalCommitArch := pendingArch
+    architecturalCommitPdst := pendingPdst
+  } else {
+    architecturalCommitValid := io.commitValid
+    architecturalCommitArch := io.commitArch
+    architecturalCommitPdst := io.commitPdst
+  }
+
+  val visibleArchitectural = Vec(UInt(config.physicalRegIndexWidth bits), config.archRegs)
   for (arch <- 0 until config.archRegs) {
-    io.architecturalMappings(arch) := architectural(arch)
+    visibleArchitectural(arch) := architectural(arch)
+    if (arch != 0) {
+      for (lane <- 0 until config.commitWidth) {
+        when(
+          architecturalCommitValid(lane) &&
+            architecturalCommitArch(lane) === U(arch, config.archRegIndexWidth bits)
+        ) {
+          visibleArchitectural(arch) := architecturalCommitPdst(lane)
+        }
+      }
+    }
+  }
+
+  for (arch <- 0 until config.archRegs) {
+    io.architecturalMappings(arch) := visibleArchitectural(arch)
   }
   io.physicalReady := ready
 
@@ -207,7 +247,7 @@ final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
   }
 
   for (lane <- 0 until config.commitWidth) {
-    io.commitPreviousPdst(lane) := architectural(io.commitArch(lane))
+    io.commitPreviousPdst(lane) := visibleArchitectural(io.commitArch(lane))
     for (older <- 0 until lane) {
       when(io.commitValid(older) && io.commitArch(older) === io.commitArch(lane)) {
         io.commitPreviousPdst(lane) := io.commitPdst(older)
@@ -246,7 +286,7 @@ final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
 
   when(io.flush) {
     for (arch <- 1 until config.archRegs) {
-      speculative(arch) := architectural(arch)
+      speculative(arch) := visibleArchitectural(arch)
     }
     ready := B((BigInt(1) << config.physicalRegs) - 1, config.physicalRegs bits)
   }.otherwise {
@@ -256,9 +296,21 @@ final class RenameMap(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit
       }
     }
     ready := (ready | completedMask) & ~allocatedMask
+  }
+  if (config.enableRegisteredArchitecturalCommit) {
     for (lane <- 0 until config.commitWidth) {
-      when(io.commitValid(lane) && io.commitArch(lane) =/= 0) {
-        architectural(io.commitArch(lane)) := io.commitPdst(lane)
+      when(
+        architecturalCommitValid(lane) && architecturalCommitArch(lane) =/= 0
+      ) {
+        architectural(architecturalCommitArch(lane)) := architecturalCommitPdst(lane)
+      }
+    }
+  } else {
+    when(!io.flush) {
+      for (lane <- 0 until config.commitWidth) {
+        when(io.commitValid(lane) && io.commitArch(lane) =/= 0) {
+          architectural(io.commitArch(lane)) := io.commitPdst(lane)
+        }
       }
     }
   }

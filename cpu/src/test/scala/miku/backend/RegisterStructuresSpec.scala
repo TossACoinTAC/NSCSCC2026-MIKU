@@ -260,6 +260,51 @@ class RegisterStructuresSpec extends AnyFunSuite {
       }
   }
 
+  test("registered architectural commit remains visible across consecutive batches and flush") {
+    val config = OooCoreConfig.FourIssueThreeCommit
+    SimConfig.withVerilator
+      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+        "/sim-workspace-ooo-registers")
+      .compile(new RenameMapProbe(config))
+      .doSim("ooo-register-commit-token-flush-boundary", 0x5244) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        clearInputs(dut, config)
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        sample(dut)
+
+        // Batch A establishes r8 -> p20.  The local token is applied at the next edge.
+        dut.io.commitValid #= 1
+        dut.io.commitArch(0) #= 8
+        dut.io.commitPdst(0) #= 20
+        sample(dut)
+        clearInputs(dut, config)
+        dut.io.commitArch(0) #= 8
+        sleep(1)
+        assert(dut.io.commitPreviousPdst(0).toBigInt == 20)
+
+        // Batch B supersedes the mapping.  Its pending value is visible to retirement metadata
+        // before the architectural register edge, while speculative state still holds p20.
+        dut.io.commitValid #= 1
+        dut.io.commitArch(0) #= 8
+        dut.io.commitPdst(0) #= 21
+        sample(dut)
+        clearInputs(dut, config)
+        dut.io.commitArch(0) #= 8
+        sleep(1)
+        assert(dut.io.commitPreviousPdst(0).toBigInt == 21)
+
+        // The following recovery edge applies the pending batch before restoring speculation.
+        dut.io.flush #= true
+        sample(dut)
+        clearInputs(dut, config)
+        dut.io.renameSource1(0) #= 8
+        sleep(1)
+        assert(dut.io.renamePsrc1(0).toBigInt == 21)
+      }
+  }
+
   for ((name, config, highPdst) <- Seq(
       ("default", OooCoreConfig.FourIssueThreeCommit, 63),
       ("expanded-window", OooCoreConfig.ExpandedWindow, 127)
