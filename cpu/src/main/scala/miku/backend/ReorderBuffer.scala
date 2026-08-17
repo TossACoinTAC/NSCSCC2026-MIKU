@@ -430,6 +430,12 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val candidatePointer = Vec.fill(config.commitWidth)(
     Reg(UInt(config.robPointerWidth bits)) init (0)
   )
+  val candidateStateBankMask = Vec.fill(config.commitWidth)(
+    Reg(Bits(payloadBankCount bits)) init (0)
+  )
+  val candidateStateRowMask = Vec.fill(config.commitWidth)(
+    Reg(Bits(payloadDepth bits)) init (0)
+  )
   for (lane <- 0 until config.commitWidth) {
     payloadReadPointer(lane) :=
       (payloadReadBase + U(lane, config.robPointerWidth bits)).resized
@@ -437,6 +443,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     payloadReadRow(lane) :=
       payloadReadPointer(lane)(config.robIndexWidth - 1 downto payloadBankWidth)
     candidatePointer(lane) := payloadReadPointer(lane)
+    candidateStateBankMask(lane) := UIntToOh(payloadReadBank(lane), payloadBankCount)
+    candidateStateRowMask(lane) := UIntToOh(payloadReadRow(lane), payloadDepth)
   }
   val payloadBankRead = Vec(Bits(payloadWidth bits), payloadBankCount)
   val retirementMetadataBankRead =
@@ -510,11 +518,35 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     state
   }
 
+  def readCandidateState(lane: Int, pointer: UInt): ReorderBufferState = {
+    if (config.enableOneHotRobCandidateStateRead) {
+      val bankTerms = (0 until payloadBankCount).map { bank =>
+        val rowTerms = (0 until payloadDepth).map { row =>
+          Mux(
+            candidateStateRowMask(lane)(row),
+            entries(row * payloadBankCount + bank).asBits,
+            B(0, stateWidth bits)
+          )
+        }
+        Mux(
+          candidateStateBankMask(lane)(bank),
+          balancedOr(rowTerms),
+          B(0, stateWidth bits)
+        )
+      }
+      val state = ReorderBufferState(config)
+      state.assignFromBits(balancedOr(bankTerms))
+      state
+    } else {
+      readState(pointer)
+    }
+  }
+
   for (lane <- 0 until config.commitWidth) {
     val pointer = candidatePointer(lane)
     val candidateIndex = pointer(config.robIndexWidth - 1 downto 0)
     val bank = candidateIndex(payloadBankWidth - 1 downto 0)
-    candidates(lane).state.assignFromBits(readState(pointer).asBits)
+    candidates(lane).state.assignFromBits(readCandidateState(lane, pointer).asBits)
     candidates(lane).payload.assignFromBits(payloadBankRead(bank))
     candidateRetirementMetadata(lane).assignFromBits(retirementMetadataBankRead(bank))
     val selectedCompletionPayload = Bits(completionPayloadWidth bits)

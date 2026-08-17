@@ -87,6 +87,9 @@ final case class OooCoreConfig(
     // Track the next ROB state slot with a one-hot sidecar. Binary allocation pointers remain
     // authoritative tags and RAM addresses, but no longer drive every resident state decoder.
     enableOneHotRobAllocationState: Boolean = true,
+    // Carry the prefetched commit pointer's bank/row ownership as local one-hot sidecars so ROB
+    // state selection does not decode the binary pointer again on the commit prefix.
+    enableOneHotRobCandidateStateRead: Boolean = true,
     instructionBufferEntries: Int = 16,
     dispatchQueueEntries: Int = 8,
     issueQueueEntriesPerPort: Int = 8,
