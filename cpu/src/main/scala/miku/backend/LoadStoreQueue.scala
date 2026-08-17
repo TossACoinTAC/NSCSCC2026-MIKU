@@ -1066,7 +1066,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val bankedLoadWakeupValid = bankedForwardCompletionValid &&
     bankedForwardCompletion.writesPdst && bankedForwardCompletion.pdst =/= 0 &&
     bankedForwardWakeupEpochCurrent
-  io.loadWakeupValid := registeredLoadWakeupValid || bankedLoadWakeupValid
+  io.loadWakeupValid := registeredLoadWakeupValid ||
+    (Bool(config.enableBankedForwardLoadFastWakeup) && bankedLoadWakeupValid)
   io.loadWakeupPdst := completion.pdst
   io.loadWakeupRecoveryEpoch := completion.recoveryEpoch
   io.loadWakeupEpochCurrent := completionLoadWakeupEpochCurrent

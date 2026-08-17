@@ -1677,15 +1677,21 @@ class LoadStoreQueueSpec extends AnyFunSuite {
   }
 
   test("a single older covering store forwards to a younger load") {
-    for (banked <- Seq(false, true)) {
-      val testConfig = config.copy(enableBankedLoadForwardCompletion = banked)
+    for (banked <- Seq(false, true); fastWake <- Seq(false, true)) {
+      val testConfig = config.copy(
+        enableBankedLoadForwardCompletion = banked,
+        enableBankedForwardLoadFastWakeup = fastWake
+      )
       SimConfig.withVerilator
         .workspacePath(
           sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
-            s"/sim-workspace-ooo-lsq-forward-$banked"
+            s"/sim-workspace-ooo-lsq-forward-$banked-$fastWake"
         )
         .compile(new LoadStoreQueueProbe(testConfig))
-        .doSim(s"ooo-lsq-store-forwarding-$banked", if (banked) 0x4c53 else 0x4c52) { dut =>
+        .doSim(
+          s"ooo-lsq-store-forwarding-$banked-$fastWake",
+          if (banked) 0x4c53 + (if (fastWake) 2 else 0) else 0x4c52 + (if (fastWake) 2 else 0)
+        ) { dut =>
         dut.clockDomain.forkStimulus(period = 10)
         clearInputs(dut)
         dut.clockDomain.assertReset()
@@ -1725,7 +1731,7 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         assert(dut.io.completion.robPointer.toBigInt == 1)
         assert(dut.io.completion.pdst.toBigInt == 7)
         assert(dut.io.completion.data.toBigInt == BigInt("12345678", 16))
-        assert(dut.io.loadWakeupValid.toBoolean)
+        assert(dut.io.loadWakeupValid.toBoolean == (!banked || fastWake))
         assert(dut.io.loadWakeupPdst.toBigInt == 7)
         assert(dut.io.loadWakeupRecoveryEpoch.toBigInt == 0)
         assert(!dut.io.dataRequestValid.toBoolean)

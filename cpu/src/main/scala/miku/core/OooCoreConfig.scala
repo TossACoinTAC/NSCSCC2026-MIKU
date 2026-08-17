@@ -117,6 +117,10 @@ final case class OooCoreConfig(
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableBalancedIssueSelection: Boolean = true,
     enableBankedLoadForwardCompletion: Boolean = true,
+    // Store-forwarded Loads retain their normal completion, but their consumers
+    // use the following ROB wakeup by default.  This keeps one narrow valid bit
+    // from driving every IQ fast-select payload register across the backend.
+    enableBankedForwardLoadFastWakeup: Boolean = false,
     // Select the scheduled Load payload with its binary queue index.  The legacy one-hot decode
     // followed by conditional bundle overrides forms a wide priority mux after the age selector.
     enableIndexedScheduledLoadSelection: Boolean = true,
