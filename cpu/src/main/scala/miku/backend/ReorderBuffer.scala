@@ -58,6 +58,16 @@ final case class ReorderBufferEntry(config: OooCoreConfig) extends Bundle {
 }
 
 final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) extends Component {
+  private val branchCompletionLanes = config.executionPorts.zipWithIndex.collect {
+    case (port, lane) if port.capabilities.contains(ExecutionUnitKind.Branch) => lane
+  }
+  require(
+    branchCompletionLanes.size == 1,
+    "the ROB branch sidecar requires exactly one branch-capable execution port"
+  )
+  private val branchCompletionLane = branchCompletionLanes.head
+  require(branchCompletionLane < config.writebackWidth)
+
   private def selectLowest(mask: Bits, width: Int): UInt = {
     val selected = UInt(width bits)
     selected := 0
@@ -505,10 +515,13 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val stagedWritesPdst = Vec.fill(config.writebackWidth)(Reg(Bool()))
   val stagedSideEffectData = Vec.fill(config.writebackWidth)(Reg(Bits(config.xlen bits)))
   val stagedException = Vec.fill(config.writebackWidth)(Reg(ExceptionMetadata()))
-  val stagedBranchResolved = Vec.fill(config.writebackWidth)(Reg(Bool()))
-  val stagedBranchTaken = Vec.fill(config.writebackWidth)(Reg(Bool()))
-  val stagedBranchMispredict = Vec.fill(config.writebackWidth)(Reg(Bool()))
-  val stagedBranchTarget = Vec.fill(config.writebackWidth)(Reg(UInt(config.xlen bits)))
+  // Branches complete only on the unique branch-capable execution port. Keep
+  // their sparse metadata in one lane-local sidecar instead of replicating it
+  // across every completion lane and selecting it again at the ROB boundary.
+  val stagedBranchResolved = Reg(Bool()) init (False)
+  val stagedBranchTaken = Reg(Bool())
+  val stagedBranchMispredict = Reg(Bool())
+  val stagedBranchTarget = Reg(UInt(config.xlen bits))
   // Epoch validation is registered alongside the completion payload.  The
   // payload is already staged before wakeup, so this preserves the existing
   // wakeup latency while keeping currentEpoch out of the IQ select-to-uop
@@ -568,16 +581,25 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       stagedWritesPdst(lane) := io.completion(lane).writesPdst
       stagedSideEffectData(lane) := io.completion(lane).sideEffectData
       stagedException(lane) := io.completion(lane).exception
-      stagedBranchResolved(lane) := io.completion(lane).branchResolved
-      stagedBranchTaken(lane) := io.completion(lane).branchTaken
-      stagedBranchMispredict(lane) := io.completion(lane).branchMispredict
-      stagedBranchTarget(lane) := io.completion(lane).branchTarget
     }
+  }
+  when(io.flush) {
+    stagedBranchResolved := False
+  }.otherwise {
+    stagedBranchResolved := io.completionValid(branchCompletionLane) &&
+      io.completion(branchCompletionLane).branchResolved
+    stagedBranchTaken := io.completion(branchCompletionLane).branchTaken
+    stagedBranchMispredict := io.completion(branchCompletionLane).branchMispredict
+    stagedBranchTarget := io.completion(branchCompletionLane).branchTarget
   }
 
   if (config.enableHeadCompletionCommitBypass) {
     val incomingHeadCompletionBypassMask = Bits(config.writebackWidth bits)
-    val incomingHeadBranchBypassMask = Bits(config.writebackWidth bits)
+    val branchCompletion = io.completion(branchCompletionLane)
+    val incomingHeadBranchBypass = io.completionValid(branchCompletionLane) &&
+      branchCompletion.recoveryEpoch === io.currentEpoch &&
+      branchCompletion.robPointer === payloadReadPointer(0) &&
+      !branchCompletion.exception.valid && branchCompletion.branchResolved
     val incomingHeadStoreCompletionBypass = io.storeCompletionBypassValid &&
       io.storeCompletionBypass.recoveryEpoch === io.currentEpoch &&
       io.storeCompletionBypass.robPointer === payloadReadPointer(0)
@@ -588,10 +610,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.completion(lane).recoveryEpoch === io.currentEpoch &&
         io.completion(lane).robPointer === payloadReadPointer(0) &&
         !io.completion(lane).exception.valid && !io.completion(lane).branchResolved
-      incomingHeadBranchBypassMask(lane) := io.completionValid(lane) &&
-        io.completion(lane).recoveryEpoch === io.currentEpoch &&
-        io.completion(lane).robPointer === payloadReadPointer(0) &&
-        !io.completion(lane).exception.valid && io.completion(lane).branchResolved
       when(incomingHeadCompletionBypassMask(lane)) {
         incomingHeadCompletionBypassResult := io.completion(lane).data
       }
@@ -608,24 +626,11 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         incomingHeadCompletionBypassResult
       )
       if (config.enableBranchHeadCompletionBypass) {
-        stagedHeadBranchBypassValid := incomingHeadBranchBypassMask.orR
-        // Build the bypass payload as a combinational one-hot mux and register
-        // the selected value every cycle.  A per-lane `when` would put the
-        // ROB-head candidate comparators on the CE of 32+ bits of the target.
-        val branchResultCandidates = Vec(Bits(config.xlen bits), config.writebackWidth)
-        val branchTakenCandidates = Vec(Bool(), config.writebackWidth)
-        val branchTargetCandidates = Vec(UInt(config.xlen bits), config.writebackWidth)
-        val branchMispredictCandidates = Vec(Bool(), config.writebackWidth)
-        for (lane <- 0 until config.writebackWidth) {
-          branchResultCandidates(lane) := io.completion(lane).data
-          branchTakenCandidates(lane) := io.completion(lane).branchTaken
-          branchTargetCandidates(lane) := io.completion(lane).branchTarget
-          branchMispredictCandidates(lane) := io.completion(lane).branchMispredict
-        }
-        stagedHeadBranchBypassResult := branchResultCandidates(OHToUInt(incomingHeadBranchBypassMask))
-        stagedHeadBranchBypassTaken := branchTakenCandidates(OHToUInt(incomingHeadBranchBypassMask))
-        stagedHeadBranchBypassTarget := branchTargetCandidates(OHToUInt(incomingHeadBranchBypassMask))
-        stagedHeadBranchBypassMispredict := branchMispredictCandidates(OHToUInt(incomingHeadBranchBypassMask))
+        stagedHeadBranchBypassValid := incomingHeadBranchBypass
+        stagedHeadBranchBypassResult := branchCompletion.data
+        stagedHeadBranchBypassTaken := branchCompletion.branchTaken
+        stagedHeadBranchBypassTarget := branchCompletion.branchTarget
+        stagedHeadBranchBypassMispredict := branchCompletion.branchMispredict
       } else {
         stagedHeadBranchBypassValid := False
         stagedHeadBranchBypassResult := 0
@@ -651,12 +656,15 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         entries(entryIndex).sideEffectData := stagedSideEffectData(lane)
         entries(entryIndex).completionExceptionValid := stagedException(lane).valid
         entries(entryIndex).completionException := stagedException(lane)
-        when(stagedBranchResolved(lane)) {
-          entries(entryIndex).branchTaken := stagedBranchTaken(lane)
-          entries(entryIndex).branchMispredict := stagedBranchMispredict(lane)
-          entries(entryIndex).branchTarget := stagedBranchTarget(lane)
-        }
       }
+    }
+    when(
+      !io.flush && stagedCompletionMatches(entryIndex)(branchCompletionLane) &&
+        stagedBranchResolved
+    ) {
+      entries(entryIndex).branchTaken := stagedBranchTaken
+      entries(entryIndex).branchMispredict := stagedBranchMispredict
+      entries(entryIndex).branchTarget := stagedBranchTarget
     }
     when(!io.flush && stagedStoreCompletionMatches(entryIndex)) {
       entryComplete(entryIndex) := True
@@ -732,14 +740,16 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val observationBranchResolved = Bits(config.writebackWidth bits)
   val observationBranchMispredict = Bits(config.writebackWidth bits)
   val observationCompletionActive = stagedCompletionValid & stagedCompletionCurrent
+  observationBranchResolved := 0
+  observationBranchMispredict := 0
   for (lane <- 0 until config.writebackWidth) {
-    observationBranchResolved(lane) :=
-      observationCompletionActive(lane) && stagedBranchResolved(lane)
-    observationBranchMispredict(lane) :=
-      observationBranchResolved(lane) && stagedBranchMispredict(lane)
     perfObservationV1Word4(10 + lane * 6 + 5 downto 10 + lane * 6) :=
       stagedRobPointer(lane).asBits
   }
+  observationBranchResolved(branchCompletionLane) :=
+    observationCompletionActive(branchCompletionLane) && stagedBranchResolved
+  observationBranchMispredict(branchCompletionLane) :=
+    observationBranchResolved(branchCompletionLane) && stagedBranchMispredict
   perfObservationV1Word4(4 downto 0) := observationBranchResolved
   perfObservationV1Word4(9 downto 5) := observationBranchMispredict
   val observationHeadRetiringBranch =
@@ -766,19 +776,16 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       candidates(0).payload.systemOperation =/= SystemOperation.none
     })
   perfObservationV1Word4(51) := headCompletionBypass
-  val observationIncomingHeadBranchCompletion = Bits(config.writebackWidth bits)
-  val observationIncomingHeadMispredictCompletion = Bits(config.writebackWidth bits)
-  for (lane <- 0 until config.writebackWidth) {
-    observationIncomingHeadBranchCompletion(lane) := io.completionValid(lane) &&
-      io.completion(lane).recoveryEpoch === io.currentEpoch &&
-      io.completion(lane).robPointer === payloadReadPointer(0) &&
-      io.completion(lane).branchResolved && !io.completion(lane).exception.valid &&
+  val observationIncomingHeadBranchCompletion =
+    io.completionValid(branchCompletionLane) &&
+      io.completion(branchCompletionLane).recoveryEpoch === io.currentEpoch &&
+      io.completion(branchCompletionLane).robPointer === payloadReadPointer(0) &&
+      io.completion(branchCompletionLane).branchResolved &&
+      !io.completion(branchCompletionLane).exception.valid &&
       candidateValid(0) && !candidateComplete(0) &&
       candidatePayloadReady(0) && candidates(0).state.isBranch
-    observationIncomingHeadMispredictCompletion(lane) :=
-      observationIncomingHeadBranchCompletion(lane) && io.completion(lane).branchMispredict
-  }
-  perfObservationV1Word4(52) := observationIncomingHeadBranchCompletion.orR
-  perfObservationV1Word4(53) := observationIncomingHeadMispredictCompletion.orR
+  perfObservationV1Word4(52) := observationIncomingHeadBranchCompletion
+  perfObservationV1Word4(53) := observationIncomingHeadBranchCompletion &&
+    io.completion(branchCompletionLane).branchMispredict
   PerfObservationV1.expose(perfObservationV1Word4, 4)
 }
