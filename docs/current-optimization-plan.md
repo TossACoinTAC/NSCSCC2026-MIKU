@@ -5,6 +5,11 @@
 效果见 [optimization-candidates.md](optimization-candidates.md)；本轮 top-50 之外的静态时序审计见
 [timing-static-audit-r5.md](timing-static-audit-r5.md)。
 
+2026-08-18 起，开发重心转为“提高可实现主频，兼顾低风险 IPC 收益”。最新的全核
+1st-pass 审计、路径证据和 2nd-pass 候选准入卡见
+[frequency-deep-audit-20260818.md](frequency-deep-audit-20260818.md)；其中的频率优先顺序
+覆盖本文下方历史轮次中“固定 100 MHz、不做升频探索”的阶段性表述。
+
 ## 当前基线与目标
 
 - CPU 开发分支：`dev/ECHO`；最近稳定 100 MHz 里程碑的开发分支证据提交为
