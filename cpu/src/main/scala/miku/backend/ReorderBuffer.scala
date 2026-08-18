@@ -69,6 +69,21 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     selected
   }
 
+  // Decode a staged ROB index once per completion lane.  The previous form
+  // repeated the same binary-index equality in every entry/lane pair; keeping
+  // the qualification as a one-hot mask lets the entry loop consume a local
+  // bit while preserving the registered pointer/generation boundary.
+  private def decodeRobIndex(index: UInt): Bits = {
+    val decoded = Bits(config.robEntries bits)
+    decoded := 0
+    for (entryIndex <- 0 until config.robEntries) {
+      when(index === U(entryIndex, config.robIndexWidth bits)) {
+        decoded(entryIndex) := True
+      }
+    }
+    decoded
+  }
+
   val io = new Bundle {
     val allocateValid = in Bits (config.renameWidth bits)
     val allocate = in Vec (ReorderBufferAllocate(config), config.renameWidth)
@@ -499,20 +514,26 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val stagedStoreCompletionRobPointer = Reg(UInt(config.robPointerWidth bits))
   val stagedCompletionMatches = Vec(Bits(config.writebackWidth bits), config.robEntries)
   val stagedStoreCompletionMatches = Bits(config.robEntries bits)
+  val stagedCompletionEntryMasks = Vec(Bits(config.robEntries bits), config.writebackWidth)
+  for (lane <- 0 until config.writebackWidth) {
+    stagedCompletionEntryMasks(lane) := decodeRobIndex(
+      stagedRobPointer(lane)(config.robIndexWidth - 1 downto 0)
+    )
+  }
+  val stagedStoreCompletionEntryMask = decodeRobIndex(
+    stagedStoreCompletionRobPointer(config.robIndexWidth - 1 downto 0)
+  )
   for (entryIndex <- 0 until config.robEntries) {
     for (lane <- 0 until config.writebackWidth) {
-      val stagedIndex = stagedRobPointer(lane)(config.robIndexWidth - 1 downto 0)
       stagedCompletionMatches(entryIndex)(lane) := stagedCompletionValid(lane) &&
         stagedCompletionCurrent(lane) &&
-        stagedIndex === U(entryIndex, config.robIndexWidth bits) &&
+        stagedCompletionEntryMasks(lane)(entryIndex) &&
         entries(entryIndex).valid && !entries(entryIndex).complete &&
         entries(entryIndex).pointer.msb === stagedRobPointer(lane).msb
     }
-    val stagedStoreIndex =
-      stagedStoreCompletionRobPointer(config.robIndexWidth - 1 downto 0)
     stagedStoreCompletionMatches(entryIndex) := stagedStoreCompletionValid &&
       stagedStoreCompletionCurrent &&
-      stagedStoreIndex === U(entryIndex, config.robIndexWidth bits) &&
+      stagedStoreCompletionEntryMask(entryIndex) &&
       entries(entryIndex).valid && !entries(entryIndex).complete &&
       entries(entryIndex).pointer.msb === stagedStoreCompletionRobPointer.msb
   }
