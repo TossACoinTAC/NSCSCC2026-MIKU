@@ -946,7 +946,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
         val entry = loads(loadHead)
         when(entry.valid && entry.robPointer === scheduledLoad.robPointer) {
           entry.requestSent := True
-          pendingLoadState(loadHead) := False
         }
       }
     }
@@ -1072,6 +1071,59 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   io.releaseLoadCount := loadReleaseCount
   io.releaseStoreCount := storeReleaseCount
 
+  val pendingLoadRequestClearMask = Mux(
+    requestCapture && !storeRequest,
+    UIntToOh(loadHead, config.loadQueueEntries),
+    B(0, config.loadQueueEntries bits)
+  )
+  val pendingLoadAllocationSetTerms = (0 until config.renameWidth).map { lane =>
+    val term = Bits(config.loadQueueEntries bits)
+    term := 0
+    when(io.allocateValid(lane) && io.allocate(lane).isLoad) {
+      term := UIntToOh(io.allocate(lane).loadQueueIndex, config.loadQueueEntries)
+    }
+    term
+  }
+  val pendingLoadAllocationSetMask = pendingLoadAllocationSetTerms.reduce(_ | _)
+  val pendingLoadReleaseClearTerms = (0 until config.commitWidth).map { lane =>
+    val term = Bits(config.loadQueueEntries bits)
+    term := 0
+    when(loadReleaseValid(lane)) {
+      term := UIntToOh(io.commit(lane).loadQueueIndex, config.loadQueueEntries)
+    }
+    term
+  }
+  val pendingLoadReleaseClearMask = pendingLoadReleaseClearTerms.reduce(_ | _)
+  val pendingLoadAguClearMask = Mux(
+    aguFire && !io.agu.isWrite && aguMisaligned,
+    UIntToOh(io.agu.uop.loadQueueIndex, config.loadQueueEntries),
+    B(0, config.loadQueueEntries bits)
+  )
+  val pendingLoadTranslationClearMask = Mux(
+    translationResponseFire && io.translationResponse.exception.valid,
+    residentLoadTranslationOwner,
+    B(0, config.loadQueueEntries bits)
+  )
+  val pendingLoadResponseClearMask = Mux(
+    responseLoadAccepted,
+    UIntToOh(responseLoadIndex, config.loadQueueEntries),
+    B(0, config.loadQueueEntries bits)
+  )
+  val pendingLoadForwardClearMask = Mux(
+    forwardFire,
+    UIntToOh(loadHead, config.loadQueueEntries),
+    B(0, config.loadQueueEntries bits)
+  )
+  val pendingLoadTerminalClearMask = pendingLoadReleaseClearMask |
+    pendingLoadAguClearMask | pendingLoadTranslationClearMask |
+    pendingLoadResponseClearMask | pendingLoadForwardClearMask
+  when(io.flush) {
+    pendingLoadState := 0
+  }.otherwise {
+    pendingLoadState := ((pendingLoadState & ~pendingLoadRequestClearMask) |
+      pendingLoadAllocationSetMask) & ~pendingLoadTerminalClearMask
+  }
+
   when(io.flush) {
     // Preserve a cancellation token until the translator's outstanding
     // response is consumed. A response consumed on the flush edge itself does
@@ -1114,7 +1166,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       entry.completed := False
       entry.translationDone := False
     }
-    pendingLoadState := 0
   }.otherwise {
     when(translationCancelPending && translationResponseFire) {
       translationCancelPending := False
@@ -1148,7 +1199,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
         loads(index).robPointer := io.allocate(lane).robPointer
         loads(index).recoveryEpoch := io.allocate(lane).recoveryEpoch
         loads(index).memoryEpoch := io.allocate(lane).memoryEpoch
-        pendingLoadState(index) := True
       }
     }
 
@@ -1194,7 +1244,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       )
       loads(index).translationDone := aguTranslationBypass
       loads(index).uncached := aguTranslationBypass && io.translationBypass.uncached
-      when(aguMisaligned) { pendingLoadState(index) := False }
     }
 
     for (index <- 0 until config.loadQueueEntries) {
@@ -1205,7 +1254,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
           loads(index).translationDone := True
           when(io.translationResponse.exception.valid) {
             loads(index).completed := True
-            pendingLoadState(index) := False
           }
         }
       }
@@ -1239,7 +1287,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     for (lane <- 0 until config.commitWidth) {
       when(io.releaseLoadValid(lane)) {
         loads(io.commit(lane).loadQueueIndex).valid := False
-        pendingLoadState(io.commit(lane).loadQueueIndex) := False
       }
       when(
         io.commitValid(lane) && io.commit(lane).isStore &&
@@ -1253,14 +1300,12 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
     when(responseLoadAccepted) {
       loads(responseLoadIndex).completed := True
-      pendingLoadState(responseLoadIndex) := False
     }
     when(responseStoreAccepted) {
       stores(storeHead).completed := True
     }
     when(forwardFire) {
       loads(loadHead).completed := True
-      pendingLoadState(loadHead) := False
     }
     when(failedScReleaseFire) {
       stores(storeHead).valid := False
