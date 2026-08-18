@@ -565,10 +565,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     )
   )
   for (lane <- 0 until config.commitWidth) {
-    // ROB owns the precise retirement qualification.  Reusing its narrow token keeps the
-    // architectural-map and free-list control paths local to the backend and avoids duplicating
-    // the wide CommitRecord decode at both consumers.
-    val commitsDestination = rob.io.commitDestinationValid(lane)
+    val commitsDestination = rob.io.commitValid(lane) && rob.io.commit(lane).retired &&
+      rob.io.commit(lane).writesGpr && rob.io.commit(lane).rd =/= 0
     registerMap.io.commitValid(lane) := commitsDestination
     registerMap.io.commitArch(lane) := rob.io.commit(lane).rd
     registerMap.io.commitPdst(lane) := rob.io.commit(lane).pdst
