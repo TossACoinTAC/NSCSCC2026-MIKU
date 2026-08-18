@@ -483,24 +483,13 @@ final class AddressTranslationUnit(
       }
       dataSearchPending := False
     }
-    // A precise redirect cancels the frontend's accepted instruction owner.
-    // The frontend drains stale ownership through the normal response channel,
-    // so every accepted request must still produce either a completion or a
-    // cancel.  Do not duplicate a response consumed on the flush edge.
+    // A precise redirect discards the frontend's instruction owner.  Give the
+    // local token final priority so a request, TLB response, or mutation in the
+    // same cycle cannot recreate stale ownership.  Data translation belongs to
+    // older in-flight memory operations and retains its existing flush policy.
     when(io.instructionFlush) {
       instructionSearchPending := False
-      when(instructionSearchPending || (instructionResponseValid && !instructionResponseFire)) {
-        instructionResponseValid := True
-        instructionResponse.virtualAddress := instructionContext.virtualAddress
-        instructionResponse.physicalAddress := 0
-        instructionResponse.uncached := False
-        instructionResponse.cancelled := True
-        instructionResponse.exception.assignFromBits(
-          B(0, instructionResponse.exception.getBitsWidth bits)
-        )
-      }.otherwise {
-        instructionResponseValid := False
-      }
+      instructionResponseValid := False
     }
   }
 }
