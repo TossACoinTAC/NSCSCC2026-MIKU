@@ -21,6 +21,12 @@ post-route/phys-opt 仅用于探索。
 IPC_factor = geomean(baseline_cycles_i / candidate_cycles_i)
 ```
 
+`IPC_factor` 对 20 项等权，是与官方 perf20 评分一致的主指标。另记录
+`TotalCycleFactor = sum(baseline_cycles_i) / sum(candidate_cycles_i)`，只用于描述当前
+workload 组合的时间权重；它会被长 ROI 项主导，不能覆盖或替代 `IPC_factor`。按
+[perf20-benchmark-patterns.md](perf20-benchmark-patterns.md) 汇总的控制流、规则吞吐、
+load/store 和混合 kernel 簇只用于解释变化、发现一升一降的跷跷板，不构成候选准入分数。
+
 在相同 100 MHz 约束下，同时记录 setup/hold WNS、setup/hold TNS、负端点数量、top200
 路径中 slack 小于 0.1 ns 和 0.2 ns 的数量，以及每个路径族的 worst、median、P90 压力
 slack、logic/route delay 比例。资源至少记录 LUT、FF、BRAM、DSP；实现报告可用时补充
@@ -40,8 +46,10 @@ manifest 的引用证据。
 
 ## 3. 轮次门禁
 
-单候选顺序为：影响分析、定向 Scala/合同测试、RTL 生成与 strict-zero lint、Yosys 结构
-比较、baseline/candidate perf20、必要的 func58 和 Linux smoke。至少五个候选通过这些
+单候选顺序为：影响分析、定向 Scala/合同测试、RTL 生成与 strict-zero lint、有限的 Yosys
+结构检查、baseline/candidate perf20、必要的 func58 和 Linux smoke。Yosys 只在预期结构
+没有实际形成，或出现明确的大规模组合/状态膨胀时拒绝候选；小幅 cell/bit/逻辑深度变化，
+包括反直觉变化，不用于预测 WNS、排序候选或触发额外设计迭代。至少五个候选通过这些
 静态与软件门禁后，再进行一次组合 direct full implementation。若某候选只让一个 top50
 路径族退出，却使 top200 近临界质量、TNS、资源或跨模块布线恶化，应拒绝该候选。
 

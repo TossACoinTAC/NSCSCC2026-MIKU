@@ -195,7 +195,12 @@ Slack (MET) : 0.100ns
                 {"rank": 2, "slack_ns": 0.30, "route_percent": 60.0,
                  "logic_delay_ns": 3.0, "route_delay_ns": 6.0, "category": "IQ"},
             ])
-            comparison = {"summary": {"geometric_mean_speedup": 1.01, "exactly_equal": False}}
+            comparison = {"summary": {
+                "geometric_mean_speedup": 1.01,
+                "baseline_total_cycles": 200,
+                "candidate_total_cycles": 190,
+                "exactly_equal": False,
+            }}
             score = build_scorecard(
                 comparison,
                 parse_design_timing_summary(baseline_summary),
@@ -204,6 +209,7 @@ Slack (MET) : 0.100ns
                 parse_utilization(baseline_util), parse_utilization(candidate_util), 10.0,
             )
             self.assertGreater(score["system_score_proxy"], 1.0)
+            self.assertAlmostEqual(score["total_cycle_factor"], 200 / 190)
             self.assertEqual(score["top_paths"]["baseline"]["slack_below_0_1_ns"], 1)
             self.assertEqual(score["utilization"]["delta"]["lut"], 10)
 

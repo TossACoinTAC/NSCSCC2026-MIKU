@@ -79,6 +79,10 @@ def load_perf_comparison(path: Path) -> dict[str, Any]:
     speedup = summary.get("geometric_mean_speedup")
     if not isinstance(speedup, (int, float)) or speedup <= 0:
         raise OptimizationMetricsError(f"perf comparison 缺少合法几何平均: {path}")
+    for key in ("baseline_total_cycles", "candidate_total_cycles"):
+        value = summary.get(key)
+        if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+            raise OptimizationMetricsError(f"perf comparison 缺少合法 {key}: {path}")
     return document
 
 
@@ -99,13 +103,23 @@ def build_scorecard(
     candidate_utilization: dict[str, float | int],
     period_ns: float,
 ) -> dict[str, Any]:
-    ipc_factor = float(comparison["summary"]["geometric_mean_speedup"])
+    comparison_summary = comparison["summary"]
+    ipc_factor = float(comparison_summary["geometric_mean_speedup"])
+    baseline_total_cycles = int(comparison_summary["baseline_total_cycles"])
+    candidate_total_cycles = int(comparison_summary["candidate_total_cycles"])
+    if baseline_total_cycles <= 0 or candidate_total_cycles <= 0:
+        raise OptimizationMetricsError("perf comparison 总周期必须为正")
     baseline_fproxy = fproxy(float(baseline_timing["setup_wns_ns"]), period_ns)
     candidate_fproxy = fproxy(float(candidate_timing["setup_wns_ns"]), period_ns)
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "clock_period_ns": period_ns,
         "ipc_factor": ipc_factor,
+        "total_cycle_factor": baseline_total_cycles / candidate_total_cycles,
+        "total_cycles": {
+            "baseline": baseline_total_cycles,
+            "candidate": candidate_total_cycles,
+        },
         "fproxy_mhz": {"baseline": baseline_fproxy, "candidate": candidate_fproxy},
         "system_score_proxy": ipc_factor * candidate_fproxy / baseline_fproxy,
         "timing": {"baseline": baseline_timing, "candidate": candidate_timing},
@@ -163,6 +177,7 @@ def main() -> int:
     )
     print(
         f"IPC={result['ipc_factor']:.9f}x "
+        f"TotalCycleFactor={result['total_cycle_factor']:.9f}x "
         f"Fproxy={result['fproxy_mhz']['baseline']:.3f}->"
         f"{result['fproxy_mhz']['candidate']:.3f}MHz "
         f"SystemScoreProxy={result['system_score_proxy']:.9f}x"
