@@ -12,44 +12,49 @@
 
 ### 2026-08-18 当前状态修正
 
-当前待冻结候选是 `dev/freq` 上的 B02-F 加默认 8-entry LDQ；工作树已把
-`FourIssueThreeCommit` 从 `OooCoreConfig(loadQueueEntries = 16)` 恢复为
-`OooCoreConfig()`。它既不同于含比赛自定义指令框架的旧 `dev/main-selective` 工作树，
-也不同于仍包含 L03/LDQ16 的 R20。R20 implementation 锁定
-`2683cef6a084`、source-tree `91b27aa27ffa...`、published RTL `e4f678a61446...` 和
-Chiplab `c398d274812f`，归档于
+当前容量决策为 16-entry LDQ。虽然 case-class 字段默认值是 8，生产 generator 通过
+`OooCoreConfig.FourIssueThreeCommit` 显式设置 `loadQueueEntries = 16`，默认值并不是当前
+生产配置。因此 R21 dirty batch 和当前生成 RTL 身份都是 B02-F + LDQ16；此前写成“当前已
+恢复 LDQ8”是文档错误，不能继续作为实验基线。LDQ8 只作为历史配置背景保留。
+
+R20 implementation 锁定 `2683cef6a084`、source-tree `91b27aa27ffa...`、published RTL
+`e4f678a61446...` 和 Chiplab `c398d274812f`，归档于
 `Post_Impl_Bundles/cpu_2683cef6a084_chiplab_c398d274812f_perf_100mhz_20260818-092420/`。
 
 R20 direct full 已 fully routed、DRC 0 error/critical warning 并生成 bitstream；hold
 WNS 为 `+0.052 ns`，setup WNS/TNS 为 `-0.047/-0.047 ns`，因此仍是 timing-fail
 candidate。最差路径是 `ROB candidatePointer -> LSQ allocator loadOccupancy_reg[4]`；
 top-50 为 LSQ 41、IQ 4、ROB/CSR 3、cache/L2 1、predictor 1。`loadOccupancy_reg[4]`
-正是 16-entry LDQ 的第 5 个 occupancy bit，默认 8-entry 配置下不会以同样形式存在。
-因此 R20 现在主要作为 L03 负面时序证据，不再定义当前 top-N；FQ01/FQ02 均降为
-“fresh LDQ8+B02-F route 后按路径触发”。
+正是 16-entry LDQ 的第 5 个 occupancy bit，另一个 8-entry 历史配置下不会以同样形式存在。
+因此 R20 现在主要作为 L03 负面时序证据；R21 只作为 dirty aggregate 的路径迁移证据，
+不定义任何单候选 WNS。FQ01/FQ02 均降为“matching route 后按路径触发”。
 
 删除旧自定义指令源码后，R20 相对邻近 LDQ16 run 减少 179 LUT、38 register，但前 50 条
-路径摘要逐项相同；这个对比只说明自定义指令清理没有改变 **LDQ16** 的路径墙，不能推导
-LDQ8 的最差路径。
+路径摘要逐项相同；这个对比只说明自定义指令清理没有改变 **LDQ16** 的路径墙，不能把该
+历史 run 的资源或 top-N 直接复制给当前 clean 源码/RTL 身份。
 
-R20 experiment manifest 没有绑定 simulation evidence。旧 `1a03a604` 的 perf20
-`3,910,163` cycles 和 B02-F 约 `2.126%` 几何 speedup 只作邻近性能参考，不能声明为
-当前 LDQ8+B02-F 的 matching IPC 收益。下一步先冻结当前源码/RTL 身份并完成 fresh direct
-full；若 ROB-to-LSQ 路径仍在 top-N，再恢复 FQ01/FQ02。以下 R0--R6 和 R5/R6 数字保留为
-历史开发记录；发生冲突时，本节与 frequency deep audit 的最新状态边界优先。
+R20 experiment manifest 没有绑定 simulation evidence；R21 manifest 虽绑定了 perf20/func58
+和生成 RTL，但记录 `workspace.dirty=true`，不能拆分其 WNS 或 IPC。旧 `1a03a604` 的
+perf20 `3,910,163` cycles 和 B02-F 约 `2.126%` 几何 speedup 只作邻近性能参考，不能
+声明为当前 clean LDQ16 matching IPC 收益或 R21 的单候选收益。下一步先冻结 B02-F+LDQ16
+源码/RTL 身份并完成 matching direct full；若 ROB-to-LSQ 路径仍在 top-N，再隔离
+FQ01，若 pending-load/requestSent 仍在 top-N，再隔离 FQ02。以下 R0--R6 和 R5/R6 数字
+保留为历史开发记录；发生冲突时，本节与 frequency deep audit 的最新状态边界优先。
 
 ## 当前基线与目标
 
-- CPU 开发分支：`dev/freq`；当前源码候选为 B02-F + LDQ8，尚无 matching physical
-  baseline。最近完成的 R20 `@ 2683cef` 是 B02-F + LDQ16 timing-fail candidate，
-  不替代当前源码身份。`fbc9634`/`6bbf9ed` 及 R5/R6 的 perf20、板测和 direct-full
-  结果也均为历史证据。
+- CPU 开发分支：`dev/freq`；当前已确定生产 generator 使用 B02-F + LDQ16，但尚无与当前
+  clean 源码/RTL 身份匹配的 physical baseline。最近完成的 R20 `@ 2683cef` 是 B02-F +
+  LDQ16 timing-fail candidate，R21 是 dirty LDQ16 aggregate；二者都不替代下一份 matching
+  源码/RTL 身份。`fbc9634`/`6bbf9ed` 及 R5/R6 的 perf20、板测和 direct-full 结果也均为
+  历史证据。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 
-以下 R5/R6、R3/R4、R20 和早期 IPC 数字均保留作历史归因，不构成当前 LDQ8+B02-F 的
-matching 性能或时序预算；当前开发只以后续 fresh manifest 和对应报告为准。
+以下 R5/R6、R3/R4、R20、R21 和早期 IPC 数字均保留作历史归因，不构成当前 clean
+B02-F+LDQ16 或 dirty LDQ16 aggregate 的 matching 性能/时序预算；当前开发只以后续 matching manifest
+和对应报告为准。
 
-### 历史基线（不替代当前 LDQ8+B02-F）
+### 历史基线（不替代当前 matching identity）
 - perf20：R6 L13 clean RTL 为 `4,423,675` cycles，20/20 pass，相对 L11 `4,865,310`
   下降 `9.077222%`，几何平均加速 `1.085725368x`；20 项全部改善。L13 的 clean
   matrix 为 `build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/clean-perf20_model_4f54ae244f79_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`。
@@ -107,8 +112,9 @@ matching 性能或时序预算；当前开发只以后续 fresh manifest 和对�
 - post-route `-0.055 ns` 只用于识别路径族，不是正式产物。
 
 上述 R5/R6 结论属于历史轮次。当前不再把 `+0.028 ns` 当作预算，也不固定在“只做
-100 MHz IPC 优化”的模式；先取得 LDQ8+B02-F 的 fresh direct-full top-N，再决定结构性
-频率候选，并在同一源码/RTL 身份下补齐 perf20、func58 和 Linux matching 证据。
+100 MHz IPC 优化”的模式；先冻结 B02-F+LDQ16 generator 和源码/RTL 身份并取得 fresh matching direct-full
+top-N，再决定结构性频率候选，并在同一源码/RTL 身份下补齐 perf20、func58 和 Linux
+matching 证据。
 
 ## R0：实验合同
 
@@ -215,7 +221,7 @@ predictor 容量实验中，`B02-B @ 2b428d6` 扩大 PHT 后总周期反而增�
 门槛且增加 predictor memory bits，`6eda207` 已回退。三项均无 matching Vivado 证据，
 后续实现仍以 L13 的 `4,423,675` cycles 为 R6 baseline。
 
-R6 observer 同时暴露出一项 harness 归因错误：当前硬件 `loadQueueEntries=8`，旧 monitor
+R6 observer 同时暴露出一项 harness 归因错误：R6 当时的硬件 `loadQueueEntries=8`，旧 monitor
 却用 `load_occupancy >= 16` 推导 LDQ full，导致该字段恒为零；其他
 `oldest blocked + alternate address ready` 计数也只是宽松上界，不能证明年轻 Load 已满足
 alias、MAT、LL/SUC 和顺序条件。`M02 @ 6cce873` 将容量 full 和逐级资格直接放入版本化
@@ -544,5 +550,5 @@ MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其
 里程碑运行 Linux。当前候选工作在 `dev/freq`，每个实验保留源码树、生成 RTL、软件、
 Chiplab、Vivado、seed、周期和 setup/hold 证据。R20 虽已 fully routed、DRC 通过并生成
 bitstream，但它属于已退出当前组合的 LDQ16，且 setup 未闭合、manifest 没有 simulation
-evidence，因此不能作为正式竞赛里程碑或当前 perf20 基线；LDQ8+B02-F 的 matching run
-必须由自身满足全部门禁后再进入发布归档。
+evidence，因此不能作为正式竞赛里程碑或当前 perf20 基线；下一份 matching run 必须由
+自身满足全部门禁后再进入发布归档。

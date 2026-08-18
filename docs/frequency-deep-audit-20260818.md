@@ -7,9 +7,11 @@
 
 ## 1. 先给结论
 
-当前 `dev/freq` 工作树为 B02-F + 默认 8-entry LDQ，尚未形成新的 matching physical
-baseline。最近完成的 `R20-stable-main-B02F-direct-100mhz` 是 B02-F + LDQ16，以下表格
-只作为该已退出组合的物理证据，不能直接定义 LDQ8 的新 top-N：
+当前 `dev/freq` 已确定使用 16-entry LDQ。虽然 case-class 字段默认值为 8，生产 generator
+使用的 `OooCoreConfig.FourIssueThreeCommit` 显式设置 `loadQueueEntries = 16`。因此当前
+生成 RTL 和 R21 dirty implementation 都是 B02-F + LDQ16；本轮尚无与当前 clean 源码/RTL
+身份匹配的 physical baseline。最近完成的 `R20-stable-main-B02F-direct-100mhz` 也是
+B02-F + LDQ16，以下表格只作为该容量身份的物理对照，不能直接定义当前 clean top-N：
 
 | 项目 | 结果 |
 | --- | --- |
@@ -23,9 +25,18 @@ baseline。最近完成的 `R20-stable-main-B02F-direct-100mhz` 是 B02-F + LDQ1
 | placed 资源 | 94,803 Slice LUT、60,136 Slice Register、56 RAMB36、21 RAMB18、8 DSP |
 | top-50 | LSQ 41、IQ 4、ROB/CSR 3、cache/L2 1、predictor 1 |
 
+已有 R21 dirty batch `R21-lowrisk-func-perf-20260818` 使用 source tree
+`a468f090...`、raw/published RTL `00f715d6...`/`ce2a34d5...`。它的 perf20 为 20/20、
+总周期 `3,910,163`，func58 seeds `240/255/141` 均通过；matching implementation
+setup/hold 为 `+0.113/+0.048 ns`，fully routed、DRC 0 error/critical warning、bitstream
+存在。R21 同时包含 LSQ release-count 窄化、decoder OR 平衡和 TLB index OR 平衡，且
+workspace dirty；相对 R20 的 `+0.160 ns` 只能作为聚合结果，不能归因给 FQ01/FT09/MT09。
+R21 的最差路径族已迁移到 `privilegedRedirectPending -> instructionSearchPending`
+的 frontend/ATU 控制锥，旧 LSQ occupancy 路径退出该聚合网表首面，但 FQ01 尚未单变量证明。
+
 这条路径的含义是：LDQ16 的额外 occupancy 位把提交候选到 LSQ allocator 的资格链推到
-setup 失败。它不能直接说明 LDQ8 仍有同一条路径；新配置必须先重新生成 RTL 和 full
-implementation。R20 中还观察到：
+setup 失败。当前容量已确定为 LDQ16，因此下一份 clean matching run 必须基于同一容量
+重新生成 RTL 和 full implementation。R20 中还观察到：
 
 - `LoadStoreQueue` 的 `requestSent` 到 `scheduledLoad` 多位状态写使能，约
   `9.64--9.71 ns`，路由占比约 `75%`；
@@ -39,24 +50,24 @@ implementation。R20 中还观察到：
 R20 还修正了一项限定在 LDQ16 语境的重要归因：从旧工作树去掉比赛自定义指令框架和相关 decode/execute
 组合逻辑后，placed 资源净减 179 LUT、38 register，但最差路径、前 50 条路径的
 source/destination、slack、logic/route delay 与旧 `1a03a604` run 逐项相同。源码清理是
-合理的范围收缩，却没有触及 LDQ16 的 WNS 墙；随后恢复 LDQ8 后，必须重新读取资源和
-路径，不能把这组资源或 top-50 复制给当前源码。
+合理的范围收缩，却没有触及 LDQ16 的 WNS 墙；当前 R21 证明 dirty batch 可以让该路径族
+退出首面，但不能把这一变化拆给某个源码改动，也不能把它当成当前 clean LDQ16 的结果。
 
-因此在拿到 LDQ8 fresh top-N 之前，2nd pass 的动作顺序调整为：
+因此在冻结 B02-F+LDQ16 身份并取得 matching fresh top-N 之前，2nd pass 的动作顺序调整为：
 
-1. 冻结 B02-F + LDQ8 源码，重新生成 matching RTL 并完成 100 MHz direct full；
-2. 只有新 top-N 仍出现 ROB-to-LSQ 或 LSQ pending-load/requestSent 时，才启动对应 FQ01/FQ02；
+1. 冻结生产 generator 的 B02-F+LDQ16 身份，再重新生成 matching RTL；
+2. 只有 fresh top-N 仍出现 ROB-to-LSQ 或 LSQ pending-load/requestSent 时，才启动对应 FQ01/FQ02；
 3. 只有 fresh top-N 再出现时，才恢复 L1I/L1D RAM enable 或 IQ
    wakeup/select 候选；
 4. multiplier 先做独立的 FPGA 技术映射实验；PHT、TLB、AXI 和扩容类方案暂缓。
 
-R20 是 LDQ16 的物理证据，不是当前 CPU 源码树的物理结论。其 manifest 的 `evidence` 和
-`simulations` 均为空，没有把 matching perf20/func58 matrix 绑定到该源码与 RTL；旧版本的
-周期和 IPC 更不能自动继承到当前 LDQ8+B02-F。
+R20 是 LDQ16 的物理证据，不是当前 clean baseline 或 dirty batch 的单候选结论。R21 manifest 已绑定
+perf20/func58、生成 RTL 和 workspace dirty 身份，但这仍是聚合 evidence；旧版本的周期和
+IPC 不能自动继承到当前 clean LDQ16，也不能拆给 R21 中任一候选。
 
 ## 2. 证据身份与边界
 
-最近完成、但已被 LDQ8 工作树取代的 matching 证据位于：
+最近完成的 R20 matching 证据位于：
 
 `Post_Impl_Bundles/cpu_2683cef6a084_chiplab_c398d274812f_perf_100mhz_20260818-092420/`
 
@@ -71,7 +82,11 @@ R20 是 LDQ16 的物理证据，不是当前 CPU 源码树的物理结论。其 
 | Chiplab commit | `c398d274812f164d387146fa7d8f612a4a1296d9` |
 | implementation | fully routed，DRC errors/critical warnings 为 0，bitstream 已生成 |
 | timing status | `fail`；setup/hold `-0.047/+0.052 ns`，`competition_eligible=false` |
-| simulation evidence | manifest 未绑定；不能声明 LDQ16 或当前 LDQ8 的 matching perf20/func58 结果 |
+| simulation evidence | manifest 未绑定；不能声明 R20 的 matching perf20/func58 结果 |
+
+R21 的实验 manifest 位于 `build/reports/experiments/R21-lowrisk-func-perf-20260818/`。
+它不在 `Post_Impl_Bundles/`，并明确记录 `workspace.dirty=true`；因此可用于本轮审计的
+证据身份和候选筛选，不得作为稳定产物或单变量物理归因。
 
 旧 `1a03a604` run 仍有参考价值：它与 LDQ16 语境相关，给出 perf20 `3,910,163` cycles、16 improve / 4
 regress 和约 `2.126%` 几何 speedup，也给出了同一组 top-50 物理路径；但它来自含已删除
@@ -169,7 +184,7 @@ blocked 上界仅 `0.1585%` cycles。扩 ROB/PRF 会扩大多端口状态、比�
 
 | cone | 当前用途 | 本轮判断 |
 | --- | --- | --- |
-| commit-to-LSQ release | load/store commit match、释放 mask、allocator occupancy | R20/LDQ16 为 P0；LDQ8 等 fresh top-N |
+| commit-to-LSQ release | load/store commit match、释放 mask、allocator occupancy | R20/LDQ16 为 P0；等待当前 clean LDQ16 fresh top-N |
 | commit-to-privileged | serial PC、CSR、TLB、ERTN、exception | 已有窄 state，只有 top-N 重现才做 FQ01-R |
 | commit-to-predictor | branch retire、GHR/RAS architectural update | 保持 staged batch，暂不与 LSQ 候选混做 |
 | commit-to-FreeList | oldPdst reclaim | 已注册，K02 事件太低，不回接组合路径 |
@@ -186,8 +201,9 @@ top-N 明确指向 PRF read/bypass，才进入物理局部化候选。
 
 ### 3.6 LSQ、Store Data Queue 与内存顺序
 
-**结构。** 当前工作树配置为 LDQ/STQ/SDQ `8/8/8`，R20 归档使用的是已退出的
-`16/8/8`；两者均为单 LSU。LSQ 需要同时维护 load/store 年龄、translation、forwarding、
+**结构。** 当前生产 generator 配置为 LDQ/STQ/SDQ `16/8/8`；case-class 字段默认值为
+8，但 `FourIssueThreeCommit` 显式覆盖为 16。R20 归档也使用 `16/8/8`；两者均为单 LSU。
+LSQ 需要同时维护 load/store 年龄、translation、forwarding、
 requestSent、completion、commit 和 recovery epoch。
 `LoadStoreQueueAllocator` 单独维护 `loadOccupancy/storeOccupancy`，通过 `CountOne`
 统计 commit release mask，并在同一寄存器更新中完成 allocate 与 release 的加减。
@@ -276,8 +292,8 @@ issue、ROB head incomplete、branch recovery，以及 DIV/FreeList/L01/L02 的�
 
 | 模块/路径族 | 最近物理证据 | 动态约束 | 1st pass 结论 |
 | --- | --- | --- | --- |
-| ROB candidate -> LSQ occupancy | R20/LDQ16 最差，9.858 ns，route 79.9%，终点为额外的 bit 4 | ROB 在用，LSQ 释放语义复杂 | **fresh LDQ8 route 后条件触发 FQ01** |
-| LSQ requestSent -> scheduledLoad CE | R20/LDQ16 多条 9.64--9.71 ns，route 约 75% | Load/Store head incomplete 占比较高 | **fresh LDQ8 route 后条件触发 FQ02** |
+| ROB candidate -> LSQ occupancy | R20/LDQ16 最差，9.858 ns，route 79.9%，终点为额外的 bit 4；R21 aggregate 已退出首面 | ROB 在用，LSQ 释放语义复杂 | **先隔离 FQ01，再由 matching top-N 决定是否继续** |
+| LSQ requestSent -> scheduledLoad CE | R20/LDQ16 多条 9.64--9.71 ns，route 约 75%；R21 未证明该族仍在首面 | Load/Store head incomplete 占比较高 | **FQ02 仅在 matching top-N 复现时开放** |
 | LSQ -> ROB completion bypass | R20/LDQ16 为 9.846 ns，route 72% | issue/exec 不是全局饱和 | P1，等待 fresh top-N |
 | L1I tag -> data enable | 更旧 baseline 9.425 ns | R20 中已迁移 | P1 条件，不能重复旧优化 |
 | IQ wakeup/select | R20 top-50 4 条，最差 slack `+0.060 ns`，route 约 82.1% | IQ 满率最高 1.19% | P1 条件，保持 cycle-neutral，先观察 FQ 路径迁移 |
@@ -291,7 +307,7 @@ issue、ROB head incomplete、branch recovery，以及 DIV/FreeList/L01/L02 的�
 候选卡描述的是“可以引入的最小实验”，不是要求立即照抄的 RTL 方案。每张卡都要
 先完成 baseline matching，再允许一次只改变一个结构变量的 A/B。
 
-### FQ01：ROB-to-LSQ release/occupancy 局部化（fresh top-N 条件）
+### FQ01：ROB-to-LSQ release/occupancy 局部化（matching top-N 条件）
 
 **目标路径。** `candidatePointer`/commit qualification -> `releaseLoadValid` ->
 `CountOne`/occupancy arithmetic -> `lsqAllocator.loadOccupancy`。
@@ -321,11 +337,11 @@ contracts；perf20 20/20、func58 三 seed；涉及异常/翻译时增加 Linux 
 **物理准入。** 只接受 `cpu_clk` top-N 中 release/occupancy 路径族退出或明显缩短、
 setup/hold 不出现新失败、DRC/fully-routed 通过，且 cycles 不退化的版本。
 
-### FQ02：LSQ pending-load 与 requestSent CE 局部化（fresh top-N 条件）
+### FQ02：LSQ pending-load 与 requestSent CE 局部化（matching top-N 条件）
 
-**目标路径。** R20 中 16 项 load 的 oldest-ready/translation/requestSent 状态选择，以及
-`requestSent` 同时驱动多个 `scheduledLoad_*` 字段写使能的宽 fanout；当前 LDQ8 必须先
-确认该路径族是否仍进入 top-N。
+**目标路径。** R20/LDQ16 中 16 项 load 的 oldest-ready/translation/requestSent 状态选择，以及
+`requestSent` 同时驱动多个 `scheduledLoad_*` 字段写使能的宽 fanout；当前生产 generator
+仍为 LDQ16，且 R21 aggregate 没有证明该路径族仍进入 top-N，必须以 matching run 复核。
 
 **候选形状。** 先做两级 oldest 归约或 2x8 bank 的局部选择，保留原有 `loadHead`、
 `scheduledLoad` 和 retry-token 寄存边界；随后再比较把同一 `requestSent` 资格拆成 bank-local
@@ -390,8 +406,8 @@ adapter、CSR、idle、TLB 相关 suite 和 Linux smoke。
 
 ### 6.1 固定顺序
 
-1. 冻结当前 B02-F+LDQ8 源码，重新生成 RTL；以该身份完成 fresh 100 MHz direct full
-   baseline。R20 只作 LDQ16 对照，不能复制其 top-N 作为当前 baseline。
+1. 冻结生产 generator 的 B02-F+LDQ16 身份，重新生成 matching RTL 并完成 fresh baseline。
+   R20/R21 都不能跨源码身份复制 top-N。
 2. 用 `cpu_clk` top-N、clock summary 和 utilization 确定 path family；如果路径迁移，
    取消原候选，不为“已经不在 top-N 的路径”做优化。
 3. 只选择一张候选卡，按 impact manifest 跑受影响 Scala/合同测试、RTL generation、
@@ -426,7 +442,7 @@ adapter、CSR、idle、TLB 相关 suite 和 Linux smoke。
 
 ### 正确性优先级
 
-1. fresh LDQ8 baseline：先证明生成 RTL 确实对应默认 8-entry 配置，再读取 top-N。
+1. fresh baseline：先证明生成 RTL 对应已确定的 B02-F+LDQ16 计划身份，再读取 top-N。
 2. 若被路径触发，FQ01 检查精确异常、uncached store、SC、flush、wraparound；FQ02 检查
    年龄、forwarding、translation owner、retry、wakeup。
 3. FQ03 cache：refill、victim、CACOP、write-back 和 hit II。
@@ -435,13 +451,13 @@ adapter、CSR、idle、TLB 相关 suite 和 Linux smoke。
 
 ### 频率优先级
 
-1. 当前 LDQ8 matching top-N 尚未取得；第一个物理动作是 fresh baseline，不立即修改 RTL。
+1. 当前 B02-F+LDQ16 clean matching top-N 尚未取得；先冻结该身份，再生成对应 fresh baseline。
 2. FQ01/FQ02 只在 fresh route 复现对应路径族后按 worst slack 排序；R20 只能证明 LDQ16
-   的 LSQ/commit 路径墙。
+   的 LSQ/commit 路径墙，R21 只能证明 dirty aggregate 的路径迁移。
 3. cache、IQ、predictor 和 multiplier 只在路径证据触发后进入对应实验。
-4. 所谓“唾手可得的 IPC”目前只有旧邻近版本中的 L02 retry-token 和 B02-F 结果可供
-   参考；R20 尚未绑定 matching performance matrix，不能把它们写成当前已确认收益。
+4. 目前最强的双赢假设是 `FQ01 -> L11+L13` 和 `FQ02 -> L02`；前者的时序收益、后者的
+   IPC opportunity 都已有邻近证据，但两者都没有 matching 单变量 WNS 结果。
 
-本轮 1st pass 已用 R20 找到 LDQ16 的负面物理证据，并据此将 L03 从当前组合移除。下一轮
-先完成 LDQ8+B02-F fresh baseline；再由该 run 选择一张候选卡，形成 matching、可复现、
-可回退的证据链。
+本轮 1st pass 已用 R20 找到 LDQ16 的负面物理证据，并由 R21 dirty batch 观察到 release
+count 局部化后的路径迁移；下一轮以已确定的 B02-F+LDQ16 身份为基线，再由 matching top-N
+选择一张候选卡，形成可复现、可回退的证据链。
