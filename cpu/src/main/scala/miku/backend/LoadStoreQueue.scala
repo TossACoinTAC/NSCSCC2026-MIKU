@@ -1361,12 +1361,36 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     !scheduledLoad.uncached && !scheduledLoad.isLl && !bufferedCommittedStore &&
     !unknownOlderStore.orR && !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
     (partialOverlapStore.orR || pendingDataStore.orR || forwardingCount > 1)
-  val retryRotated =
-    ((alternatePendingLoadAddressReady ## alternatePendingLoadAddressReady) |>> loadHead)
-      .resize(config.loadQueueEntries)
-  val retryAlternateHead =
-    (loadHead + OHToUInt(OHMasking.first(retryRotated))).resized
-  val retryTrigger = oldestLoadLocalAliasBlocked && retryRotated.orR &&
+  val retryBaseBank = loadHead.msb
+  val retryBaseLocal = loadHead(loadSelectLocalWidth - 1 downto 0)
+  val retryPendingBank0 = alternatePendingLoadAddressReady(loadSelectBankEntries - 1 downto 0)
+  val retryPendingBank1 =
+    alternatePendingLoadAddressReady(config.loadQueueEntries - 1 downto loadSelectBankEntries)
+  val retryBasePending = Mux(retryBaseBank, retryPendingBank1, retryPendingBank0)
+  val retryOtherPending = Mux(retryBaseBank, retryPendingBank0, retryPendingBank1)
+  val retryBaseSuffixPending = Bits(loadSelectBankEntries bits)
+  val retryBasePrefixPending = Bits(loadSelectBankEntries bits)
+  for (entry <- 0 until loadSelectBankEntries) {
+    val entryIndex = U(entry, loadSelectLocalWidth bits)
+    retryBaseSuffixPending(entry) := retryBasePending(entry) && entryIndex >= retryBaseLocal
+    retryBasePrefixPending(entry) := retryBasePending(entry) && entryIndex < retryBaseLocal
+  }
+  val retryBaseSuffixValid = retryBaseSuffixPending.orR
+  val retryOtherValid = retryOtherPending.orR
+  val retryBasePrefixValid = retryBasePrefixPending.orR
+  val retryAlternateValid = retryBaseSuffixValid || retryOtherValid || retryBasePrefixValid
+  val retryAlternateBank = Bool()
+  val retryAlternateLocal = UInt(loadSelectLocalWidth bits)
+  retryAlternateBank := retryBaseBank
+  retryAlternateLocal := OHToUInt(OHMasking.first(retryBasePrefixPending))
+  when(retryBaseSuffixValid) {
+    retryAlternateLocal := OHToUInt(OHMasking.first(retryBaseSuffixPending))
+  }.elsewhen(retryOtherValid) {
+    retryAlternateBank := !retryBaseBank
+    retryAlternateLocal := OHToUInt(OHMasking.first(retryOtherPending))
+  }
+  val retryAlternateHead = (retryAlternateBank.asBits ## retryAlternateLocal.asBits).asUInt
+  val retryTrigger = oldestLoadLocalAliasBlocked && retryAlternateValid &&
     !retryCandidatePending
   when(io.flush) {
     retryValid := False
