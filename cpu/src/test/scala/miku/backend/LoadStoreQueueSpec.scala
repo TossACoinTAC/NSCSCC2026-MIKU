@@ -733,72 +733,76 @@ class LoadStoreQueueSpec extends AnyFunSuite {
   }
 
   test("load scheduling preserves circular age across both queue banks") {
-    SimConfig.withVerilator
-      .workspacePath(
-        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
-          "/sim-workspace-ooo-lsq-banked-circular-select"
-      )
-      .compile(new LoadStoreQueueProbe(config))
-      .doSim("ooo-lsq-banked-circular-select", 0x4c82) { dut =>
-        dut.clockDomain.forkStimulus(period = 10)
-        clearInputs(dut)
-        dut.io.translationBypassEligible #= true
-        dut.clockDomain.assertReset()
-        dut.clockDomain.waitSampling(2)
-        dut.clockDomain.deassertReset()
-        sample(dut)
-
-        // Starting at slot 6, the exact circular order is the bank-0 suffix,
-        // bank 1, then the bank-0 prefix: 6 -> 9 -> 2.
-        val loads = Seq(
-          (6, 10, BigInt(0x600), BigInt(0x80000600L), 8),
-          (9, 11, BigInt(0x900), BigInt(0x80000900L), 9),
-          (2, 12, BigInt(0x200), BigInt(0x80000200L), 10)
+    for (sidecar <- Seq(false, true)) {
+      SimConfig.withVerilator
+        .workspacePath(
+          sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+            s"/sim-workspace-ooo-lsq-banked-circular-select-$sidecar"
         )
-        dut.io.allocateValid #= 7
-        for (((loadIndex, pointer, _, _, _), lane) <- loads.zipWithIndex) {
-          dut.io.allocate(lane).robPointer #= pointer
-          dut.io.allocate(lane).isLoad #= true
-          dut.io.allocate(lane).loadQueueIndex #= loadIndex
-        }
-        sample(dut)
-        dut.io.allocateValid #= 0
-
-        for ((loadIndex, pointer, virtualAddress, physicalAddress, pdst) <- loads) {
-          dut.io.translationBypassPhysicalAddress #= physicalAddress
-          setLoadAgu(
-            dut,
-            pointer = pointer,
-            address = virtualAddress,
-            loadIndex = loadIndex,
-            pdst = pdst
-          )
+        .compile(
+          new LoadStoreQueueProbe(config.copy(enableLoadPendingStateSidecar = sidecar))
+        )
+        .doSim(s"ooo-lsq-banked-circular-select-$sidecar", 0x4c82 + sidecar.hashCode()) { dut =>
+          dut.clockDomain.forkStimulus(period = 10)
+          clearInputs(dut)
+          dut.io.translationBypassEligible #= true
+          dut.clockDomain.assertReset()
+          dut.clockDomain.waitSampling(2)
+          dut.clockDomain.deassertReset()
           sample(dut)
-        }
-        dut.io.aguValid #= false
-        dut.io.dataRequestReady #= true
 
-        val requests = scala.collection.mutable.ArrayBuffer.empty[(BigInt, BigInt, BigInt)]
-        var requestWait = 0
-        while (requests.size < loads.size && requestWait < 32) {
-          if (dut.io.dataRequestValid.toBoolean) {
-            requests += ((
-              dut.io.dataRequest.robPointer.toBigInt,
-              dut.io.dataRequest.virtualAddress.toBigInt,
-              dut.io.dataRequest.physicalAddress.toBigInt
-            ))
+          // Starting at slot 6, the exact circular order is the bank-0 suffix,
+          // bank 1, then the bank-0 prefix: 6 -> 9 -> 2.
+          val loads = Seq(
+            (6, 10, BigInt(0x600), BigInt(0x80000600L), 8),
+            (9, 11, BigInt(0x900), BigInt(0x80000900L), 9),
+            (2, 12, BigInt(0x200), BigInt(0x80000200L), 10)
+          )
+          dut.io.allocateValid #= 7
+          for (((loadIndex, pointer, _, _, _), lane) <- loads.zipWithIndex) {
+            dut.io.allocate(lane).robPointer #= pointer
+            dut.io.allocate(lane).isLoad #= true
+            dut.io.allocate(lane).loadQueueIndex #= loadIndex
           }
           sample(dut)
-          requestWait += 1
-        }
-        assert(
-          requests.toSeq == Seq(
-            (BigInt(10), BigInt(0x600), BigInt(0x80000600L)),
-            (BigInt(11), BigInt(0x900), BigInt(0x80000900L)),
-            (BigInt(12), BigInt(0x200), BigInt(0x80000200L))
+          dut.io.allocateValid #= 0
+
+          for ((loadIndex, pointer, virtualAddress, physicalAddress, pdst) <- loads) {
+            dut.io.translationBypassPhysicalAddress #= physicalAddress
+            setLoadAgu(
+              dut,
+              pointer = pointer,
+              address = virtualAddress,
+              loadIndex = loadIndex,
+              pdst = pdst
+            )
+            sample(dut)
+          }
+          dut.io.aguValid #= false
+          dut.io.dataRequestReady #= true
+
+          val requests = scala.collection.mutable.ArrayBuffer.empty[(BigInt, BigInt, BigInt)]
+          var requestWait = 0
+          while (requests.size < loads.size && requestWait < 32) {
+            if (dut.io.dataRequestValid.toBoolean) {
+              requests += ((
+                dut.io.dataRequest.robPointer.toBigInt,
+                dut.io.dataRequest.virtualAddress.toBigInt,
+                dut.io.dataRequest.physicalAddress.toBigInt
+              ))
+            }
+            sample(dut)
+            requestWait += 1
+          }
+          assert(
+            requests.toSeq == Seq(
+              (BigInt(10), BigInt(0x600), BigInt(0x80000600L)),
+              (BigInt(11), BigInt(0x900), BigInt(0x80000900L)),
+              (BigInt(12), BigInt(0x200), BigInt(0x80000200L))
+            )
           )
-        )
-      }
+        }
+    }
   }
 
   test("independent loads complete only with matching LQ owner and ROB tag") {

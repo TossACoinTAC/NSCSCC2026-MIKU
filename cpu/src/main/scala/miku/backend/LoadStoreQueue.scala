@@ -235,10 +235,16 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // three local regions: the base bank suffix, the other bank, then the base
   // bank prefix.  This is the exact circular order starting at loadBase, but
   // avoids a full-queue variable rotate and add on the scheduling path.
-  val pendingLoads = Bits(config.loadQueueEntries bits)
+  val derivedPendingLoads = Bits(config.loadQueueEntries bits)
   for (entry <- 0 until config.loadQueueEntries) {
-    pendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
+    derivedPendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
       !loads(entry).completed
+  }
+  val pendingLoadState = Reg(Bits(config.loadQueueEntries bits)) init (0)
+  val pendingLoads = if (config.enableLoadPendingStateSidecar) {
+    pendingLoadState
+  } else {
+    derivedPendingLoads
   }
   val loadSelectBankEntries = config.loadQueueEntries / 2
   val loadSelectLocalWidth = log2Up(loadSelectBankEntries)
@@ -935,6 +941,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
         val entry = loads(loadHead)
         when(entry.valid && entry.robPointer === scheduledLoad.robPointer) {
           entry.requestSent := True
+          pendingLoadState(loadHead) := False
         }
       }
     }
@@ -1102,6 +1109,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       entry.completed := False
       entry.translationDone := False
     }
+    pendingLoadState := 0
   }.otherwise {
     when(translationCancelPending && translationResponseFire) {
       translationCancelPending := False
@@ -1135,6 +1143,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
         loads(index).robPointer := io.allocate(lane).robPointer
         loads(index).recoveryEpoch := io.allocate(lane).recoveryEpoch
         loads(index).memoryEpoch := io.allocate(lane).memoryEpoch
+        pendingLoadState(index) := True
       }
     }
 
@@ -1180,6 +1189,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
       )
       loads(index).translationDone := aguTranslationBypass
       loads(index).uncached := aguTranslationBypass && io.translationBypass.uncached
+      when(aguMisaligned) { pendingLoadState(index) := False }
     }
 
     for (index <- 0 until config.loadQueueEntries) {
@@ -1188,7 +1198,10 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
         loads(index).uncached := io.translationResponse.uncached
         when(translationResponseFire) {
           loads(index).translationDone := True
-          when(io.translationResponse.exception.valid) { loads(index).completed := True }
+          when(io.translationResponse.exception.valid) {
+            loads(index).completed := True
+            pendingLoadState(index) := False
+          }
         }
       }
     }
@@ -1221,6 +1234,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     for (lane <- 0 until config.commitWidth) {
       when(io.releaseLoadValid(lane)) {
         loads(io.commit(lane).loadQueueIndex).valid := False
+        pendingLoadState(io.commit(lane).loadQueueIndex) := False
       }
       when(
         io.commitValid(lane) && io.commit(lane).isStore &&
@@ -1234,12 +1248,14 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
     when(responseLoadAccepted) {
       loads(responseLoadIndex).completed := True
+      pendingLoadState(responseLoadIndex) := False
     }
     when(responseStoreAccepted) {
       stores(storeHead).completed := True
     }
     when(forwardFire) {
       loads(loadHead).completed := True
+      pendingLoadState(loadHead) := False
     }
     when(failedScReleaseFire) {
       stores(storeHead).valid := False
