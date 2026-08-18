@@ -16,7 +16,40 @@ R22 合入时暴露并由 `38c4a07` 关闭的 `BankedFetchPredictor` RAS one-hot
 组合环（C10）。Observer v2 及其 trace 只保留在 `dev/freq` 作为开发期证据，不进入
 clean RTL 或稳定里程碑。
 
-### 2026-08-18 当前状态修正
+### R24 当前执行状态
+
+当前 baseline 为 R21 聚合 RTL：CPU commit `5be1257ab976`、source tree
+`a468f0903539...`、published RTL `ce2a34d58e76...`、Chiplab `c398d274812f`。
+perf20 为 `3,910,163` cycles，func58 seeds `240/255/141` 通过；100 MHz matching direct
+full setup/hold 为 `+0.113/+0.048 ns`、setup TNS 0、fully routed、DRC 0 error/critical
+warning、bitstream 成功。归档位于
+`Post_Impl_Bundles/cpu_5be1257ab976_chiplab_c398d274812f_perf_100mhz_20260818-122325/`。
+
+R21 top200 为 cache/L2 106、ROB/CSR 31、LSQ 30、predictor 25、IQ 5、other CPU 3。
+ROB 约占 CPU LUT 三成；R24 因此从整面 ROB completion/commit/recovery 控制网络入手，
+组合候选为 ROB01、ROB02、ROB03、ROB04、FCTX01、SYS01。每项独立提交、定向验证和
+Yosys 结构审计，至少五项通过静态/软件门禁后才做一次组合 direct full。全局评价执行
+[optimization-evaluation-contract.md](optimization-evaluation-contract.md)，不能再用某一
+目标族退出 top50 代替 WNS/TNS/top200/资源/IPC 的整体判断。
+
+Yosys 与 Vivado 的历史配对审计结论如下：
+
+| 配对 | Yosys | Vivado direct full | 结论 |
+| --- | --- | --- | --- |
+| R14 -> R15 | `+42 cells`、`-583 word bits`、L1I 深度 `-1` | WNS `-0.673 -> -0.372 ns` | 同向但多族同时变化，不能单项归因。 |
+| R15 -> R16 | `+607 cells`、`+6731 bits` | WNS `-0.372 -> -0.334 ns` | 资源变差而 WNS 略好。 |
+| R16 -> R17 | `-32 cells`、`-621 bits` | WNS `-0.334 -> -0.230 ns` | 偶然同向，无逻辑深度证据。 |
+| R17 -> R18 | `-23 cells`，LSQ/core 深度下降 | WNS `-0.230 -> -0.320 ns` | 路径迁移到 ROB/CSR，典型 seesaw。 |
+| R18 -> R19 | `-116 cells`、`-1648 bits` | WNS `-0.320 -> -0.601 ns` | 结构更小但实现明显变差。 |
+| R22 -> R23 | LSQ `+76 cells`、`+1050 wire bits`、`+44 mux` | `+643 LUT/+173 FF`，WNS 基本不变 | Yosys 识别了增量方向，但严重低估映射代价。 |
+| R21 -> R22 | Vivado `-800 LUT/-274 FF` | WNS `+0.113 -> -0.271 ns` | 面积下降不推出时序改善。 |
+
+R14-R19 的 `Yosys cell delta` 与 WNS delta 描述性 Pearson 相关约 `0.24`，样本又是复合
+批次，不能建立预测模型。Yosys 只作为结构预筛选和回归拒绝门：验证结构确实删除/新增、
+memory inference、generic cell/mux/DFF/memory bits 和模块级逻辑深度；Vivado 负责判断
+Xilinx primitive 映射、placement/route、congestion、WNS/TNS 和路径迁移。
+
+### 2026-08-18 历史状态修正
 
 当前容量决策为 16-entry LDQ。虽然 case-class 字段默认值是 8，生产 generator 通过
 `OooCoreConfig.FourIssueThreeCommit` 显式设置 `loadQueueEntries = 16`，默认值并不是当前
@@ -50,16 +83,12 @@ exact fetch-side 观察结果决定 BP01/BP02。以下 R0--R6 和 R5/R6 数字
 
 ## 当前基线与目标
 
-- CPU 开发分支：`dev/freq`；当前已确定生产 generator 使用 B02-F + LDQ16，但尚无与当前
-  clean 源码/RTL 身份匹配的 physical baseline。最近完成的 R20 `@ 2683cef` 是 B02-F +
-  LDQ16 timing-fail candidate，R21 是 dirty LDQ16 aggregate；二者都不替代下一份 matching
-  源码/RTL 身份。`fbc9634`/`6bbf9ed` 及 R5/R6 的 perf20、板测和 direct-full 结果也均为
-  历史证据。
+- CPU 开发分支：`dev/freq`；当前 baseline 是上文锁定的 R21 B02-F + LDQ16 matching
+  direct full。R20、R22、R23 及 R5/R6 均只作为历史对照，不替代 R21 身份。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
 
-以下 R5/R6、R3/R4、R20、R21 和早期 IPC 数字均保留作历史归因，不构成当前 clean
-B02-F+LDQ16 或 dirty LDQ16 aggregate 的 matching 性能/时序预算；当前开发只以后续 matching manifest
-和对应报告为准。
+以下 R5/R6、R3/R4、R20、R22、R23 和早期 IPC 数字均保留作历史归因，不构成 R24
+matching 性能/时序预算；当前开发以 R21 baseline 与后续 matching manifest 为准。
 
 ### 历史基线（不替代当前 matching identity）
 - perf20：R6 L13 clean RTL 为 `4,423,675` cycles，20/20 pass，相对 L11 `4,865,310`

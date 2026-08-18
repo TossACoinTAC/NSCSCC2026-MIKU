@@ -18,6 +18,11 @@ from common import (
 )
 from test_impact import calculate_impact
 from timing_analyze import classify, parse_timing_report, summarize
+from optimization_metrics import (
+    build_scorecard,
+    parse_design_timing_summary,
+    parse_utilization,
+)
 
 sys.path.insert(0, str(ROOT / "scripts/common"))
 from content_hash import cpu_source_hash
@@ -162,6 +167,45 @@ Slack (MET) : 0.100ns
             self.assertEqual(result["groups"]["predictor"]["count"], 1)
             self.assertEqual(result["groups"]["platform"]["count"], 1)
             self.assertEqual(classify("u_cpu/core/issueQueues/q", "u_cpu/out"), "IQ")
+
+    def test_global_optimization_scorecard_uses_worst_and_near_critical_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            summary = """| Design Timing Summary
+    WNS(ns)      TNS(ns)  TNS Failing Endpoints  TNS Total Endpoints      WHS(ns)      THS(ns)  THS Failing Endpoints  THS Total Endpoints
+      0.100        0.000                      0               10        0.050        0.000                      0               10
+"""
+            baseline_summary = root / "baseline.rpt"
+            candidate_summary = root / "candidate.rpt"
+            baseline_summary.write_text(summary, encoding="utf-8")
+            candidate_summary.write_text(summary.replace("0.100", "0.200"), encoding="utf-8")
+            baseline_util = root / "baseline-util.rpt"
+            candidate_util = root / "candidate-util.rpt"
+            util_text = (
+                "| Slice LUTs | 100 | 0 | 0 | 1000 | 10 |\n"
+                "| Slice Registers | 200 | 0 | 0 | 1000 | 20 |\n"
+                "| Block RAM Tile | 2 | 0 | 0 | 10 | 20 |\n"
+                "| DSPs | 1 | 0 | 0 | 10 | 10 |\n"
+            )
+            baseline_util.write_text(util_text, encoding="utf-8")
+            candidate_util.write_text(util_text.replace("| 100 |", "| 110 |"), encoding="utf-8")
+            paths = summarize([
+                {"rank": 1, "slack_ns": 0.05, "route_percent": 80.0,
+                 "logic_delay_ns": 2.0, "route_delay_ns": 8.0, "category": "ROB/CSR"},
+                {"rank": 2, "slack_ns": 0.30, "route_percent": 60.0,
+                 "logic_delay_ns": 3.0, "route_delay_ns": 6.0, "category": "IQ"},
+            ])
+            comparison = {"summary": {"geometric_mean_speedup": 1.01, "exactly_equal": False}}
+            score = build_scorecard(
+                comparison,
+                parse_design_timing_summary(baseline_summary),
+                parse_design_timing_summary(candidate_summary),
+                paths, paths,
+                parse_utilization(baseline_util), parse_utilization(candidate_util), 10.0,
+            )
+            self.assertGreater(score["system_score_proxy"], 1.0)
+            self.assertEqual(score["top_paths"]["baseline"]["slack_below_0_1_ns"], 1)
+            self.assertEqual(score["utilization"]["delta"]["lut"], 10)
 
     def test_impact_map_is_path_based(self) -> None:
         mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))

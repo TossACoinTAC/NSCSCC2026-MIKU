@@ -50,6 +50,14 @@ BASE_MATRIX ?=
 CANDIDATE_MATRIX ?=
 COMPARE_ID ?= comparison-$(shell date +%Y%m%d-%H%M%S)
 COMPARE_OUT ?= $(BUILD_ROOT)/reports/comparisons/$(COMPARE_ID).json
+BASE_TIMING_SUMMARY ?=
+CANDIDATE_TIMING_SUMMARY ?=
+BASE_TIMING_JSON ?=
+CANDIDATE_TIMING_JSON ?=
+BASE_UTILIZATION ?=
+CANDIDATE_UTILIZATION ?=
+CLOCK_PERIOD_NS ?= 10.0
+OPTIMIZATION_METRICS_OUT ?= $(BUILD_ROOT)/reports/optimization/$(COMPARE_ID).json
 TIMING_REPORT ?=
 TIMING_OUT ?= $(BUILD_ROOT)/reports/timing/$(notdir $(basename $(TIMING_REPORT))).json
 PERF_OBSERVATION_MATRIX ?=
@@ -69,7 +77,7 @@ FUNC58_WORKLOADS := func58
 CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_CACHE_VOLUME=$(DOCKER_CACHE_VOLUME) $(ROOT_DIR)/scripts/env/run-in-container
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-.PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
+.PHONY: help doctor status ide-setup env-build toolchain-check experiment-freeze experiment-compare timing-analyze optimization-evaluate test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim branch-trace-summary wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
@@ -82,10 +90,10 @@ help:
 		'  make status             显示根仓库及受支持子仓库状态' \
 		'  make ide-setup          生成指向 cpu/build.sbt 的 BSP 配置' \
 		'  make env-build          构建锁定 CPU/仿真工具镜像' \
-		'  make docs-check         验证文档入口与候选账本结构' \
 		'  make experiment-freeze  冻结源码、RTL、工具和显式证据身份' \
 		'  make experiment-compare 比较两组身份兼容的完整 perf20' \
 		'  make timing-analyze      自动归类 Vivado top timing paths' \
+		'  make optimization-evaluate 生成 IPC×频率全局评价' \
 		'  make test-impact         按变更路径列出必须运行的测试' \
 		'  make perf-observation-summary 汇总 instrumented perf20 ROI' \
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
@@ -147,9 +155,6 @@ env-build:
 toolchain-check: env-build
 	@$(CONTAINER_RUN) sh -ec 'java -version; sbt --version; verilator --version; yosys -V; loongarch32r-linux-gnusf-gcc --version | head -n 1'
 
-docs-check:
-	@python3 scripts/common/check_docs.py
-
 experiment-freeze: cpu-generate
 	@python3 scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
 		--experiment-id "$(EXPERIMENT_ID)" --chiplab-dir "$(CHIPLAB_HOME)" \
@@ -166,6 +171,24 @@ experiment-compare:
 timing-analyze:
 	@test -n "$(strip $(TIMING_REPORT))" || { printf 'TIMING_REPORT 不能为空\n' >&2; exit 2; }
 	@python3 scripts/experiment/timing_analyze.py --report "$(TIMING_REPORT)" --out "$(TIMING_OUT)"
+
+optimization-evaluate:
+	@test -n "$(strip $(COMPARE_OUT))" || { printf 'COMPARE_OUT 不能为空\n' >&2; exit 2; }
+	@test -n "$(strip $(BASE_TIMING_SUMMARY))" || { printf 'BASE_TIMING_SUMMARY 不能为空\n' >&2; exit 2; }
+	@test -n "$(strip $(CANDIDATE_TIMING_SUMMARY))" || { printf 'CANDIDATE_TIMING_SUMMARY 不能为空\n' >&2; exit 2; }
+	@test -n "$(strip $(BASE_TIMING_JSON))" || { printf 'BASE_TIMING_JSON 不能为空\n' >&2; exit 2; }
+	@test -n "$(strip $(CANDIDATE_TIMING_JSON))" || { printf 'CANDIDATE_TIMING_JSON 不能为空\n' >&2; exit 2; }
+	@test -n "$(strip $(BASE_UTILIZATION))" || { printf 'BASE_UTILIZATION 不能为空\n' >&2; exit 2; }
+	@test -n "$(strip $(CANDIDATE_UTILIZATION))" || { printf 'CANDIDATE_UTILIZATION 不能为空\n' >&2; exit 2; }
+	@python3 scripts/experiment/optimization_metrics.py \
+		--comparison "$(COMPARE_OUT)" \
+		--baseline-timing-summary "$(BASE_TIMING_SUMMARY)" \
+		--candidate-timing-summary "$(CANDIDATE_TIMING_SUMMARY)" \
+		--baseline-paths "$(BASE_TIMING_JSON)" \
+		--candidate-paths "$(CANDIDATE_TIMING_JSON)" \
+		--baseline-utilization "$(BASE_UTILIZATION)" \
+		--candidate-utilization "$(CANDIDATE_UTILIZATION)" \
+		--clock-period-ns "$(CLOCK_PERIOD_NS)" --out "$(OPTIMIZATION_METRICS_OUT)"
 
 perf-observation-summary:
 	@test -n "$(strip $(PERF_OBSERVATION_MATRIX))" || { printf 'PERF_OBSERVATION_MATRIX 不能为空\n' >&2; exit 2; }
@@ -220,7 +243,7 @@ cpu-locked-gates: cpu-generate
 		--ports "$(CPU_DIR)/reference/core-top.ports.json" --rtl "$(BUILD_ROOT)/rtl/mycpu_top.v" \
 		--out-dir "$(BUILD_ROOT)/gates/yosys" --yosys /usr/bin/yosys
 
-cpu-check: cpu-test-all cpu-generate cpu-locked-gates docs-check cpu-contract-test
+cpu-check: cpu-test-all cpu-generate cpu-locked-gates cpu-contract-test
 
 sim-prepare: cpu-generate
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/prepare" \

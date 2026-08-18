@@ -36,6 +36,40 @@ def classify(source: str, destination: str) -> str:
     return "other CPU"
 
 
+def percentile(values: list[float], percent: float) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return ordered[0]
+    position = (len(ordered) - 1) * percent
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return ordered[lower] * (1.0 - fraction) + ordered[upper] * fraction
+
+
+def path_distribution(paths: list[dict[str, Any]]) -> dict[str, Any]:
+    slacks = [item["slack_ns"] for item in paths]
+    route_percentages = [item["route_percent"] for item in paths]
+    logic_delays = [item["logic_delay_ns"] for item in paths]
+    route_delays = [item["route_delay_ns"] for item in paths]
+    return {
+        "count": len(paths),
+        "worst_slack_ns": min(slacks) if slacks else None,
+        "median_slack_ns": statistics.median(slacks) if slacks else None,
+        # P90 is the 90th percentile of delay pressure, expressed as the
+        # 10th percentile of slack because smaller slack is worse.
+        "p90_pressure_slack_ns": percentile(slacks, 0.10),
+        "slack_below_0_1_ns": sum(value < 0.1 for value in slacks),
+        "slack_below_0_2_ns": sum(value < 0.2 for value in slacks),
+        "average_route_percent": statistics.fmean(route_percentages)
+        if route_percentages else None,
+        "average_logic_delay_ns": statistics.fmean(logic_delays) if logic_delays else None,
+        "average_route_delay_ns": statistics.fmean(route_delays) if route_delays else None,
+    }
+
+
 def parse_timing_report(path: Path) -> list[dict[str, Any]]:
     text = path.read_text(encoding="utf-8", errors="replace")
     starts = list(re.finditer(r"(?m)^Slack \((?:VIOLATED|MET)\)\s*:\s*([-+]?[0-9.]+)ns", text))
@@ -74,16 +108,24 @@ def summarize(paths: list[dict[str, Any]]) -> dict[str, Any]:
     for category in ("frontend", "predictor", "IQ", "ROB/CSR", "LSQ", "cache/L2", "platform", "other CPU"):
         selected = [item for item in paths if item["category"] == category]
         if selected:
-            groups[category] = {
-                "count": len(selected),
-                "worst_slack_ns": min(item["slack_ns"] for item in selected),
-                "average_slack_ns": statistics.fmean(item["slack_ns"] for item in selected),
-                "average_route_percent": statistics.fmean(item["route_percent"] for item in selected),
-                "ranks": [item["rank"] for item in selected],
-            }
+            groups[category] = path_distribution(selected)
+            groups[category]["average_slack_ns"] = statistics.fmean(
+                item["slack_ns"] for item in selected
+            )
+            groups[category]["ranks"] = [item["rank"] for item in selected]
         else:
-            groups[category] = {"count": 0, "worst_slack_ns": None, "average_slack_ns": None, "average_route_percent": None, "ranks": []}
-    return {"schema_version": 1, "path_count": len(paths), "groups": groups, "paths": paths}
+            groups[category] = {
+                **path_distribution([]),
+                "average_slack_ns": None,
+                "ranks": [],
+            }
+    return {
+        "schema_version": 2,
+        "path_count": len(paths),
+        "distribution": path_distribution(paths),
+        "groups": groups,
+        "paths": paths,
+    }
 
 
 def main() -> int:
