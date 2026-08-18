@@ -264,20 +264,19 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val loadBaseSuffixValid = loadBaseSuffixPending.orR
   val loadOtherValid = loadOtherPending.orR
   val loadBasePrefixValid = loadBasePrefixPending.orR
-  val loadBaseSuffixIndex = OHToUInt(OHMasking.first(loadBaseSuffixPending))
-  val loadOtherIndex = OHToUInt(OHMasking.first(loadOtherPending))
-  val loadBasePrefixIndex = OHToUInt(OHMasking.first(loadBasePrefixPending))
+  val loadBaseSuffixSelect = OHMasking.first(loadBaseSuffixPending)
+  val loadOtherSelect = OHMasking.first(loadOtherPending)
+  val loadBasePrefixSelect = OHMasking.first(loadBasePrefixPending)
   val oldestLoadBank = Bool()
-  val oldestLoadLocal = UInt(loadSelectLocalWidth bits)
+  val oldestLoadLocalSelect = Bits(loadSelectBankEntries bits)
   oldestLoadBank := loadBaseBank
-  oldestLoadLocal := loadBasePrefixIndex
+  oldestLoadLocalSelect := loadBasePrefixSelect
   when(loadBaseSuffixValid) {
-    oldestLoadLocal := loadBaseSuffixIndex
+    oldestLoadLocalSelect := loadBaseSuffixSelect
   }.elsewhen(loadOtherValid) {
     oldestLoadBank := !loadBaseBank
-    oldestLoadLocal := loadOtherIndex
+    oldestLoadLocalSelect := loadOtherSelect
   }
-  val oldestLoadHead = (oldestLoadBank.asBits ## oldestLoadLocal.asBits).asUInt
   // Restricted younger-ready Load bypass (L02 retry-token form).  When the
   // currently scheduled oldest Load is held by a local alias/forwarding
   // condition, select the next younger pending Load whose address is already
@@ -286,7 +285,18 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val retryValid = RegInit(False)
   val retryLoadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val retryCandidatePending = retryValid && pendingLoads(retryLoadHead)
-  val selectedLoadHead = Mux(retryCandidatePending, retryLoadHead, oldestLoadHead)
+  val retryLoadLocalSelect = UIntToOh(
+    retryLoadHead(loadSelectLocalWidth - 1 downto 0),
+    loadSelectBankEntries
+  )
+  val selectedLoadBank = Mux(retryCandidatePending, retryLoadHead.msb, oldestLoadBank)
+  val selectedLoadLocalSelect = Mux(
+    retryCandidatePending,
+    retryLoadLocalSelect,
+    oldestLoadLocalSelect
+  )
+  val selectedLoadLocal = OHToUInt(selectedLoadLocalSelect)
+  val selectedLoadHead = (selectedLoadBank.asBits ## selectedLoadLocal.asBits).asUInt
   val selectedLoadValid = retryCandidatePending || loadBaseSuffixValid || loadOtherValid ||
     loadBasePrefixValid
   // Match the registered uop boundary used by the reference LoadQueue.  The
@@ -303,20 +313,15 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // one long combinational loop on the storage timing path.
   val scheduledLoadReselect =
     selectedLoadValid && (!scheduledLoadValid || selectedLoadHead =/= loadHead)
-  val selectedLoadLocal = selectedLoadHead(loadSelectLocalWidth - 1 downto 0)
   val selectedLoadByBank = Vec(LoadQueueEntry(config), 2)
   for (bank <- 0 until 2) {
-    selectedLoadByBank(bank) := loads(bank * loadSelectBankEntries)
-    switch(selectedLoadLocal) {
-      for (entry <- 0 until loadSelectBankEntries) {
-        is(U(entry, loadSelectLocalWidth bits)) {
-          selectedLoadByBank(bank) := loads(bank * loadSelectBankEntries + entry)
-        }
-      }
-    }
+    selectedLoadByBank(bank) := OHMux(
+      selectedLoadLocalSelect,
+      (0 until loadSelectBankEntries).map(entry => loads(bank * loadSelectBankEntries + entry))
+    )
   }
   val selectedLoadForAgu = Mux(
-    selectedLoadHead.msb,
+    selectedLoadBank,
     selectedLoadByBank(1),
     selectedLoadByBank(0)
   )
