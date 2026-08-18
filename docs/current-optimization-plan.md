@@ -10,13 +10,46 @@
 [frequency-deep-audit-20260818.md](frequency-deep-audit-20260818.md)；其中的频率优先顺序
 覆盖本文下方历史轮次中“固定 100 MHz、不做升频探索”的阶段性表述。
 
+### 2026-08-18 当前状态修正
+
+当前待冻结候选是 `dev/freq` 上的 B02-F 加默认 8-entry LDQ；工作树已把
+`FourIssueThreeCommit` 从 `OooCoreConfig(loadQueueEntries = 16)` 恢复为
+`OooCoreConfig()`。它既不同于含比赛自定义指令框架的旧 `dev/main-selective` 工作树，
+也不同于仍包含 L03/LDQ16 的 R20。R20 implementation 锁定
+`2683cef6a084`、source-tree `91b27aa27ffa...`、published RTL `e4f678a61446...` 和
+Chiplab `c398d274812f`，归档于
+`Post_Impl_Bundles/cpu_2683cef6a084_chiplab_c398d274812f_perf_100mhz_20260818-092420/`。
+
+R20 direct full 已 fully routed、DRC 0 error/critical warning 并生成 bitstream；hold
+WNS 为 `+0.052 ns`，setup WNS/TNS 为 `-0.047/-0.047 ns`，因此仍是 timing-fail
+candidate。最差路径是 `ROB candidatePointer -> LSQ allocator loadOccupancy_reg[4]`；
+top-50 为 LSQ 41、IQ 4、ROB/CSR 3、cache/L2 1、predictor 1。`loadOccupancy_reg[4]`
+正是 16-entry LDQ 的第 5 个 occupancy bit，默认 8-entry 配置下不会以同样形式存在。
+因此 R20 现在主要作为 L03 负面时序证据，不再定义当前 top-N；FQ01/FQ02 均降为
+“fresh LDQ8+B02-F route 后按路径触发”。
+
+删除旧自定义指令源码后，R20 相对邻近 LDQ16 run 减少 179 LUT、38 register，但前 50 条
+路径摘要逐项相同；这个对比只说明自定义指令清理没有改变 **LDQ16** 的路径墙，不能推导
+LDQ8 的最差路径。
+
+R20 experiment manifest 没有绑定 simulation evidence。旧 `1a03a604` 的 perf20
+`3,910,163` cycles 和 B02-F 约 `2.126%` 几何 speedup 只作邻近性能参考，不能声明为
+当前 LDQ8+B02-F 的 matching IPC 收益。下一步先冻结当前源码/RTL 身份并完成 fresh direct
+full；若 ROB-to-LSQ 路径仍在 top-N，再恢复 FQ01/FQ02。以下 R0--R6 和 R5/R6 数字保留为
+历史开发记录；发生冲突时，本节与 frequency deep audit 的最新状态边界优先。
+
 ## 当前基线与目标
 
-- CPU 开发分支：`dev/ECHO`；最近稳定 100 MHz 里程碑的开发分支证据提交为
-  `fbc9634`，已 squash 发布到 `main @ 6b559ec`。R6 `L11+L13` matching 源码身份为
-  `6bbf9ed`；它已经完成新的 direct full implementation，但 setup 未闭合，因此仍是候选，
-  不替代 R5 稳定里程碑。
+- CPU 开发分支：`dev/freq`；当前源码候选为 B02-F + LDQ8，尚无 matching physical
+  baseline。最近完成的 R20 `@ 2683cef` 是 B02-F + LDQ16 timing-fail candidate，
+  不替代当前源码身份。`fbc9634`/`6bbf9ed` 及 R5/R6 的 perf20、板测和 direct-full
+  结果也均为历史证据。
 - Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
+
+以下 R5/R6、R3/R4、R20 和早期 IPC 数字均保留作历史归因，不构成当前 LDQ8+B02-F 的
+matching 性能或时序预算；当前开发只以后续 fresh manifest 和对应报告为准。
+
+### 历史基线（不替代当前 LDQ8+B02-F）
 - perf20：R6 L13 clean RTL 为 `4,423,675` cycles，20/20 pass，相对 L11 `4,865,310`
   下降 `9.077222%`，几何平均加速 `1.085725368x`；20 项全部改善。L13 的 clean
   matrix 为 `build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/clean-perf20_model_4f54ae244f79_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`。
@@ -73,8 +106,9 @@
   面积、拥塞和跨 IQ 控制锥，不能作为时序修复保留。
 - post-route `-0.055 ns` 只用于识别路径族，不是正式产物。
 
-本阶段固定 100 MHz，不做升频探索。R5 direct full 已闭合，当前 `+0.028 ns` setup WNS
-作为下一轮 IPC 候选的初始时序预算；核心性能指标仍是固定 100 MHz 下的 perf20 周期。
+上述 R5/R6 结论属于历史轮次。当前不再把 `+0.028 ns` 当作预算，也不固定在“只做
+100 MHz IPC 优化”的模式；先取得 LDQ8+B02-F 的 fresh direct-full top-N，再决定结构性
+频率候选，并在同一源码/RTL 身份下补齐 perf20、func58 和 Linux matching 证据。
 
 ## R0：实验合同
 
@@ -113,7 +147,7 @@
   因而不能直接视为 L02 的安全可回收周期。branch recovery 只占 `0.97%`，本轮不优先
   扩大分支恢复机制。汇总证据为 `build/reports/observations/R6-baseline.json`。
 
-## R6：Load/SQ 归因与性能实验
+## 历史 R6：Load/SQ 归因与性能实验
 
 首项 `L10` 使用 LSQ 原始 ordinary cached Load completion 产生窄身份 token；ROB 只在
 当前 epoch、准确命中下一拍 head 时保存 token。Load 数据仍由现有 LSQ completion 寄存器
@@ -497,7 +531,7 @@ R5 已完成四个相互独立候选的组合 direct implementation：
   completion 侧只做已注册 index 的局部 data select。只有新的 LSQ 路径重新进入 top-50 时才实施，
   避免为已变成正 slack 的路径增加寄存器。
 
-R6 已以 L13 为软件 baseline 完成完整门禁、perf20、func58、Linux 固定窗口和 matching
+R6 作为历史轮次以 L13 为软件 baseline 完成完整门禁、perf20、func58、Linux 固定窗口和 matching
 observer；L14、PHT 扩容与 BTB 扩容均已完成 A/B 并退出组合。下一步冻结 L11+L13 身份并
 启动一次 direct full implementation。旧稳定归档中 BTB prediction
 到 instruction TLB request 的 `+0.028 ns`、ROB/CSR `+0.051 ns`、IQ `+0.099 ns`、
@@ -507,9 +541,8 @@ cache/L2 `+0.097 ns` 只属于旧 RTL 组合；L13 改变 LSQ 请求控制后必
 ## 系统、归档与发布
 
 MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其他候选在每个时序闭合
-里程碑运行 Linux。若若干候选已形成细粒度提交、完整软件证据和清楚的阶段结论，可在轮次
-中途推送远端 `dev/ECHO` 备份阶段成果，不要求先闭合时序。`dev/ECHO` 保留候选级提交、
-失败尝试和完整证据链；满足 matching 100 MHz direct full 的 setup/hold WNS 均严格大于零、
-DRC/route/bitstream 完整且 Linux 门禁通过后，`main` 可将该阶段 squash 成一个里程碑提交，
-不要求保留候选级提交拓扑。R5 稳定 bitstream 已完成 matching perf20 板测；后续每个新的
-时序闭合里程碑仍须使用自己的 matching bitstream 重新板测，R6 当前不能继承该结果。
+里程碑运行 Linux。当前候选工作在 `dev/freq`，每个实验保留源码树、生成 RTL、软件、
+Chiplab、Vivado、seed、周期和 setup/hold 证据。R20 虽已 fully routed、DRC 通过并生成
+bitstream，但它属于已退出当前组合的 LDQ16，且 setup 未闭合、manifest 没有 simulation
+evidence，因此不能作为正式竞赛里程碑或当前 perf20 基线；LDQ8+B02-F 的 matching run
+必须由自身满足全部门禁后再进入发布归档。

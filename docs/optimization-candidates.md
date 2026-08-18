@@ -30,6 +30,20 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 
 ## 2. 当前默认组合与本轮证据
 
+2026-08-18 的当前源码候选为 B02-F + 默认 8-entry LDQ，比赛自定义指令框架和 L03
+LDQ16 均不在当前组合中；该工作树尚无 matching physical baseline。最近完成的 R20
+`@ 2683cef` 实际是 B02-F + LDQ16，其 100 MHz direct full 为 setup/hold
+`-0.047/+0.052 ns`，fully routed、DRC 0 error/critical warning、bitstream 成功，但
+setup 门禁未通过。top-50 为 LSQ 41、IQ 4、ROB/CSR 3、cache/L2 1、predictor 1，最差
+终点为 16-entry occupancy 的 `loadOccupancy_reg[4]`。R20 因而成为 L03 退出当前组合的
+负面时序证据；FQ01/FQ02 等待 LDQ8+B02-F fresh top-N 后再决定。R20 manifest 未绑定
+simulation evidence，下文 B02-F 周期仍是邻近 LDQ16 工作树结果，不能当作当前 matching
+IPC 证据。
+
+同样，L02/L15 表格中标注“在 L03 之上”或“LDQ=16 之上”的周期、func58 和板测结果只
+属于历史 LDQ16 组合；候选源码是否保留不等于其收益已在当前 LDQ8+B02-F 上复现，重新启用
+或排序前必须补齐 LDQ8 matching evidence。
+
 当前默认启用的主要候选包括 F01/H03 frontend turnover、B03-full、L05、L07、L08、L11、L13、W02、H01、Q01，以及 E02、FT01、FT02、FT03、BT02、MT03、BT03、WT01、FT04、MT04、FT05、WT02、FT06、MT05、WT04、PT01、AT01、RT01、IT01、MT06、CT01、FT08、WT05、CT02 与重新启用的 W01；BT04 和 WT03 作为已否决的可配置 A/B 结构保留，E01 默认关闭。R5 direct full 的 setup/hold 为 `+0.028/+0.047 ns`，并已用 matching bitstream 完成远程 perf20 20/20；这些实现和板测证据仅代表旧 RTL 组合。R6 `L11+L13 @ 6bbf9ed` 的软件基线为 perf20 `4,423,675`；matching direct full 为 setup/hold `-0.057/+0.048 ns`、setup TNS `-0.138 ns`，fully routed、DRC 与 bitstream 完整，但尚未满足 100 MHz setup 门禁，因此只作为 candidate 保留。
 
 本轮原始 baseline 为 `5,543,953`，经 frontend history turnover、E02 和 FT01 后为 `5,306,558`（累计 `-4.282053%`）；FT02 再降至 `5,299,059`（相对 MT02 `-0.141316%`，几何平均 `1.006239125x`）。L07 窄 Store completion 将其降至 `5,104,911`（增量 `-3.663820%`，几何平均 `1.038957091x`），BR01 再降至 `5,057,854`（增量 `-0.921799%`，几何平均 `1.009753745x`；相对原始 baseline 累计 `-8.768094%`），W01/FT06/MT05/WT04/PT01/AT01/RT01 节点为 `5,014,520`，逐项周期透明。R3 matching direct full 为 `-0.440/+0.009 ns`，相对 WT04 的 setup WNS 改善 `0.149 ns`、TNS 改善 `28.035 ns`，但仍未闭合。各增量的逐项变化均单独记录，不能把累计收益拆分给其他候选。MT03+BT03 matching 100 MHz direct full 的 setup/hold 为 `-0.694/+0.053 ns`；L07+BR01+BT04 matching direct full 为 `-1.442/+0.050 ns`，因此 BT04 已否决。恢复 BT03 并加入 WT01 后，matching direct full 为 `-0.824/+0.056 ns`；WT01 将 recovery 驱动的 IQ 路径从 top-50 的 47 条降为 0 条，但 frontend、predictor、L1I 和 ATU 路径转为主导，R1 仍未闭合。post-route 只作物理探索，即使闭合也不能成为正式竞赛产物。
@@ -59,7 +73,7 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | E04 | 基于 trace replay 的执行端口能力重配 | 当前三个 ALU-capable port 加单 LSU 与三宽 commit 总体匹配，但 branch/MUL 只在 P2、DIV 只在 P1、router 又偏向最低编号；离线 replay 可量化 occupancy-aware routing、复制 branch capability、P3 兼容 ALU、第二 MUL/DIV/AGU 的独立收益上界 | 复制 FU 往往连带 PRF 读口、IQ、completion lane、LSQ/cache 端口和布线；P3 正处于参考 wakeup critical path，盲目增加能力可能降低 Fmax | 每 FU demand/端口冲突、各 IQ ready/occupancy、理论 maximum matching、4-issue 饱和率、结构变体 replay cycles、资源与完整 SoC WNS | 待测量 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | L01 | 多 Store、逐字节 Store-to-Load forwarding | 当前只在恰好一个 older Store 完整覆盖 Load mask 时转发；多个覆盖 Store或多个部分 Store会阻塞到它们排空。按每个 byte 选择程序顺序最近的 older Store，可让常见 byte/halfword 拼接和连续覆盖提前完成 | 8 STQ x 4 byte 的年龄比较、优先选择与数据 mux 可能重建历史 LSQ critical cone；必须处理同一字中 cache 数据与 Store bytes 合并、异常和虚拟/物理别名 | forwardingCount、partial-overlap blocked 周期、blocked load 到 store drain 的延迟、按 byte 最近 producer、LSQ WNS/LUT、memory differential | 待测量 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | L02 | 跳过被 Store 阻塞的最老未发 Load | scheduler 只选择最老的 pending Load；若它因未知 Store 地址/数据或部分重叠阻塞，更年轻且与所有老 Store无冲突的 Load也不能发出。ready-load select 可增加 memory-level parallelism | 直接对多个 LDQ candidate 同时做年龄与 8 STQ disambiguation 会近似成倍扩大组合锥；首个实验改用一次只选择一个替代项的寄存 retry token，并在既有单 candidate 比较边界重新完整资格化。uncached/LL、未知老 Store、老 SUC 和老 Load 顺序约束不得放宽 | oldest-load-blocked 且 younger-safe-ready 周期、可提前请求数、MSHR 空闲、miss overlap、LSQ select WNS/LUT、perf20 分项 | 已实现为单替代项 retry-token 形式；完整 Scala 门禁与本地 perf20 A/B 通过，待 func58/Linux/matching direct full/板测 | 在 L03+L15 之上，本地短路径 perf20 `4,316,663 -> 4,259,994`（再 `-1.313%`）；`inner_product -7.59%`、`minmax_sequence -1.79%`、`loop_induction -1.54%`、`lookup_table -0.88%`、`bubble_sort -0.88%`、`coremark -0.60%`；完整 Scala 39 suites/233 tests 通过，本地 func58 seeds `240/255/141` 均到 `3A00003A`。该实现是实际收益，不是上界。 |
-| L03 | LDQ/STQ/SDQ 按饱和证据扩容 | 当前三者均为 8 entries，长 cache miss、Store drain 或 Store-data 依赖可能先于 32-entry ROB 阻塞 rename；适度扩到 16 可提升 MLP 和窗口利用 | LSQ 是寄存器加关联年龄/地址比较，不会因为 BRAM 余量而廉价扩容；STQ 加倍会直接扩大 forwarding/order cone，pointer 也贯穿 allocator、uop 和测试。首个实验只扩大 LDQ，保持 STQ/SDQ 为 8 | LQ/STQ/SDQ full stall、occupancy 分布、ROB 非满但 LSQ 满周期、MSHR occupancy、层次 LUT/FF、完整 SoC WNS 与 cycles | 已实现为 LDQ-only 8-to-16；完整 Scala 门禁与本地 perf20 A/B 通过，待 func58/Linux/matching direct full/板测 | 本地 R6 基线 `4,423,675`；LDQ=16 为 `4,320,785`，总周期 `-2.326%`，几何平均 `0.986232`；`fireye_A0 -17.30%`、`stream_copy -2.98%`、`dhrystone -2.84%`、`inner_product -1.16%`，最大回退 `fireye_B2 +0.35%`。完整 Scala 39 suites/233 tests 通过；本地 func58 random-AXI seeds `240/255/141` 均达到 `3A00003A`。L03+L15 的 post-route 物理优化版位流板测 job `20260816-051403-a9377049` 20/20 pass，CPU 总周期 `38,229,428`，较 R6 板测低 `7.19%`；该包 WNS 仍为 `-0.065 ns`，不是时序闭合。 |
+| L03 | LDQ/STQ/SDQ 按饱和证据扩容 | 当前三者恢复为 8 entries；历史 LDQ-only 8-to-16 可降低满队列阻塞并提高 MLP | LSQ 是寄存器加关联年龄/地址比较，不会因为 BRAM 余量而廉价扩容；LDQ 加倍扩大 allocator occupancy、年龄/地址比较和路由。R20 最差终点为新增的 `loadOccupancy_reg[4]` | LQ/STQ/SDQ full stall、occupancy 分布、ROB 非满但 LSQ 满周期、MSHR occupancy、层次 LUT/FF、完整 SoC WNS 与 cycles | 已从当前频率组合移除；保留为历史 IPC 候选，只有独立 matching LDQ8/16 物理 A/B 才能重开 | 本地 R6 `4,423,675 -> 4,320,785`，总周期 `-2.326%`；历史板测也有收益，但 L03+L15 包 WNS `-0.065 ns`。R20 的 B02-F+LDQ16 direct full 为 `-0.047/+0.052 ns`，唯一 setup 失败终点是 `loadOccupancy_reg[4]`；虽然这是组合结果、不能精确拆分 WNS 数值，却足以否定在“频率优先”阶段默认保留 LDQ16。 |
 | L04 | 按 ROB 年龄仲裁 Load/Store 翻译 | Store lookahead 当前只在最老 Load 不需要翻译时运行；Load translation 持续有请求时，地址已知的老 Store 仍可能直到 ROB head 才获得 request/response。比较最老待翻译 Load 与 Store 的 ROB pointer，优先翻译程序序更老者，可把 Store 的两拍翻译移到提交前，同时保留单个 D-side translation owner | Load 通常位于依赖链上，放弃固定 Load 优先可能增加 load-use latency；ROB 年龄比较、flush/cancel owner 和 SC/exception 身份必须保持，且不能把共享 ATU ready 拉进 LSQ 的旧关键路径 | head Store translation request/response 周期、被 Store 抢占的 Load 数及额外等待、两者 ROB 年龄差、head-incomplete 总量、perf20 分项、LSQ/ATU WNS | 已停止 | 总周期约 -0.054%，但 4 项退化；性价比不足，已移除。 |
 | L05 | Direct/DMW 地址预翻译快路径 | 官方 perf20 启动后使用 `DA=0, PG=1`，但普通代码/数据地址命中 cacheable DMW0，不查 TLB；当前 ATU 仍让这类访问经过注册的 translation request/response。对运行时确认的 direct/DMW hit 在 AGU/LSQ 已有寄存边界提前形成 PA/MAT，按选择的落点可从常见 cached Load/Store 前端路径移除约一至两拍并释放 D-side translation owner | 必须按架构模式动态判定，不能按 `RUN_PERF_TEST`、PC 或 benchmark 地址硬编码；PA、MAT、PLV、`DisableCache`、CRMD/DMW 提交切换、flush 和 C04 物理别名合同都要一致。只加 Load 快路而不加 Store，仍可能被 `unknownOlderStore` 阻塞；把组合 PA 直接拉到 L1D 又可能撤销现有 LSQ timing cut | perf20 各项 direct/DMW/TLB/SUC 访问数、AGU-to-translation-response 与 AGU-to-L1D-request、未知老 Store 阻塞、cache hit load-use、每项 cycles、LSQ/ATU LUT/route 与 matching SoC WNS | 已采用 | 历史独立 A/B -11.962249%；当前 direct/DMW 预翻译开启。 |
 | L06 | 已选 Load translation/physical payload 寄存切分（`e5212e3`） | 在 `scheduledLoad` 边界寄存 selected Load 的 `PA/MAT/translationDone` 与身份，后续顺序检查、forwarding 和 cache request 直接使用该 payload，移除动态 `loadHead` 宽地址 mux；主要目标是切断 LSQ 时序路径，周期结果为中性 | 增加宽状态寄存器和 LQ slot/translation response 的身份对齐；AGU 同拍写入、flush、recovery epoch、slot 回收和异常响应不能错配，也不能给正常 address-to-translation 路径引入额外周期 | selected-load 到 translation/cache request 的延迟、LSQ scheduled-load top-N 的 logic/route、LQ reuse/flush 定向测试、19 项 cycles、matching SoC WNS/资源 | 已采用 | 周期中性；作为 LSQ 宽地址选择的寄存切分保留。 |
@@ -89,7 +103,7 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | F01 | 流水化 fetch-group 启动并增加前端请求上下文解耦 | 当前只有一个 I-side ATU context、一个 translated-request slot 和一个 L1I request context。热 uTLB 的 request 到 response 本身是一拍，但 response 先落 ATU 寄存器、再落 frontend translated slot、下一拍才发 L1I；静态逐拍推导的最短相邻 translation accept 间隔约 4 拍，即满 16 B group 也只有约 1 inst/cycle 的启动上限 | 多上下文需要精确的 PC/prediction/translation 配对、redirect kill/drain 和 buffer credit；应先消除 C07，再用小 FIFO/valid-ready pipeline 逐级提高 II，不能把 uTLB 比较、预测和 L1I ready 合成一条长组合路径 | 连续热 uTLB+L1I hit 的 translation/cache request accept 时间戳、每 group 各级 II、frontend empty、decode starvation、IPC、LUT/FF、完整 SoC WNS | 已采用 | phase 1 历史 A/B -13.217337%；当前 translation response/turnover 路径均开启。 |
 | V01 | I/D micro-TLB 容量与替换策略 sweep | 当前 I/D 各 4 项；一项 `PS=12` 双页 entry 覆盖相邻 8 KiB，两个 half 都有效时每侧理论最大覆盖 32 KiB，但只能同时保存 4 个 VPPN pair，half 稀疏或工作集跨越更多 pair 时有效覆盖更低。主 TLB hit 仍需共享 walker 扫描。8/16 项或小型组相联结构可能显著降低 Linux text/data 工作集的 micro miss | 全相联扩容会增加 VPPN/ASID 比较、结果合并、FF 与布线；当前 TLB 已约占 standalone CPU 3,584 LUT，不能因 BRAM 余量就假设免费。容量提升也无法解决 F01 的热命中 II | I/D micro hit/miss、工作集 VPPN pair 数、有效 half 数、RR eviction 后短期重访、main-walk cycles、TLB 层次 LUT/FF/WNS、perf20/Linux cycles | 待测量 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | V02 | 主 TLB walker 带宽与 I/D 解耦 | 当前 I/D micro miss 共享一个每拍 4 项的 walker，单次最多扫描 8 slice，并发 I/D miss 会串行。8 项/拍、独立 I/D walker 或同 VPN 合并可降低稀有但长的翻译停顿 | 比较器和 entry mux 增加可能重新制造历史上已经消除的 TLB-to-exception 长路径；在 micro miss 很少时收益低，且双 walker 必须处理 mutation、相同 entry 多命中和公平性 | I/D 同时 walk 次数、排队等待、命中 slice 分布、每次 exposed stall、比较器/LUT/route、完整 SoC WNS 与 cycles | 待测量 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
-| B02 | 分支预测索引与容量优化 | 当前为 4-bank BTB/PHT、8-bit GHR、8-entry RAS；predictor 层次资源较小。降低 MPKI 会同时避免错误路径工作和较晚的 commit-time 恢复罚时 | 增大/复杂化 predictor 会增加 lookup 延迟和存储资源；错误 speculative-history 恢复会破坏预测状态 | branch/BTB/PHT/indirect/return 分类命中率、MPKI、每次罚时、alias、predictor timing/resource | 家族开放；A/B/C 三个朴素变体已否决 | B02-A XOR fold 为 `+0.2101%` 退化；B02-B 扩大 PHT 为 `4,423,675 -> 4,424,949`（`+0.028800%`），`8071454` 已回退；B02-C 扩大每 bank BTB 为 `4,423,675 -> 4,409,791`（`-0.313857%`、几何平均 `1.002553477x`），但低于 0.5% 门槛且 memory bits `38,400 -> 67,584`，`6eda207` 已回退。比较见 `build/reports/comparisons/R6-B02-B.json`、`R6-B02-C.json`；后续只保留有 trace/alias 证据的新索引或结构方向。 |
+| B02 | 分支预测索引与容量优化 | 当前 B02-F 为 4-bank BTB/PHT、每 bank 4096 个 2-bit PHT entry、10-bit GHR、8-entry RAS；降低 MPKI 会同时避免错误路径工作和较晚的 commit-time 恢复罚时 | 增大/复杂化 predictor 会增加 lookup 延迟和存储资源；错误 speculative-history 恢复会破坏预测状态 | branch/BTB/PHT/indirect/return 分类命中率、MPKI、每次罚时、alias、predictor timing/resource | B02-F 当前默认启用；A/B/C 三个朴素变体已否决；LDQ8 matching 性能证据待补 | 邻近 LDQ16 工作树的 B02-F 为 `3,910,163` cycles、16 improve / 4 regress、几何 speedup 约 `2.126%`。R20 B02-F+LDQ16 physical run 为 setup/hold `-0.047/+0.052 ns`，predictor 仅占 top-50 一条且 slack `+0.079 ns`；这说明 predictor 不是该组合的第一面墙，但不能把旧周期或路径排序继承给当前 LDQ8。 |
 | B03 | 保留三宽退休中的全部 branch training | 原实现同拍最多退休三条却只保留一路 update；B03-min 先保证 recovery branch 被训练，B03-full 再用 8-entry、三入一出 FIFO 保留全部退休分支，并在 flush/recovery 前按程序顺序折叠 architectural GHR/RAS | FIFO head/write mux、capacity-to-commit 反馈及三路 GHR/RAS fold 会增加 predictor/ROB 附近的逻辑和布线；首次 route 前已把 retirement fold 输入寄存切分 | 19 项 standalone perf20、同拍多分支/flush/恢复测试、FIFO occupancy、MPKI、predictor/ROB top-N WNS 与资源 | 已采用 | B03-full 相对 F01 -11.882408%；三宽退休训练 FIFO 当前保留。 |
 | K01 | 缩短 commit recovery 到 redirect 的注册一拍 | ROB 在周期 N 产生 recovery，core 在 N+1 才统一 redirect/flush；消除该拍可为每次 mispredict 固定省一拍 | 当前 FreeList release、predictor training、CSR/TLB 状态更新都依赖 N/N+1 的 post-commit 原子语义；同拍 flush 会把 ROB prefix 接入全核高扇出路径并可能丢退休副作用 | recovery 数、固定一拍占总 cycles、commit-to-redirect 时序、全核 flush fanout、精确异常/FreeList/LSQ 回归 | 待测量 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | K02 | FreeList 延迟释放的 exhaustion credit | 已退休 `oldPdst` 先注册、下一拍才回到 FreeList；当 freeCount 恰为 0 而本拍 commit 正在释放寄存器时，rename 可能多停一拍 | 当前寄存边界曾切断 ROB commit 到 FreeList 的完整 SoC 关键路径；lookahead credit 必须与 recovery 的 post-commit snapshot 一致，不能重复分配 | FreeList-only stall、`freeCount==0 && retiring writer` 周期、可消除 rename bubble、FreeList/ROB WNS、flush/WAW 随机测试 | 待测量 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
@@ -105,6 +119,23 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 | FT01 | 按 fetch lane 构造 speculative RAS link address | 历史 matching route 中 `translationPc` 经预测选择和 32-bit `+4` 到 speculative RAS 的路径仅余 `+0.022 ns`；call link 只可能是 16-byte fetch group 内四个固定槽位的下一 PC，可由 group base 和 lane 构造，避免 selected branch PC 驱动完整加法链 | 必须覆盖 lane 0-3，尤其 lane 3 跨组；immediate/delayed speculative update、return、correction 和 flush 的地址语义必须不变。Vivado 也可能已共享或化简原加法器，真实收益只能由 matching route 证明 | 四 lane RAS 定向测试、生成 RTL 组合结构、完整 perf20 非退化、matching frontend top-N/WNS/LUT | 已实现并保留 | 完整 perf20 与修改前逐项精确相等；lane 0-3 定向测试通过。matching full route 的旧 `+4` 加法路径已消失，但新 WNS 为 BTB/L1I hit 回授至 RAS/ATU 的宽路径簇，FT01 单独不足以闭合。 |
 | P02 | Vivado strategy/seed 与物理优化 A/B | `Explore`、phys_opt、LUT combining、局部寄存器复制和不同实现 seed 可能在同一 RTL 上改变 route-dominated WNS；适合先判断结果是否受物理随机性主导 | strategy/seed 不能替代 RTL 时序修复，跨 seed 选择最好的单次结果会造成过拟合；必须保留完整报告、实现选项、DRC 和 bitstream hash | 同一 RTL/软件下多个 seed 的 WNS/TNS、top-path 族、congestion、runtime、资源、cycle/frequency 产品；禁止跨 RTL 借用 slack | 探索方法已验证 | 首轮将 setup WNS/TNS 从 `-0.552/-116.580 ns` 改善到 `-0.125/-4.616 ns`；第二轮从首轮 DCP 改善到 `-0.055/-1.050 ns`。hold 均为正，DRC 0 error/critical warning、fully routed、bitstream 成功。最终 top-N 为 PHT、BTB/ATU、LSQ、IQ 和 L1I/frontend 多路径宽墙；所有 post-route 结果均仅作探索。 |
 | P01 | 物理感知的模块局部性、寄存器复制与必要的 floorplan 实验 | 完整 SoC 关键路径以 route delay 为主，说明逻辑等价的布局可能产生明显差异 | 过早固定 Pblock 会恶化全局拥塞并使结果依赖 seed；不能掩盖结构性广播问题 | congestion、SLR/clock-region 分布、跨区 nets、多个实现 seed 的 WNS 稳定性 | 讨论 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
+
+### 2026-08-18 源码静态审计增补
+
+本节记录本轮基于当前 SpinalHDL 源码、生成 RTL 和 Yosys 结构统计发现的新增候选。
+这些条目没有继承已清理的 `dev/ECHO` 报告、旧 RTL 的 WNS/TNS 或周期数字；在完成
+matching RTL 的 Scala/合同测试、定向仿真、perf20/func58 和完整 implementation
+之前，效果列只能写静态证据。
+
+| ID | 方向 | 价值机制 | 主要代价或风险 | 决策所需指标 | 状态 | 已测效果 |
+| --- | --- | --- | --- | --- | --- | --- |
+| FT09 | LA32R 译码归约树与优先级链平衡化 | `La32rDecoder.any` 使用左结合 `reduce`；`instructionValid` 含七十余个谓词，`systemOperation`、`fuType`、`branchKind` 和异常选择还由连续 `when` 形成优先级链，`WideDecode` 同时实例化三个 decoder。对独立 OR 集合改用平衡树，并对确有重叠的字段使用显式优先级编码，可降低 fetch/decode 组合深度 | 解码谓词并非全部互斥，错误重排会改变非法指令、系统指令和异常优先级；平衡树也可能增加局部扇出或被后端重新改写 | decoder 逻辑深度、`La32rDecoder` LUT/等值比较/route、decode-to-uop top-N、三 lane 输出配对、完整门禁、perf20、func58 和 matching setup/hold | 待实验，静态高优先级 | 当前 RTL 的 decoder 模块约 785 cells、336 个逻辑 OR、119 个等值比较；尚无该改动的 paired WNS、TNS 或周期证据 |
+| E05 | ALU result-term OR 树平衡化 | `Alu.scala` 将十二个 masked result term 通过左结合 `reduce(_ | _)` 合并；保持 masked-OR 语义不变，仅将合并树改为平衡结构，目标是减少 32-bit 结果选择的组合深度 | 若把 masked-OR 错误改成单一 mux，多操作控制重叠时会改变行为；Vivado 可能已经自行平衡，源码改动未必带来物理收益 | ALU OR 深度、结果到执行寄存器的 setup slack、LUT/route、非法或重叠操作控制回归、perf20 和 matching full implementation | 待实验，低风险 | 当前生成 RTL 的 `Alu` 含 13 个 `$or`；尚无 A/B 物理或软件收益证据 |
+| MT09 | LSQ older-store/load 关联扫描局部化 | 当前 `LoadStoreQueue` 对 8 个 Store 和 8 个 Load 做年龄、翻译、物理字地址、byte mask、数据就绪和 SUC 顺序检查；R20/旧静态统计使用 16 个 Load。结果经 `loadOrderClear`、`cacheLoadCandidate` 到 `requestCapture` | 增加阶段可能改变 load-use 和 MLP；任何放宽都必须保留物理 alias、partial overlap、LL/SC、uncached Store、memory epoch 和 flush 合同。现有 request buffer 已切断 cache/AXI backpressure，不能重复加无效边界 | `unknownOlderStore`、`partialOverlapStore`、`pendingDataStore` 和 `olderLoadOrderBlock` 的命中率，request-capture 前 top-N、LSQ LUT/等值比较/mux、load stall、MSHR occupancy、perf20/func58、matching WNS/TNS | 等 fresh LDQ8 top-N；静态条件候选 | R20/LDQ16 生成 RTL 的 LSQ 约 7890 cells、1393 个等值比较、4323 个 mux；必须用 LDQ8 RTL 重算，旧统计不代表当前规模 |
+| BT05 | StoreDataQueue 线性优先选择平衡化 | `StoreDataQueue` 的 8-entry `selectedSlot` 和 `enqueueSlot` 都由反向覆盖式线性优先选择产生；使用保持最低 index 优先的平衡选择树，可降低 ready-map 到输出寄存器和空闲槽分配的逻辑级数 | 模块较小，收益可能被布线和寄存器路径淹没；必须保持最低 index、无 ready、同拍 enqueue/dequeue、flush 和 backpressure 语义 | selector 逻辑深度、SDQ output/allocate top-N、LUT/route、Store-to-load wake 延迟、完整门禁和 perf20 | 待实验，低优先 | 当前 `StoreDataQueue` 约 569 cells、149 个 mux；尚无 A/B 结果 |
+| T04 | ROB completion 与 RenameMap ready 关联网络局部化 | ROB 对 32 个 entry 与 5 个 completion lane 做身份匹配，RenameMap 又对全部物理寄存器扫描 allocation 和 writeback；可研究先做窄 valid/index 预过滤、共享 tag compare 或局部 scoreboard，减少宽 ready/complete 控制扇出 | 这是 OoO 的固有关联成本，改动容易破坏 pointer generation、epoch、同拍 allocation/writeback、flush 和 exactly-once completion；共享比较器也可能增加扇出，暂不假定能改善 Fmax | ROB/RenameMap top-N、等值比较和 mux 数、commit/rename stall、ready scoreboard 翻转、LUT/FF/route、完整功能回归和 matching WNS | 观察，待测量 | 当前 Yosys 统计 ROB 约 14262 cells、3198 个等值比较、7801 个 mux；RenameMap 约 1278 个等值比较、815 个 mux；无当前路径 WNS 归因 |
+
+已有候选的本轮细化：`T03` 应把“当前同时生成 signed/unsigned 两个 `$mul`，再由 `Mux` 选择”作为单乘法器 A/B 的明确起点；`D02` 的当前实现确实包含 `portUsed`/`laneOpen` 的三 lane 串行链和反向 payload mux；`BT03`、`WT05` 与 `MT06` 的既有 token、wakeup 解耦和 banked forwarding 不回退，但 IQ 动态 payload read、LSQ forwarding bank 和剩余关联比较只作为测量项。上述已有候选均不得引用已清理 bundle 的旧物理结果。
 
 ### R1 周期透明候选
 
@@ -149,14 +180,22 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
 
-当前 P1 正确性 gate（含 C09）已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。R4 matching direct full 的 setup/hold 为 `-0.106/+0.051 ns`，前端路径已退出 top-50，剩余路径墙集中在 IQ/ROB、cache/L2 和少量 LSQ。R5 已将 WT05、CT02、RT02、MT08、CT03、RT03 纳入软件验证；top-N 用于排序但不限制候选准入，能证明不增加拍数或具有受控小代价的候选可进入同一线性验证批次。
+当前 P1 正确性 gate（含 C09）已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。
+当前 LDQ8+B02-F 尚无 matching physical baseline。最近的 R20 使用 LDQ16，setup/hold 为
+`-0.047/+0.052 ns`，top-50 集中为 LSQ 41、IQ 4、ROB/CSR 3、cache/L2 1、predictor 1；
+它支持移除 L03，却不能定义 LDQ8 的当前路径排序。R20 也没有绑定 simulation evidence，
+旧 R4/R5/R6 的 cycles、IPC 和 WNS 只能作为历史归因。
 
-1. 本轮周期从 5,543,953 降至当前 R4 节点的 5,014,546，累计减少 529,407（`-9.549269%`）；IT01 与 MT06+CT01 组合保持逐项周期中性，FT08 总周期增加 `0.000518%`、归一化几何平均性能回退 `0.005882%`。R4 direct full 已将 setup 从 R3 的 `-0.440 ns` 改善到 `-0.106 ns`，但尚未闭合；新的 IQ/ROB 路径必须通过 WT05 等候选继续验证。
-2. P02 post-route 仅用于判断物理随机性和提取最新 top-N 路径；其结果无论是否闭合都不能晋级 Stable_Backup 或正式竞赛产物。
-3. 下一份正式 bitstream 必须从 matching RTL 直接执行一次 full implementation，并由该 run 自身满足 setup/hold、DRC、route 和 bitstream 门禁。
-4. 下一轮 IPC 候选仍优先从前端持续供给、分支训练/恢复和已量化的 load-use 暴露中选择；ROB/PRF 扩容因当前占用证据降为低优先级。
-5. 候选设计阶段同时控制寄存边界、宽 mux、高扇出和跨模块控制；任何后续 RTL 修改必须重新运行受影响 suite、完整门禁、perf20 和 func58。
-6. R4 已从 L1I/frontend、LSQ completion 和 IQ issue output 三个独立路径族积累 IT01、MT06、CT01、FT08；matching full 已完成，结果为 `-0.106/+0.051 ns`。R5 已积累 WT05 与 CT02 两个独立候选；先完成组合 perf20/func58，再只启动一次 direct full。MT07 仅在 LSQ 重新进入负 slack top-50 时实施。
+1. 先冻结并实现 LDQ8+B02-F fresh baseline；若 implementation 使用了恢复 LDQ8 之前生成的
+   RTL，则结果作废并重新生成。
+2. 读取 fresh top-N 后再准入 FQ01/FQ02；只有 ROB-to-LSQ 或 pending-load/requestSent 路径
+   仍在首面路径墙时才修改它们，否则按新 worst-path family 重排。
+3. 每张结构候选卡先跑受影响 Scala/合同测试、RTL 生成、定向 Verilator，再跑匹配的 perf20、
+   func58 和 Linux smoke；之后才做同一实验合同的 Vivado full implementation。
+4. P02 物理探索只用于估计 seed/布局敏感性，不能替代 FQ01/FQ02 的 RTL 修复，也不能把
+   post-route 结果晋级 Stable_Backup 或正式竞赛产物。
+5. predictor、IQ/cache、ROB/PRF 扩容以及 multiplier 只有在 fresh 路径或独立资源证据触发
+   时才进入实验；B02-F 的旧邻近 LDQ16 perf20 数字不作为当前 matching IPC 收益。
 
 ## 5. 详细说明的维护边界
 
@@ -164,25 +203,26 @@ test gate；只有定向测试证明风险不存在，或修复后完成相应�
 
 ## 6. 证据入口
 
-- 当前 RTL：`build/rtl/generation-manifest.json`。
+- 最近完成、已被源码配置取代的物理证据：`Post_Impl_Bundles/cpu_2683cef6a084_chiplab_c398d274812f_perf_100mhz_20260818-092420/manifest.json`；R20 为 B02-F+LDQ16，setup/hold `-0.047/+0.052 ns`，`competition_eligible=false`，manifest 没有绑定 simulation evidence。
+- 当前工作树生成入口：`build/rtl/generation-manifest.json`；其 hash 必须与下一候选 manifest 配对，不能直接继承 R20 的 published RTL 身份。
 - R6 L11 perf20：`build/sim/runs/cpu_1548f170c573_chiplab_c398d274812f/clean-perf20_model_858465589681_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`；逐项比较为 `build/reports/comparisons/R6-L11.json`。
 - R6 L11 func58：`build/sim/runs/cpu_1548f170c573_chiplab_c398d274812f/clean-func58_model_b820b5960d95_software_3fe689f227db/random/matrix_1892a80af7f5_func58.csv`；Linux 固定窗口摘要为 `build/sim/runs/cpu_1548f170c573_chiplab_c398d274812f/clean_model_badf33e41792_software_d3ce90aca67c/random/matrix_517ad2574f10_summary.txt`。
 - R6 L13 perf20 与 observer：`build/sim/runs/cpu_00f0a4acce30_chiplab_c398d274812f/clean-perf20_model_4f54ae244f79_software_f6e7c20f71a4/ideal/matrix_65876ab77466_perf20.csv`、`build/reports/comparisons/R6-L13.json` 和 `build/reports/observations/R6-L13.json`。
 - R6 L11+L13 direct full candidate：`Post_Impl_Bundles/cpu_6bbf9edcdd36_chiplab_c398d274812f_perf_100mhz_20260815-205104/manifest.json`；setup/hold 为 `-0.057/+0.048 ns`，top-50 分类为 `build/reports/timing/R6-L11-L13-direct-top50.json`。
 - R6 已退出实验：L14、PHT 扩容、BTB 扩容的比较分别为 `build/reports/comparisons/R6-L14.json`、`R6-B02-B.json`、`R6-B02-C.json`；三项实现均已回退且没有 matching Vivado 证据。
-- 当前实验冻结：R4 证据冻结后更新为 `build/reports/experiments/R4-IT01-MT06-CT01-FT08/experiment-manifest.json`。
-- 当前 perf20：`build/sim/runs/cpu_88051f7ba468_chiplab_c398d274812f/clean-perf20_model_97f70770e5ef_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；FT08 逐项比较为 `build/reports/comparisons/R4-FT08.json`。
+- 历史 R4 实验冻结：`build/reports/experiments/R4-IT01-MT06-CT01-FT08/experiment-manifest.json`。
+- 历史 R4 perf20：`build/sim/runs/cpu_88051f7ba468_chiplab_c398d274812f/clean-perf20_model_97f70770e5ef_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；FT08 逐项比较为 `build/reports/comparisons/R4-FT08.json`。
 - R5 perf20：`build/sim/runs/cpu_8cc74e1d4e58_chiplab_c398d274812f/clean-perf20_model_408602150177_software_f6e7c20f71a4/ideal/matrix_52d9676ce812_perf20.csv`；CT02 独立比较与 R5 组合比较分别为 `build/reports/comparisons/R5-CT02.json`、`build/reports/comparisons/R5-WT05-CT02.json`。
-- 当前 func58：`build/sim/runs/cpu_88051f7ba468_chiplab_c398d274812f/clean-func58_model_cd24212cea13_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`；random-AXI seeds `240/255/141` 均为 58/58。
+- 历史 R4 func58：`build/sim/runs/cpu_88051f7ba468_chiplab_c398d274812f/clean-func58_model_cd24212cea13_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`；random-AXI seeds `240/255/141` 均为 58/58。
 - R5 func58：`build/sim/runs/cpu_8cc74e1d4e58_chiplab_c398d274812f/clean-func58_model_632c1632bd92_software_3fe689f227db/random/matrix_2395d770132d_func58.csv`；random-AXI seeds `240/255/141` 均为 58/58。
-- 当前 instrumented perf20：`build/sim/runs/cpu_d6afe23f0dbe_chiplab_c398d274812f/instrumented-perf20_model_012e3c7fc04f_software_f6e7c20f71a4/ideal/matrix_168c541ab78a_perf20.csv`；汇总为 `build/reports/observations/R2-L07-perf20-v4.json`。
+- 历史 R2 instrumented perf20：`build/sim/runs/cpu_d6afe23f0dbe_chiplab_c398d274812f/instrumented-perf20_model_012e3c7fc04f_software_f6e7c20f71a4/ideal/matrix_168c541ab78a_perf20.csv`；汇总为 `build/reports/observations/R2-L07-perf20-v4.json`。
 - M01 v5 决策矩阵：`build/sim/runs/cpu_9bc200a9f6f6_chiplab_c398d274812f/instrumented-perf20_model_7b40bca59eea_software_f6e7c20f71a4/ideal/matrix_168c541ab78a_perf20.csv`；汇总为 `build/reports/observations/R2-M01-perf20-v5.json`。
 - 最新已闭合 direct full 里程碑：`Stable_Backup/cpu_fbc96342366c_chiplab_c398d274812f_perf_100mhz_20260815-112750/manifest.json`。
 - 该里程碑的 matching 板测：LabAgent job `20260815-114325-2bc00a63`，perf20 20/20、40 次
   原始双跑全部通过，保守选中 `cpu_count=43,489,002`；package SHA-256
   `3687124f745a95398ffbf282897cec62b2b380454c0f99bbea269439b34d2ec7`，证据位于
   `Stable_Backup/cpu_fbc96342366c_chiplab_c398d274812f_perf_100mhz_20260815-112750/board/20260815-114325-2bc00a63/`。
-- 最新 direct full top-50 分类：`build/reports/timing/R4-IT01-MT06-CT01-FT08-direct-top50.json`；直接对照为 `build/reports/timing/R3-PT01-AT01-RT01-direct-top50.json`，更早证据为 `build/reports/timing/R2-WT04-direct-top50.json`、`build/reports/timing/R2-W01-FT06-MT05-direct-top50.json`、`build/reports/timing/R2-WT02-direct-top50.json` 和 `build/reports/timing/R1-BT03-direct-top50.json`。
+- 历史 R4 direct-full top-50 分类：`build/reports/timing/R4-IT01-MT06-CT01-FT08-direct-top50.json`；直接对照为 `build/reports/timing/R3-PT01-AT01-RT01-direct-top50.json`，更早证据为 `build/reports/timing/R2-WT04-direct-top50.json`、`build/reports/timing/R2-W01-FT06-MT05-direct-top50.json`、`build/reports/timing/R2-WT02-direct-top50.json` 和 `build/reports/timing/R1-BT03-direct-top50.json`。
 - 首轮 post-route exploration：`Post_Impl_Bundles/cpu_013db4902e57_chiplab_c398d274812f_perf_postroute_100mhz_20260814-081307/manifest.json`。
 - 第二轮 post-route exploration：`Post_Impl_Bundles/cpu_013db4902e57_chiplab_c398d274812f_perf_postroute_100mhz_20260814-082453/manifest.json`。
 - 历史不可变实现与板测证据：`Stable_Backup/` 内各候选 manifest；其中旧 post-route 条目按当前合同只作历史路径证据。
