@@ -1,6 +1,6 @@
 # MIKU 优化候选账本与实验状态
 
-最后同步：2026-08-18。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)。本轮 top-50 之外的静态时序审计见 [timing-static-audit-r5.md](timing-static-audit-r5.md)。
+最后同步：2026-08-18（BranchTrace v2 第二轮）。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)。本轮 top-50 之外的静态时序审计见 [timing-static-audit-r5.md](timing-static-audit-r5.md)，BranchTrace v2 第二轮报告见 [frequency-second-pass-20260818.md](frequency-second-pass-20260818.md)。
 
 ## 1. 状态与编号合同
 
@@ -74,6 +74,7 @@ FQ01 已被单变量证明。
 | C07 | TLB mutation 与在途翻译取消协议 | `TLBWR/TLBFILL/INVTLB` 的 mutation 与 privileged redirect 同拍清空 ATU 的 I/D pending 和 response；frontend、LSQ、data-translation owner 的 flush 协议却都保留 drop/cancel token，明确等待旧 response 返回。若提交时存在已握手翻译，静态状态机会留下永久 pending 并阻止后续请求 | 这是跨模块协议的高置信度结构缺口，但尚未用系统级定向仿真复现；修复必须选择统一合同：mutation 返回带 generation 的 cancelled completion，或所有 owner 同拍显式撤销，不能让部分层等待、部分层丢包 | TLB mutation 与 I-side uTLB hit/main walk、D-side LSQ/CACOP translation 在每个拍点交叠；观察 `translationDropPending`、`translationCancelPending`、`translationOwnerValid`、后续 fetch/load 进展和 DiffTest | 已关闭 | translation completion/cancel 合同已贯通 ATU、Frontend 与 LSQ。 |
 | C08 | PS=21 大页物理地址拼接 | r1p04 的 `PS=21` entry 由 `VA[21]` 选择两个 2 MiB half，PA 应为 `{selected_PPN[19:9], VA[20:0]}`；当前实现是 `{PPN[19:10], VA[21:0]}`，把所选 PPN bit 9 替换成 VA 奇偶位。连续且 4 MiB 对齐的常见映射会掩盖问题，合法的非连续/反向 half 映射会错误 | 修正会改变当前大页行为，必须先确认 Linux/bootloader 实际 PS 与 PPN 编码，并同时核对 match、odd select、TLBRD/WR/FILL 和 INVTLB page compare；不能用常见连续 huge page 启动成功否定问题 | PS=21 的 PPN0.bit9=1/PPN1.bit9=0、不同高 PPN、奇偶 VA、ASID/global、权限/dirty/MAT、TLBRD round-trip、NEMU differential | 已关闭 | PS=21 使用所选 PPN[19:9] 与 VA[20:0] 拼接，非连续/反向 half 已覆盖。 |
 | C09 | Main TLB 复位有效位 | 32 个主 TLB entry 的 payload 未初始化且 `enabled` 未复位；Verilator 寄存器布局变化可暴露伪匹配，导致 PS=21 walker 合并错误 entry 并产生错误 PPN/invalid 异常 | 只需复位 qualification bit，不复位宽 payload；必须保证 TLBRD/搜索在软件写入前均观察到 disabled | 复位后逐项读取 32 个 entry 的 enabled 位，并回归 PS=21、TLB mutation、micro-TLB negative/positive 路径 | 已关闭 | `2bc5433` 仅复位 `enabled` 位并加入 32-entry 管理接口合同；ATU suite 10/10，之后完整门禁 39 suites/225 tests 通过。该修复不计性能收益，但阻断 AT01 的错误状态已消除。 |
+| C10 | BankedFetchPredictor RAS one-hot 生成环 | BPT03 初次合入时，`architecturalRasCountOneHot`/`architecturalRasPushAccepted` 组合在 Spinal `PhaseCheckCombinationalLoops` 阶段失败，clean RTL 无法生成 | 以局部 `pushAccepted`/`popAccepted` 值打断环，保持 call/return、满空饱和和 flush 语义；缓存 instrumented trace 仍只属于 observer baseline | `make cpu-generate CPU_BRANCH_TRACE=0`、predictor/L1I/core integration、完整 `cpu-check`、RAS call/return/flush regression | **已关闭** | `38c4a07` 修复组合环；predictor 3/3、L1I 11/11、完整 39 suites/236 tests 通过。该修复不使 observer trace 成为当前 clean RTL 的 matching 证据。 |
 | T01 | 分区/局部化 early wakeup 与 IQ ready 网络 | 旧参考最差路径有 82.7% routing 和高扇出，说明减少跨 ROB/IQ 广播仍有机会提高 Fmax | 多一级寄存可能增加 dependent-use latency；复制比较逻辑会增加 LUT | 固定 c398 完整 SoC WNS、相关路径扇出/route delay、依赖链周期数、perf20 分项 | 讨论 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | W01 | 消除同 lane 的 registered/direct wakeup 冲突 | 每个执行 lane 的 ROB 注册唤醒优先于同拍 direct wake；连续单周期 GPR writer 会使后一条的早唤醒退化为下一拍注册唤醒。抑制已经成功 direct broadcast 的下一拍 registered echo，可把 wake lane 留给更年轻的 direct tag | 抑制协议若丢 tag 会永久死锁，且可能恶化完整 SoC 路由；首次 DIV、SC 和其他没有 direct broadcast 的变长完成必须保留 | 每 lane 冲突周期、resident/late consumer、依赖链 issue 间隔、IQ 比较器/LUT、完整 SoC WNS、perf20 分项 | 已重新验证并默认启用；待 matching route | `45512a6` 的完整门禁为 39 suites/222 tests、Python 合同 56 项；perf20 `5,056,868 -> 5,014,520`（`-0.837435%`），几何平均 `1.010598877x`，18 项改善、2 项不变、无退化。相对早期 `-0.102375%` 结果，本轮真实组合显示该候选已达到性能保留门槛；matching 物理影响待最终组合 direct full 交叉验证。 |
 | W02 | 注册 LSQ completion 的 load-use 提前唤醒 | 当前 load 在 LSQ completion 已注册后仍经 ROB 再注册一拍才唤醒 IQ；从已注册且充分校验的 load completion 提前广播 tag，下一拍可借 PRF write-through 取数，理论上缩短常见 load-use 一拍 | 必须证明 exception、flush/epoch、ROB 槽位重用、store forwarding、uncached response 下绝不假唤醒；LSQ 到全 IQ 的广播可能重建已切断的关键路径 | load completion 到 consumer issue 间隔、真实 load-use 数、ROB 校验失败/flush 重叠、L1 hit/miss 分类、WNS 与 perf20 | 已采用 | 历史独立 A/B 约 -1.219%；关闭后的 route 反而更差，当前保留。 |
@@ -153,6 +154,31 @@ matching RTL 的 Scala/合同测试、定向仿真、perf20/func58 和完整 imp
 
 已有候选的本轮细化：`T03` 应把“当前同时生成 signed/unsigned 两个 `$mul`，再由 `Mux` 选择”作为单乘法器 A/B 的明确起点；`D02` 的当前实现确实包含 `portUsed`/`laneOpen` 的三 lane 串行链和反向 payload mux；`BT03`、`WT05` 与 `MT06` 的既有 token、wakeup 解耦和 banked forwarding 不回退，但 IQ 动态 payload read、LSQ forwarding bank 和剩余关联比较只作为测量项。上述已有候选均不得引用已清理 bundle 的旧物理结果。
 
+### 2026-08-18 BranchTrace v2 第二轮候选
+
+本节对应 [frequency-second-pass-20260818.md](frequency-second-pass-20260818.md)。observer
+提交为 `2b71eeb`，缓存 run 的 20 个 perf20 ROI 全部通过 marker/m01 对齐。trace 只带
+退休时的 PHT metadata，没有完整的 `dynamicPredictionHit`、BTB target/type 和
+fetch-side predictedTaken，因此分支数字必须标为 replay 上界；它们不能替代 matching
+RTL A/B。更重要的是，缓存 published RTL 仍含旧的 `architecturalRasCountStage`，当前
+source tree 已是 one-hot RAS 版本；初次 fresh `make cpu-generate CPU_BRANCH_TRACE=0` 在
+`BankedFetchPredictor.scala:159-176` 触发 `PhaseCheckCombinationalLoops`，随后由 `38c4a07`
+关闭。以下数字仍只属于 observer baseline 的 provisional 假设，不能跨 source/RTL 身份
+用于 R22 的 clean IPC 或 WNS 归因。
+
+**C10 已关闭：RAS one-hot generator 组合环。** `38c4a07` 以局部 accepted 值打断环，
+随后 predictor、L1I、core integration 和完整生成门禁通过。已有 trace 无需重跑，但仍按
+`2b71eeb` observer baseline 身份保留；Observer v2 不进入 clean RTL 或稳定里程碑。
+
+| ID | 最小实验 | 当前证据与决策 |
+| --- | --- | --- |
+| BP01 | 弱 PHT state `01/10` 时读取 64/128/256-entry PC-local 2-bit alternate；只在 weak conditional 上选择，退休更新 | 缓存 trace 的 weak conditional `46,485`（`8.414%`）；inferred PHT `64.427%`，256-entry replay `74.467%`，比 PHT 多 `4,667` 个正确方向上界。C10 已关闭，但 observer 与当前 RTL identity 不同，暂不作为当前 workload 的精确收益；side-table read/select 仍可能恶化 frontend/ATU WNS。 |
+| BP02 | PHT state `01` 且 conditional 为 BTFNT 回跳时使用已有静态方向 | 缓存 trace 中 `4,548` 个事件的方向 replay 比 PHT 多 `548` 个正确数上界；不新增存储，适合作为低时序压力对照，仍须独立 clean RTL A/B。 |
+| FQ02-R | 在现有 FQ02 内先拆 16-entry oldest selector 为 2x8 bank-local select，再拆 `requestSent` 局部 CE；不改变可见周期 | 缓存 v2/m01 provisional 计数为 `blockedWithAlternate=425,678`、`oldestOrderBlockedAlternate=172,878`、`oldestLocalAliasBlockedAlternate=101,272`。它同时有 LSQ 路径和 IPC 机会，是当前接近 B02-F 级别的双赢假设；仅在 fresh matching top-N 仍落在 LSQ 时准入。 |
+
+PHT 当前实际观察到 `3,943/4,096` 个 index，不能以 BRAM 空闲推断容量未使用；DIV
+blocked `0.127%`、FreeList blocked `0.158%`、IQ 未显示全局饱和，也不支持本轮扩容。
+
 ### 2026-08-18 双赢候选排序
 
 当前最值得验证的不是再扩 predictor 容量，而是以下两个组合假设。它们都只改变一个
@@ -204,18 +230,38 @@ FT09/MT09 的平衡 OR 是低风险的 cycle-neutral WNS 清理，当前 R21 只
 
 ## 4. 当前优先级与下一步
 
+### R22 已完成候选与 R23 触发条件
+
+| ID | 提交 | 当前状态 | 预期路径/语义边界 | 当前证据 |
+| --- | --- | --- | --- | --- |
+| CT07 | `b074e7d` | 已实现并保留；组合 route 未闭合 | speculative turnover 只接受一次 array lookup，保持 hit/miss、maintenance 和 kill 优先级 | L1I 11/11；perf20 逐项不变；R22 frontend/cache 0/50，组合证据不可拆分 |
+| IFT01 | `eec1527` | 已实现并保留；组合 route 未闭合 | 从已注册 response 上统一生成四 lane predecode，保持 response latency 和 lane 对齐 | L1I 11/11；perf20 逐项不变；R22 frontend/cache 0/50，组合证据不可拆分 |
+| BPT02 | `9483b5b` | 已实现并保留；组合 route 未闭合 | 四 lane 共享 speculative RAS top 读取，保持 return target | predictor 3/3；perf20 逐项不变；R22 predictor 0/50，组合证据不可拆分 |
+| BPT03 | `3c7e451` + `38c4a07` | 已实现并保留；C10 关闭，组合 route 未闭合 | 用局部 one-hot transition 取代 RAS count 的重复算术；`38c4a07` 修复初次组合环路 | predictor 3/3、完整 39/236；perf20 逐项不变；R22 predictor 0/50，组合证据不可拆分 |
+
+R22 的四项均未宣称周期或频率收益。clean perf20 20 项总周期为 `3,910,163`，func58
+三 seed 均通过；证据身份固定在 `build/reports/experiments/R22-CT07-IFT01-BPT02-BPT03-20260818/`
+和 `build/reports/comparisons/R22-CT07-IFT01-BPT02-BPT03.json`。observer v2 的 20/20 ROI 矩阵只用于判断 predictor
+候选是否值得继续，PHT 4096 与 1024 的弱状态重放准确率差异不足以支持扩容；正式效果须来自
+与当前源树匹配的 clean perf20、func58、Yosys 和 Vivado manifest。matching direct full
+归档为 `Post_Impl_Bundles/cpu_38c4a072e0fd_chiplab_c398d274812f_perf_100mhz_20260818-151307/`：
+setup/hold `-0.271/+0.057 ns`，TNS `-5.109 ns`，fully routed、DRC 0 error、bitstream
+成功；94,468 LUT、59,834 FF，较 R21 少 800 LUT、274 FF。top-50 为 LSQ 48、IQ 1、
+ROB/CSR 1；前 47 条都落在 `loads_10_completed -> scheduledLoad_*`，因此组合完成了
+frontend/predictor 路径迁移但没有形成里程碑，FQ02-R 已由 fresh route 正式触发。
+
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
 
-当前 P1 正确性 gate（含 C09）已全部关闭；后续发现的新正确性风险仍自动阻断相应性能候选。
-当前已确定使用 B02-F+LDQ16，但尚无与当前 clean 源码/RTL 身份匹配的物理 baseline。R20 使用
-LDQ16，setup/hold 为 `-0.047/+0.052 ns`；R21 使用同一容量身份但混入多项 dirty RTL，
-setup/hold 为 `+0.113/+0.048 ns`。两者都不能定义当前 clean LDQ16 的路径排序或单候选收益。
+当前既有 P1 正确性 gate（含 C09、C10）已关闭；后续发现的新正确性风险仍自动阻断
+相应性能候选。
+当前 B02-F+LDQ16 的 clean R22 physical baseline 已建立；不得再用 R20/R21 的 top-N
+替代。R22 setup/hold 为 `-0.271/+0.057 ns`，其 fresh 路径排序只支持先做 FQ02-R，
+不支持继续优化已经退出 top-50 的 frontend/predictor。
 
-1. 冻结生产 generator 的 B02-F+LDQ16 身份，再生成 matching baseline；在此之前不把 R20/R21
-   的 top-N、WNS 或 cycles 迁移到当前 clean LDQ16。
-2. 只在 fresh top-N 仍出现 ROB-to-LSQ 或 pending-load/requestSent 路径时准入 FQ01/FQ02；
-   R21 只支持“FQ01 类结构值得隔离”，不支持 FQ01 单项归因。
+1. 以 R22 clean identity 为 baseline，FQ02-R 先拆 pending/oldest select 与 wide payload
+   capture；保持 L02 retry token、request capture 和所有可见周期。
+2. FQ01 仍要求 ROB-to-LSQ release/occupancy 路径重新进入 fresh top-N；R22 当前不支持准入。
 3. 若目标是最大化 cycles/频率产品，先用已存在的 L11+L13 candidate 做 FQ01 timing-enabler
    A/B；若目标是最小风险的单核双赢，再做 FQ02 保持 L02 retry-token 的 bank-local A/B。
 4. 每张结构候选卡先跑受影响 Scala/合同测试、RTL 生成、定向 Verilator，再跑匹配的 perf20、

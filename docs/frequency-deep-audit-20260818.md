@@ -288,6 +288,33 @@ issue、ROB head incomplete、branch recovery，以及 DIV/FreeList/L01/L02 的�
 它不能回答 WNS、route 拥塞、BRAM 深度利用率或 Vivado primitive 的具体摆放；因此本轮
 不继续增加 counter。容量问题使用生成 RTL、Vivado utilization 和 timing top-N 回答。
 
+### 3.12 BranchTrace v2 第二轮结果
+
+完整的 ROI、身份和候选卡见 [frequency-second-pass-20260818.md](frequency-second-pass-20260818.md)。
+observer 提交为 `2b71eeb`，20/20 perf20 workload 的 branch trace 与 `m01-counters.json`
+严格对齐。当前 20 个 ROI 合计 `3,910,143` cycles、`810,807` 条 retired branch、
+`44,316` 条 mispredicted branch；这些是 instrumented 仿真证据，不是新的 physical
+baseline。后续对缓存 published RTL 的静态检查发现它仍含旧的
+`architecturalRasCountStage`，而当前 source tree 已是 one-hot RAS 版本；fresh
+`make cpu-generate CPU_BRANCH_TRACE=0` 曾在 `BankedFetchPredictor.scala:159-176`
+触发 `PhaseCheckCombinationalLoops`。`38c4a07` 已关闭 C10，并通过 predictor、L1I、
+集成 suite 和完整 `cpu-check`；这里的 branch/LSQ 动态数字仍只属于 observer baseline
+的 provisional 观察，不能用于当前 clean RTL 的性能归因或 WNS 预算。
+
+本轮得到三个决策：
+
+- weak conditional PHT 事件为 `46,485/552,382 = 8.414%`；PHT index 实际观察到
+  `3,943/4,096`，不支持缩小或“容量未使用”的结论。
+- 256-entry PC-local replay 比 inferred PHT 多 `4,667` 个 weak-event 正确方向，形成
+  `BP01` 的 IPC 假设；由于缺少 fetch-side `dynamicPredictionHit`，不能把它当作精确
+  MPKI，也不能宣称 WNS 双赢。
+- state `01` 回跳的 BTFNT 覆盖形成 `BP02` 的低压力对照，上界是 `+548` 个方向正确数；
+  `FQ02` 的 LSQ opportunity 仍为 `blockedWithAlternate=425,678`，因此 fresh matching
+  top-N 仍在 LSQ 时，FQ02-R 优先级高于 BP01/BP02。
+
+DIV、FreeList、IQ 和 ROB/PRF 的动态上界没有触发扩容；dispatch acceptance 也没有
+区分出具体资源冲突，本轮不重写 DispatchRouter。
+
 ## 4. 1st pass 结论矩阵
 
 | 模块/路径族 | 最近物理证据 | 动态约束 | 1st pass 结论 |
@@ -400,6 +427,30 @@ adapter、CSR、idle、TLB 相关 suite 和 Linux smoke。
 和 Linux uncached/ordering smoke；不能用 ideal-memory perf20 代替。
 
 ## 6. 统一实验合同
+
+### R22 观测更新
+
+observer v2 的 20 项 perf20 ROI 已全部通过 marker 对齐，聚合 conditional branch 为
+555,261，弱 PHT 事件 46,485；离线 4,096-row 与 1,024-row 重放准确率仅相差约 0.14
+个百分点。因此 predictor 容量不是本轮的频率优先项，R22 改为验证 CT07/IFT01/BPT02/BPT03
+四个已有周期透明候选。observer 仍是 instrumented-only，不能作为 clean RTL 的 WNS、资源
+或 IPC 证据；候选的 matching top-N 必须从新的生成 RTL 重新提取。
+
+R22 当前身份已通过两次完整 `cpu-check`（最终 39 suites / 236 tests）、clean perf20
+20/20 逐项精确不变（总周期 `3,910,163`）和 func58 random-AXI seeds `240/255/141`
+的 58/58。source-tree SHA-256 为
+`c160775963d9e3a58910329e287564a7879d6b4857a79edee10a4dbe8cf0cf00`，published RTL
+SHA-256 为 `1493fab65c0d6faf19cb35c70f411d8ea6fa6ff6c68c229aaaae0f7dfc907f67`。
+100 MHz matching direct full 的 setup/hold 为 `-0.271/+0.057 ns`，setup TNS
+`-5.109 ns`，fully routed、DRC 0 error 且 bitstream 成功；资源为 94,468 LUT、
+59,834 FF、28,816 slice、66.5 BRAM tile 和 8 DSP。相对 R21 少 800 LUT、274 FF，
+但尚未闭合。
+
+fresh top-50 分类为 LSQ 48、IQ 1、ROB/CSR 1，frontend/predictor/cache/ATU 均为 0。
+前 47 条均从 `loads_10_completed` 经过 16-entry pending/oldest select 到
+`scheduledLoad_*`；最差 slack `-0.271 ns`，logic/route `2.499/7.755 ns`。这证明
+CT07/IFT01/BPT02/BPT03 组合已把原 ATU/L1I 首面移走，也把下一轮准入条件精确收敛到
+FQ02-R；不能将组合的路径迁移或资源下降拆分归因给任一单项。
 
 为了控制时间成本，所有候选共用下面的粗粒度指标，不为每个 entry 或 opcode 增加新
 计数器。

@@ -9,6 +9,12 @@
 1st-pass 审计、路径证据和 2nd-pass 候选准入卡见
 [frequency-deep-audit-20260818.md](frequency-deep-audit-20260818.md)；其中的频率优先顺序
 覆盖本文下方历史轮次中“固定 100 MHz、不做升频探索”的阶段性表述。
+BranchTrace v2 的第二轮分支/LSQ 候选与 replay 上界见
+[frequency-second-pass-20260818.md](frequency-second-pass-20260818.md)；其中 BP01/BP02
+仍是待验证的 IPC 候选，不能替代当前 clean matching 的路径触发条件。该报告还记录了
+R22 合入时暴露并由 `38c4a07` 关闭的 `BankedFetchPredictor` RAS one-hot generator
+组合环（C10）。Observer v2 及其 trace 只保留在 `dev/freq` 作为开发期证据，不进入
+clean RTL 或稳定里程碑。
 
 ### 2026-08-18 当前状态修正
 
@@ -38,7 +44,8 @@ R20 experiment manifest 没有绑定 simulation evidence；R21 manifest 虽绑�
 perf20 `3,910,163` cycles 和 B02-F 约 `2.126%` 几何 speedup 只作邻近性能参考，不能
 声明为当前 clean LDQ16 matching IPC 收益或 R21 的单候选收益。下一步先冻结 B02-F+LDQ16
 源码/RTL 身份并完成 matching direct full；若 ROB-to-LSQ 路径仍在 top-N，再隔离
-FQ01，若 pending-load/requestSent 仍在 top-N，再隔离 FQ02。以下 R0--R6 和 R5/R6 数字
+FQ01，若 pending-load/requestSent 仍在 top-N，再隔离 FQ02；若路径迁移到前端，再以
+exact fetch-side 观察结果决定 BP01/BP02。以下 R0--R6 和 R5/R6 数字
 保留为历史开发记录；发生冲突时，本节与 frequency deep audit 的最新状态边界优先。
 
 ## 当前基线与目标
@@ -546,9 +553,42 @@ cache/L2 `+0.097 ns` 只属于旧 RTL 组合；L13 改变 LSQ 请求控制后必
 
 ## 系统、归档与发布
 
+### R22：分支观测与 frontend/RAS 时序候选
+
+R22 从 `origin/main` 的 R21 稳定树继续，observer v2（`2b71eeb`）只作为开发期
+instrumented 仿真设施，不进入 clean RTL、Vivado 或正式产物。完整 perf20 instrumented
+矩阵已经完成 20/20；20 个 `rdtimel.w` ROI marker 均与 M01 的周期和退休分支数一致。
+聚合 trace 共记录 810,807 个分支事件，其中 conditional 555,261 个；推断方向准确率
+为 94.718%。弱 PHT 状态共 46,485 个，离线重放的 4,096-row 与 1,024-row 准确率分别为
+75.003% 和 74.868%，差距很小，因此本轮不扩 PHT 容量，也不把 observer 的推断准确率
+当作实际 IPC 收益。
+
+本轮先累积四个不增加架构拍数的局部化候选：`b074e7d`（CT07，限定 speculative
+turnover lookup）、`eec1527`（IFT01，响应寄存器后统一 predecode）、`9483b5b`
+（BPT02，共享 speculative RAS top 读取）和 `3c7e451`（BPT03，RAS transition
+局部化）。BPT03 初次合入时暴露 Spinal 组合环路，`38c4a07` 以局部 `pushAccepted`/
+`popAccepted` 值打断该环路；该修复独立保留，不能把失败测试归因给测试设施。CT07/IFT01
+定向 L1I 测试 11/11，BPT02/BPT03 定向 predictor 测试 3/3；第二次完整 `cpu-check`
+为 39 suites / 236 tests 全过，clean perf20 20/20 且总周期 `3,910,163` 与 R21
+逐项精确相等，func58 seeds `240/255/141` 均为 58/58。R22 source-tree SHA-256 为
+`c160775963d9e3a58910329e287564a7879d6b4857a79edee10a4dbe8cf0cf00`，published RTL
+SHA-256 为 `1493fab65c0d6faf19cb35c70f411d8ea6fa6ff6c68c229aaaae0f7dfc907f67`。
+
+R22 matching 100 MHz direct full 已归档到
+`Post_Impl_Bundles/cpu_38c4a072e0fd_chiplab_c398d274812f_perf_100mhz_20260818-151307/`：
+setup/hold 为 `-0.271/+0.057 ns`，setup TNS `-5.109 ns`，fully routed、DRC 0 error、
+bitstream 成功。资源为 94,468 LUT、59,834 FF、28,816 slice、66.5 BRAM tile、8 DSP；
+相对 R21 减少 800 LUT 和 274 FF。top-50 已从 R21 的 ATU/L1I 前端路径迁移为 LSQ 48 条、
+IQ 1 条、ROB/CSR 1 条；其中前 47 条均由 `loads_10_completed` 经过 pending/oldest select
+到 `scheduledLoad_*`，最差路径 logic/route 为 `2.499/7.755 ns`。四项组合的结构减压和
+目标路径消除成立，但 setup 未闭合，因此 R22 不是里程碑，也不能拆分宣称单项 WNS 收益。
+
+R23 由 fresh top-50 明确触发 FQ02-R：优先局部化 16-entry pending bitmap/oldest select 和
+scheduled-load payload capture，保持 L02 retry token、请求时刻与可见周期。Observer v2
+不参与该候选的 clean RTL 归因。
+
 MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其他候选在每个时序闭合
 里程碑运行 Linux。当前候选工作在 `dev/freq`，每个实验保留源码树、生成 RTL、软件、
-Chiplab、Vivado、seed、周期和 setup/hold 证据。R20 虽已 fully routed、DRC 通过并生成
-bitstream，但它属于已退出当前组合的 LDQ16，且 setup 未闭合、manifest 没有 simulation
-evidence，因此不能作为正式竞赛里程碑或当前 perf20 基线；下一份 matching run 必须由
+Chiplab、Vivado、seed、周期和 setup/hold 证据。R22 虽已 fully routed、DRC 通过并生成
+bitstream，但 setup 未闭合，因此不能作为正式竞赛里程碑；下一份 matching run 必须由
 自身满足全部门禁后再进入发布归档。
