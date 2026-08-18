@@ -40,6 +40,7 @@ REQUIRED_IMPL_ARTIFACTS = {
 # DCP, timing summary, DRC and bitstream before this supplemental report pass.
 OPTIONAL_ANALYSIS_ARTIFACTS = {
     "cpu_setup_top50.rpt": "cpu_setup_top50.rpt",
+    "cpu_setup_top200.rpt": "cpu_setup_top200.rpt",
     "route_status.rpt": "route_status.rpt",
     "utilization_routed.rpt": "utilization_routed.rpt",
 }
