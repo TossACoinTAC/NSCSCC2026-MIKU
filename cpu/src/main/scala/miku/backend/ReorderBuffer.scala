@@ -507,6 +507,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val stagedRobPointer = Vec.fill(config.writebackWidth)(
     Reg(UInt(config.robPointerWidth bits))
   )
+  val stagedRecoveryEpoch = Vec.fill(config.writebackWidth)(
+    Reg(UInt(config.recoveryEpochWidth bits))
+  )
   val stagedResult = Vec.fill(config.writebackWidth)(Reg(Bits(config.xlen bits)))
   val stagedPdst = Vec.fill(config.writebackWidth)(Reg(UInt(config.physicalRegIndexWidth bits)))
   val stagedWritesPdst = Vec.fill(config.writebackWidth)(Reg(Bool()))
@@ -568,6 +571,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     }.otherwise {
       stagedCompletionValid(lane) := io.completionValid(lane)
       stagedRobPointer(lane) := io.completion(lane).robPointer
+      stagedRecoveryEpoch(lane) := io.completion(lane).recoveryEpoch
       stagedCompletionCurrent(lane) :=
         io.completionValid(lane) && io.completion(lane).recoveryEpoch === io.currentEpoch
       // Valid and pointer define payload validity. Capturing each lane avoids
