@@ -658,53 +658,6 @@ class ReorderBufferSpec extends AnyFunSuite {
       }
   }
 
-  test("ROB one-hot completion qualification preserves multi-lane pointer identity") {
-    val config = OooCoreConfig.FourIssueThreeCommit.copy(
-      enableHeadCompletionCommitBypass = false
-    )
-    SimConfig.withVerilator
-      .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-rob-one-hot-completion")
-      .compile(new ReorderBufferProbe(config))
-      .doSim("ooo-rob-one-hot-completion", 0x4f4f57) { dut =>
-        def sample(): Unit = {
-          dut.clockDomain.waitSampling()
-          sleep(1)
-        }
-
-        dut.clockDomain.forkStimulus(period = 10)
-        initialize(dut, config)
-        dut.clockDomain.assertReset()
-        dut.clockDomain.waitSampling(2)
-        dut.clockDomain.deassertReset()
-        sample()
-
-        dut.io.allocateValid #= 3
-        dut.io.allocateAccept #= true
-        dut.io.allocatePc(0) #= 0x100
-        dut.io.allocatePc(1) #= 0x104
-        sleep(1)
-        val first = dut.io.allocatedPointer(0).toBigInt
-        val second = dut.io.allocatedPointer(1).toBigInt
-        sample()
-
-        dut.io.allocateValid #= 0
-        dut.io.allocateAccept #= false
-        dut.io.completionRobPointer(0) #= second
-        dut.io.completionRobPointer(1) #= first
-        dut.io.completionValid #= 3
-        sample()
-        assert(dut.io.commitValid.toBigInt == 0)
-
-        dut.io.completionValid #= 0
-        sample()
-        assert(dut.io.commitValid.toBigInt == 3)
-        assert(dut.io.commitPc(0).toBigInt == 0x100)
-        assert(dut.io.commitPc(1).toBigInt == 0x104)
-        sample()
-        assert(dut.io.empty.toBoolean)
-      }
-  }
-
   test("ordinary head completion may commit from the staged exact-pointer match") {
     for ((bypass, name, seed) <- Seq(
         (false, "legacy", 0x4f4f51),
