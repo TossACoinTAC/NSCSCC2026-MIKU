@@ -38,7 +38,10 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   val predictorType = UInt(PredictedBranchType.Width bits)
   val loadQueueIndex = UInt(config.loadQueueIndexWidth bits)
   val storeQueueIndex = UInt(config.storeQueueIndexWidth bits)
-  val pointer = UInt(config.robPointerWidth bits)
+  // The physical slot already encodes the low index bits.  Only the wrap
+  // generation is state; commit/recovery reconstruct the full identity from
+  // their registered candidate pointer.
+  val generation = Bool()
   val result = Bits(config.xlen bits)
   val sideEffectData = Bits(config.xlen bits)
   val completionExceptionValid = Bool()
@@ -211,7 +214,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.allocate(lane).uop.loadQueueIndex
       entries(entryIndex).storeQueueIndex :=
         io.allocate(lane).uop.storeQueueIndex
-      entries(entryIndex).pointer := destination
+      entries(entryIndex).generation := destination.msb
       entries(entryIndex).result := B(0, config.xlen bits)
       entries(entryIndex).sideEffectData :=
         B(0, config.xlen bits)
@@ -242,7 +245,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     when(
       !io.flush && stagedAllocationValid(lane) &&
         entryValid(pointer(config.robIndexWidth - 1 downto 0)) &&
-        state.pointer === pointer
+        state.generation === pointer.msb
     ) {
       entryPayloadReady(pointer(config.robIndexWidth - 1 downto 0)) := True
     }
@@ -401,7 +404,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       candidates(lane).payload.pc
     })
     io.commit(lane).instruction := candidates(lane).payload.instruction
-    io.commit(lane).robPointer := candidates(lane).state.pointer
+    io.commit(lane).robPointer := candidatePointer(lane)
     io.commit(lane).rd := candidates(lane).payload.rd
     io.commit(lane).pdst := candidates(lane).payload.pdst
     io.commit(lane).oldPdst := candidates(lane).payload.oldPdst
@@ -471,7 +474,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   io.recovery.exception.tlbRefill := False
   when(recoveryMask.orR) {
     val recoveryIndex = selectLowest(recoveryMask, log2Up(config.commitWidth))
-    io.recovery.robPointer := candidates(recoveryIndex).state.pointer
+    io.recovery.robPointer := candidatePointer(recoveryIndex)
     io.recovery.pc := (if (config.enableRobPcState) {
       candidates(recoveryIndex).state.pc
     } else {
@@ -523,7 +526,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         stagedCompletionCurrent(lane) &&
         stagedIndex === U(entryIndex, config.robIndexWidth bits) &&
         entryValid(entryIndex) && !entryComplete(entryIndex) &&
-        entries(entryIndex).pointer.msb === stagedRobPointer(lane).msb
+        entries(entryIndex).generation === stagedRobPointer(lane).msb
     }
     val stagedStoreIndex =
       stagedStoreCompletionRobPointer(config.robIndexWidth - 1 downto 0)
@@ -531,7 +534,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       stagedStoreCompletionCurrent &&
       stagedStoreIndex === U(entryIndex, config.robIndexWidth bits) &&
       entryValid(entryIndex) && !entryComplete(entryIndex) &&
-      entries(entryIndex).pointer.msb === stagedStoreCompletionRobPointer.msb
+      entries(entryIndex).generation === stagedStoreCompletionRobPointer.msb
   }
   when(io.flush) {
     stagedStoreCompletionValid := False
