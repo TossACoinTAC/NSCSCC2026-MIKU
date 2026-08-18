@@ -231,17 +231,47 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val drainAfterFlush = RegInit(False)
 
   // Completed loads remain allocated until commit.  The allocator therefore
-  // advances the base only on commit, and a rotated priority select preserves
-  // program order across physical slot wrap-around.
+  // advances the base only on commit.  Select the oldest pending entry in
+  // three local regions: the base bank suffix, the other bank, then the base
+  // bank prefix.  This is the exact circular order starting at loadBase, but
+  // avoids a full-queue variable rotate and add on the scheduling path.
   val pendingLoads = Bits(config.loadQueueEntries bits)
   for (entry <- 0 until config.loadQueueEntries) {
     pendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
       !loads(entry).completed
   }
-  val rotatedPending = ((pendingLoads ## pendingLoads) |>> loadBase)
-    .resize(config.loadQueueEntries)
-  val loadHeadOffset = OHToUInt(OHMasking.first(rotatedPending))
-  val oldestLoadHead = (loadBase + loadHeadOffset).resized
+  val loadSelectBankEntries = config.loadQueueEntries / 2
+  val loadSelectLocalWidth = log2Up(loadSelectBankEntries)
+  val loadBaseBank = loadBase.msb
+  val loadBaseLocal = loadBase(loadSelectLocalWidth - 1 downto 0)
+  val loadPendingBank0 = pendingLoads(loadSelectBankEntries - 1 downto 0)
+  val loadPendingBank1 = pendingLoads(config.loadQueueEntries - 1 downto loadSelectBankEntries)
+  val loadBasePending = Mux(loadBaseBank, loadPendingBank1, loadPendingBank0)
+  val loadOtherPending = Mux(loadBaseBank, loadPendingBank0, loadPendingBank1)
+  val loadBaseSuffixPending = Bits(loadSelectBankEntries bits)
+  val loadBasePrefixPending = Bits(loadSelectBankEntries bits)
+  for (entry <- 0 until loadSelectBankEntries) {
+    val entryIndex = U(entry, loadSelectLocalWidth bits)
+    loadBaseSuffixPending(entry) := loadBasePending(entry) && entryIndex >= loadBaseLocal
+    loadBasePrefixPending(entry) := loadBasePending(entry) && entryIndex < loadBaseLocal
+  }
+  val loadBaseSuffixValid = loadBaseSuffixPending.orR
+  val loadOtherValid = loadOtherPending.orR
+  val loadBasePrefixValid = loadBasePrefixPending.orR
+  val loadBaseSuffixIndex = OHToUInt(OHMasking.first(loadBaseSuffixPending))
+  val loadOtherIndex = OHToUInt(OHMasking.first(loadOtherPending))
+  val loadBasePrefixIndex = OHToUInt(OHMasking.first(loadBasePrefixPending))
+  val oldestLoadBank = Bool()
+  val oldestLoadLocal = UInt(loadSelectLocalWidth bits)
+  oldestLoadBank := loadBaseBank
+  oldestLoadLocal := loadBasePrefixIndex
+  when(loadBaseSuffixValid) {
+    oldestLoadLocal := loadBaseSuffixIndex
+  }.elsewhen(loadOtherValid) {
+    oldestLoadBank := !loadBaseBank
+    oldestLoadLocal := loadOtherIndex
+  }
+  val oldestLoadHead = (oldestLoadBank.asBits ## oldestLoadLocal.asBits).asUInt
   // Restricted younger-ready Load bypass (L02 retry-token form).  When the
   // currently scheduled oldest Load is held by a local alias/forwarding
   // condition, select the next younger pending Load whose address is already
@@ -251,7 +281,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val retryLoadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val retryCandidatePending = retryValid && pendingLoads(retryLoadHead)
   val selectedLoadHead = Mux(retryCandidatePending, retryLoadHead, oldestLoadHead)
-  val selectedLoadValid = retryCandidatePending || pendingLoads.orR
+  val selectedLoadValid = retryCandidatePending || loadBaseSuffixValid || loadOtherValid ||
+    loadBasePrefixValid
   // Match the registered uop boundary used by the reference LoadQueue.  The
   // selected index and immutable payload are state: translation, forwarding,
   // and cache request ownership no longer re-read wide queue fields through a
