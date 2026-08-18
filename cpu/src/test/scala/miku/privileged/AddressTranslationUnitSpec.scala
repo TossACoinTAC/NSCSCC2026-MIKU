@@ -127,7 +127,7 @@ class AddressTranslationUnitSpec extends AnyFunSuite {
     cycles
   }
 
-  test("instruction flush discards a stalled owner and reopens the request slot") {
+  test("instruction flush cancels a stalled owner before reopening the request slot") {
     SimConfig.withVerilator
       .workspacePath(
         sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
@@ -156,6 +156,13 @@ class AddressTranslationUnitSpec extends AnyFunSuite {
         assert(!dut.io.instructionRequest.ready.toBoolean)
         sample(dut)
         dut.io.instructionFlush #= false
+        assert(dut.io.instructionResponse.valid.toBoolean)
+        assert(dut.io.instructionResponse.cancelled.toBoolean)
+        assert(dut.io.instructionResponse.virtualAddress.toBigInt == BigInt(0x1c001000))
+        assert(!dut.io.instructionResponse.exception.valid.toBoolean)
+
+        dut.io.instructionResponse.ready #= true
+        sample(dut)
         assert(!dut.io.instructionResponse.valid.toBoolean)
 
         dut.io.instructionRequest.valid #= true
@@ -165,7 +172,15 @@ class AddressTranslationUnitSpec extends AnyFunSuite {
         sample(dut)
         dut.io.instructionRequest.valid #= false
         assert(dut.io.instructionResponse.valid.toBoolean)
+        assert(!dut.io.instructionResponse.cancelled.toBoolean)
         assert(dut.io.instructionResponse.virtualAddress.toBigInt == BigInt(0x1c002000))
+
+        dut.io.instructionResponse.ready #= true
+        sample(dut)
+        dut.io.instructionFlush #= true
+        sample(dut)
+        dut.io.instructionFlush #= false
+        assert(!dut.io.instructionResponse.valid.toBoolean)
       }
   }
 
