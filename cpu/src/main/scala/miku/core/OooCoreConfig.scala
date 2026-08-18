@@ -139,6 +139,8 @@ final case class OooCoreConfig(
     enableInstructionOwnerLateBypassPayload: Boolean = true,
     enableRecoveryBranchTrainingPriority: Boolean = true,
     enableL2WriteBack: Boolean = true,
+    // Simulation-only branch metadata sideband.  Keep it outside the default production RTL.
+    enableBranchTraceObserver: Boolean = false,
     resetVector: BigInt = BigInt("1c000000", 16),
     instructionCache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 128, lineBytes = 64),
     dataCache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 128, lineBytes = 64),

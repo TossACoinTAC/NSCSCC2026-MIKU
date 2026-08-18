@@ -6,6 +6,7 @@ usage() {
     'usage: sim-prepare --workspace DIR [--artifact-root DIR] --cpu-dir DIR --chiplab-dir DIR' \
     '                   --chiplab-commit HASH --profile clean|instrumented' \
     '                   --suite standard|func58|perf20 --workloads CSV' \
+    '                   --branch-trace 0|1' \
     '                   --config-args STRING --jobs N --sim-path PATH' \
     '                   --verilator-home DIR --extra-libs STRING [--rebuild 0|1]'
 }
@@ -18,6 +19,7 @@ chiplab_commit=
 profile=
 suite=
 workloads=
+branch_trace=0
 config_args=
 jobs=
 sim_path=
@@ -35,6 +37,7 @@ while (($#)); do
     --profile) profile=$2; shift 2 ;;
     --suite) suite=$2; shift 2 ;;
     --workloads) workloads=$2; shift 2 ;;
+    --branch-trace) branch_trace=$2; shift 2 ;;
     --config-args) config_args=$2; shift 2 ;;
     --jobs) jobs=$2; shift 2 ;;
     --sim-path) sim_path=$2; shift 2 ;;
@@ -61,6 +64,14 @@ if [[ $profile != clean && $profile != instrumented ]]; then
 fi
 if [[ $suite != standard && $suite != func58 && $suite != perf20 ]]; then
   printf 'SIM_SUITE must be standard, func58, or perf20, got %s\n' "$suite" >&2
+  exit 2
+fi
+if [[ $branch_trace != 0 && $branch_trace != 1 ]]; then
+  printf 'BRANCH_TRACE must be 0 or 1, got %s\n' "$branch_trace" >&2
+  exit 2
+fi
+if [[ $branch_trace == 1 && $profile != instrumented ]]; then
+  printf 'branch trace requires SIM_PROFILE=instrumented\n' >&2
   exit 2
 fi
 if [[ ! $jobs =~ ^[1-9][0-9]*$ ]]; then
@@ -187,6 +198,8 @@ official_patch_file="$workspace/scripts/sim/official-software-switch.patch"
 official_patch_lock="$official_patch_file.sha256"
 commit_endpoint_file="$workspace/scripts/sim/commit_endpoint_observer.h"
 commit_endpoint_lock="$commit_endpoint_file.sha256"
+branch_trace_header="$workspace/scripts/sim/branch_trace_observer.h"
+branch_trace_source="$workspace/scripts/sim/branch_trace_observer.cpp"
 simulation_patch_file="$workspace/scripts/sim/confreg-simulation-mode.patch"
 simulation_patch_lock="$simulation_patch_file.sha256"
 
@@ -197,6 +210,8 @@ m01_patch_sha=none
 m01_source_sha=none
 official_patch_sha=none
 commit_endpoint_sha=none
+branch_trace_header_sha=none
+branch_trace_source_sha=none
 if [[ $suite != standard ]]; then
   (cd "$workspace" && sha256sum -c "$official_patch_lock")
   (cd "$workspace" && sha256sum -c "$commit_endpoint_lock")
@@ -210,6 +225,10 @@ if [[ $profile == instrumented ]]; then
   patch_sha=$(sha256sum "$patch_file" | awk '{print $1}')
   m01_patch_sha=$(sha256sum "$m01_patch_file" | awk '{print $1}')
   m01_source_sha=$(sha256sum "$m01_source_lock" | awk '{print $1}')
+  if [[ $branch_trace == 1 ]]; then
+    branch_trace_header_sha=$(sha256sum "$branch_trace_header" | awk '{print $1}')
+    branch_trace_source_sha=$(sha256sum "$branch_trace_source" | awk '{print $1}')
+  fi
 fi
 
 verilator_bin=$(env PATH="$sim_path:$PATH" sh -c 'command -v verilator')
@@ -228,6 +247,8 @@ model_key=$({
   printf 'simulation_patch_sha256=%s\nofficial_patch_sha256=%s\n' \
     "$simulation_patch_sha" "$official_patch_sha"
   printf 'commit_endpoint_observer_sha256=%s\n' "$commit_endpoint_sha"
+  printf 'branch_trace=%s\nbranch_trace_header_sha256=%s\nbranch_trace_source_sha256=%s\n' \
+    "$branch_trace" "$branch_trace_header_sha" "$branch_trace_source_sha"
   printf 'instrumentation_patch_sha256=%s\nm01_patch_sha256=%s\nm01_source_sha256=%s\n' \
     "$patch_sha" "$m01_patch_sha" "$m01_source_sha"
   printf 'verilator_sha256=%s\nverilator_version=%s\nverilator_home=%s\n' \
@@ -268,6 +289,12 @@ if [[ $rebuild == 1 || $model_valid == 0 ]]; then
       "$model_staging/sims/verilator/testbench/include/perf_monitor.h"
     install -m 0444 "$workspace/scripts/sim/perf_monitor.cpp" \
       "$model_staging/sims/verilator/testbench/perf_monitor.cpp"
+    if [[ $branch_trace == 1 ]]; then
+      install -m 0444 "$branch_trace_header" \
+        "$model_staging/sims/verilator/testbench/include/branch_trace_observer.h"
+      install -m 0444 "$branch_trace_source" \
+        "$model_staging/sims/verilator/testbench/branch_trace_observer.cpp"
+    fi
     TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$m01_patch_file"
     if ! awk '
       previous == "    top = new Vtop;" &&
@@ -311,6 +338,9 @@ commit_endpoint_observer_sha256=$commit_endpoint_sha
 simulation_patch_sha256=$simulation_patch_sha
 m01_patch_sha256=$m01_patch_sha
 m01_source_manifest_sha256=$m01_source_sha
+branch_trace=$branch_trace
+branch_trace_header_sha256=$branch_trace_header_sha
+branch_trace_source_sha256=$branch_trace_source_sha
 verilator_sha256=$verilator_sha
 verilator=$verilator_version
 verilator_home=$verilator_home
@@ -487,6 +517,9 @@ commit_endpoint_observer_sha256=$commit_endpoint_sha
 simulation_patch_sha256=$simulation_patch_sha
 m01_patch_sha256=$m01_patch_sha
 m01_source_manifest_sha256=$m01_source_sha
+branch_trace=$branch_trace
+branch_trace_header_sha256=$branch_trace_header_sha
+branch_trace_source_sha256=$branch_trace_source_sha
 verilator=$verilator_version
 java=$(java -version 2>&1 | head -n 1)
 EOF

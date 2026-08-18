@@ -34,6 +34,8 @@ SIM_LANES ?= 2
 SIM_ALLOW_THREE ?= 0
 SIM_LANE_PEAK_MB ?=
 SIM_REBUILD ?= 0
+SIM_BRANCH_TRACE ?= 0
+CPU_BRANCH_TRACE ?= $(SIM_BRANCH_TRACE)
 PERF_CPU_MHZ ?= 100
 SOC_ARCHIVE_CLASS ?= auto
 SOC_BUILD_KIND ?= perf
@@ -69,7 +71,7 @@ CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-l
 
 .PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
-  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
+  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim branch-trace-summary wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
@@ -96,6 +98,7 @@ help:
 		'  make func58-sim         全 func58 固定 seeds' \
 		'  make perf20-sim         完整 perf20（包含 stringsearch）' \
 		'  make linux-sim          Linux 软件仿真入口' \
+		'  make branch-trace-summary BRANCH_TRACE=... 汇总逐分支 predictor trace' \
 		'  make board-queue        查询远程 LabAgent 队列' \
 		'  make board-status BOARD_JOB=<id>  查询板测状态' \
 		'  make board-result BOARD_JOB=<id>  查询板测终态证据' \
@@ -107,7 +110,8 @@ help:
 		'  make clean-all          额外清理显式 IDE 状态' '' \
 		'路径覆盖：VIVADO_HOME VIVADO SURFER LABAGENT_HOST LABAGENT_SSH_KEY DOCKER_IMAGE JOBS SIM_LANES' \
 		'实现归档：SOC_EXPERIMENT_MANIFEST=... SOC_ARCHIVE_CLASS=auto|candidate|stable' \
-		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项'
+		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项' \
+		'分支观察：SIM_BRANCH_TRACE=1 生成仿真专用 branch-trace-v1 sidecar'
 
 board-queue:
 	@LABAGENT_HOST="$(LABAGENT_HOST)" LABAGENT_SSH_KEY="$(LABAGENT_SSH_KEY)" $(BOARDCTL) queue
@@ -185,10 +189,11 @@ cpu-contract-test:
 		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
 
 cpu-generate:
+	@test "$(CPU_BRANCH_TRACE)" = 0 || test "$(CPU_BRANCH_TRACE)" = 1
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@rm -rf "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
-	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw"'
+	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw$(if $(filter 1,$(CPU_BRANCH_TRACE)), --branch-trace,)"'
 	@test -f "$(BUILD_ROOT)/rtl/raw/core_top.v"
 	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" package \
 		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
@@ -222,6 +227,7 @@ sim-prepare: cpu-generate
 		--workspace "$(ROOT_DIR)" --artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" \
 		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
 		--profile "$(SIM_PROFILE)" --suite "$(SIM_SUITE)" --workloads "$(SIM_WORKLOADS)" \
+		--branch-trace "$(SIM_BRANCH_TRACE)" \
 		--config-args '--run $(RUN_SOFTWARE) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst' \
 		--jobs "$(JOBS)" --sim-path "$(CONTAINER_SIM_PATH)" --verilator-home /usr/share/verilator --extra-libs '-llz4' \
 		--rebuild "$(SIM_REBUILD)"
@@ -255,6 +261,10 @@ perf20-sim:
 linux-sim:
 	@$(MAKE) sim RUN_SOFTWARE=linux SIM_WORKLOADS=linux \
 		TIME_LIMIT="$(LINUX_TIME_LIMIT)" SIM_LANES=1
+
+branch-trace-summary:
+	@test -n "$(BRANCH_TRACE)" || { printf 'BRANCH_TRACE is required\n' >&2; exit 2; }
+	@python3 -I "$(ROOT_DIR)/scripts/experiment/branch_trace_summary.py" "$(BRANCH_TRACE)"
 
 wave:
 	@test -f "$(SURFER)" || { printf 'Surfer 不存在: %s\n' "$(SURFER)" >&2; exit 1; }

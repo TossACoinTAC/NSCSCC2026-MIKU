@@ -4,24 +4,37 @@ import java.nio.file.{Files, Path, Paths}
 import spinal.core._
 
 private object CoreTopCompatGeneratorSupport {
-  private def outputArgument(args: Array[String]): String =
-    args match {
-      case Array(path) if path.nonEmpty              => path
-      case Array("--out-dir", path) if path.nonEmpty => path
-      case Array() =>
-        sys.env
-          .get("OUT_DIR")
-          .filter(_.nonEmpty)
-          .getOrElse(
-            throw new IllegalArgumentException(
-              "output directory is required as an argument or OUT_DIR"
-            )
-          )
-      case _ =>
-        throw new IllegalArgumentException(
-          "usage: GenerateCoreTopCompat [--out-dir] <output-directory>"
-        )
+  private final case class GeneratorArguments(outputDirectory: String, branchTrace: Boolean)
+
+  private def parseArguments(args: Array[String]): GeneratorArguments = {
+    var outputDirectory: Option[String] = None
+    var branchTrace = false
+    var index = 0
+    while (index < args.length) {
+      args(index) match {
+        case "--out-dir" =>
+          require(index + 1 < args.length, "--out-dir requires a directory")
+          outputDirectory = Some(args(index + 1))
+          index += 2
+        case "--branch-trace" =>
+          branchTrace = true
+          index += 1
+        case value if outputDirectory.isEmpty && value.nonEmpty =>
+          outputDirectory = Some(value)
+          index += 1
+        case value =>
+          throw new IllegalArgumentException(s"unknown generator argument: $value")
+      }
     }
+    val directory = outputDirectory
+      .orElse(sys.env.get("OUT_DIR").filter(_.nonEmpty))
+      .getOrElse(
+        throw new IllegalArgumentException(
+          "output directory is required as an argument or OUT_DIR"
+        )
+      )
+    GeneratorArguments(directory, branchTrace)
+  }
 
   private def findRepositoryRoot(path: Path): Option[Path] =
     if (path == null) None
@@ -38,7 +51,8 @@ private object CoreTopCompatGeneratorSupport {
     }
 
   def generate(args: Array[String]): Unit = {
-    val outputDirectory = Paths.get(outputArgument(args)).toAbsolutePath.normalize()
+    val generatorArguments = parseArguments(args)
+    val outputDirectory = Paths.get(generatorArguments.outputDirectory).toAbsolutePath.normalize()
     val workingDirectory = Paths.get("").toAbsolutePath.normalize()
     val classDirectory = Paths
       .get(getClass.getProtectionDomain.getCodeSource.getLocation.toURI)
@@ -70,7 +84,9 @@ private object CoreTopCompatGeneratorSupport {
     )
     spinalConfig.withTimescale = false
     spinalConfig.generateVerilog {
-      val dut = new CoreTopCompat(CoreTopCompatConfig())
+      val dut = new CoreTopCompat(
+        CoreTopCompatConfig(branchTraceObserver = generatorArguments.branchTrace)
+      )
       dut.setDefinitionName("core_top")
       dut
     }
