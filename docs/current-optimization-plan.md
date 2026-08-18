@@ -587,6 +587,34 @@ R23 由 fresh top-50 明确触发 FQ02-R：优先局部化 16-entry pending bitm
 scheduled-load payload capture，保持 L02 retry token、请求时刻与可见周期。Observer v2
 不参与该候选的 clean RTL 归因。
 
+R23 已累积六个周期透明步骤：`6af20e8` 将 pending oldest 选择拆成两个 bank 的
+suffix/other/prefix 循环选择；`06dbbdd` 将 scheduled-load payload 选择限定在 bank-local
+one-hot mux；`848d936` 引入 scheduler-only pending sidecar，并保留 legacy 配置作语义对照；
+`36e6ff9` 将 L02 younger-load retry 改为相同 bank-local 选择；`b9dd194` 让 one-hot 选择
+直接进入 payload `OHMux`；`68ddd1c` 将 request、allocation、terminal event 合并成局部
+mask next-state，消除初版动态 bit 写入产生的 mux 膨胀。六步均保持 loadBase 年龄顺序、
+retry token、forwarding/translation owner、flush/epoch 和请求时刻。
+
+LSQ 定向测试为 35/35；完整门禁为 39 suites / 237 tests，strict-zero Verilator、Yosys、
+77 项 Python 合同均通过。clean perf20 20/20 且总周期 `3,910,163`，与 R22 20 项逐项
+精确相等；func58 random-AXI seeds `240/255/141` 均为 58/58。Yosys 对比 R22 显示 LSQ
+`7,898 -> 7,974` cells、`35,738 -> 36,788` wire bits、`4,323 -> 4,367` mux、DFF
+`512 -> 513`，整核 `70,233 -> 70,309` cells。matching 100 MHz direct implementation
+已归档到
+`Post_Impl_Bundles/cpu_68ddd1c77097_chiplab_c398d274812f_perf_100mhz_20260818-163551/`：
+setup/hold `-0.270/+0.055 ns`、setup TNS `-4.161 ns`、62 个 failing endpoints；route
+errors 0、DRC errors 0、fully routed 且 bitstream 成功，但 setup 未闭合，因此不是里程碑。
+资源为 95,111 LUT、60,007 FF、66.5 BRAM、8 DSP；相对 R22 增加 643 LUT 和 173 FF。
+最终 top-50 为 predictor 27、ROB/CSR 11、IQ 6、cache/L2 4、other CPU 2、LSQ 0；最差
+ROB/CSR `-0.270 ns`，cache/L2 `-0.225 ns`，predictor `-0.177 ns`。FQ02-R 已把 R22 的
+LSQ 48/50 主路径完整移出 top-50，但没有形成整体闭合；下一轮应针对新鲜 ROB/CSR、cache/L2
+和 predictor 路径累积多个周期透明候选。最终拥挤峰值约 East 90.35%、South 89.19%，
+route 完成时 overlaps 为 0。结构化证据位于
+`build/reports/experiments/R23-FQ02-R-20260818/` 和
+`build/reports/comparisons/R23-FQ02-R.json`，top-50 分类位于
+`build/reports/timing/R23-FQ02-R-top50.json`。Observer v2 继续只作为开发中 instrumented
+设施，不进入 R23 clean manifest 或里程碑判定。
+
 MMU、cache、AXI、异常或内存顺序发生变化的轮次运行 Linux；其他候选在每个时序闭合
 里程碑运行 Linux。当前候选工作在 `dev/freq`，每个实验保留源码树、生成 RTL、软件、
 Chiplab、Vivado、seed、周期和 setup/hold 证据。R22 虽已 fully routed、DRC 通过并生成

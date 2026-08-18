@@ -512,3 +512,30 @@ FQ02-R；不能将组合的路径迁移或资源下降拆分归因给任一单�
 本轮 1st pass 已用 R20 找到 LDQ16 的负面物理证据，并由 R21 dirty batch 观察到 release
 count 局部化后的路径迁移；下一轮以已确定的 B02-F+LDQ16 身份为基线，再由 matching top-N
 选择一张候选卡，形成可复现、可回退的证据链。
+
+### R23 matching 记录
+
+R23 针对 R22 fresh top-50 的 LSQ 主路径累积 FQ02-R 六步局部化实现：banked pending
+oldest select、scheduled-load payload bank-local 选择、pending sidecar、banked younger-load
+retry、one-hot payload mux，以及合并 sidecar event masks。完整门禁为 39 suites / 237 tests，
+LSQ 定向 35/35；clean perf20 为 20/20、总周期 `3,910,163`，与 R22 逐项精确相等；func58
+seeds `240/255/141` 均为 58/58。Yosys 仅见有限结构代价，LSQ `7,898 -> 7,974` cells、
+整核 `70,233 -> 70,309` cells；初版 sidecar 的动态 bit 写入膨胀已由 `68ddd1c` 的局部
+one-hot mask next-state 消除。
+
+R23 结构化 manifest 为
+`build/reports/experiments/R23-FQ02-R-20260818/experiment-manifest.json`，A/B 为
+`build/reports/comparisons/R23-FQ02-R.json`。matching 100 MHz direct implementation
+归档为
+`Post_Impl_Bundles/cpu_68ddd1c77097_chiplab_c398d274812f_perf_100mhz_20260818-163551/`：
+setup/hold `-0.270/+0.055 ns`、setup TNS `-4.161 ns`，62 个 failing endpoints；fully
+routed、route/DRC errors 0 且 bitstream 成功，但 setup 未闭合。资源为 95,111 LUT、
+60,007 FF、66.5 BRAM、8 DSP；拥挤峰值约 East 90.35%、South 89.19%，route 完成时
+overlaps 为 0。
+
+fresh top-50 为 predictor 27、ROB/CSR 11、IQ 6、cache/L2 4、other CPU 2、LSQ 0；
+最差三族分别是 ROB completion-bypass `-0.270 ns`、L1I correction `-0.225 ns` 和
+BTB-to-RAS `-0.177 ns`。这证明 FQ02-R 已把 R22 的 LSQ 48/50 主路径完整移出 top-50，
+同时也证明增加的局部状态和布局扰动没有换来整体 WNS 改善。下一轮必须依据这份 fresh
+报告处理新路径族，不能继续沿 LSQ 方向堆叠。Observer v2 不在 clean RTL、manifest 或
+本轮里程碑结论中，仍只作为开发中增量。

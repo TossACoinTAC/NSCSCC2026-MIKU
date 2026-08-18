@@ -150,7 +150,7 @@ matching RTL 的 Scala/合同测试、定向仿真、perf20/func58 和完整 imp
 | T04 | ROB completion 与 RenameMap ready 关联网络局部化 | ROB 对 32 个 entry 与 5 个 completion lane 做身份匹配，RenameMap 又对全部物理寄存器扫描 allocation 和 writeback；可研究先做窄 valid/index 预过滤、共享 tag compare 或局部 scoreboard，减少宽 ready/complete 控制扇出 | 这是 OoO 的固有关联成本，改动容易破坏 pointer generation、epoch、同拍 allocation/writeback、flush 和 exactly-once completion；共享比较器也可能增加扇出，暂不假定能改善 Fmax | ROB/RenameMap top-N、等值比较和 mux 数、commit/rename stall、ready scoreboard 翻转、LUT/FF/route、完整功能回归和 matching WNS | 观察，待测量 | 当前 Yosys 统计 ROB 约 14262 cells、3198 个等值比较、7801 个 mux；RenameMap 约 1278 个等值比较、815 个 mux；无当前路径 WNS 归因 |
 
 | FQ01 | ROB-to-LSQ release/occupancy 局部化 | 在保持 release mask 周期语义的前提下，只把 `CountOne` 结果和窄 release count 送过 LSQ/allocator 边界，避免 ROB commit qualification、宽 mask 和 allocator occupancy 形成一条跨层控制锥。当前 dirty batch 已采用接近 FQ01-A 的结构 | 不能延迟 `commitValid`，不能用 ROB `isLoad/isStore` 直接释放；必须保留 uncached Store drain、SC 失败、flush、精确异常、同拍 allocate+release 和 pointer wrap 语义 | 单变量 matching top-N 中 release/occupancy 路径的 worst/median 变化、WNS/TNS/hold、occupancy underflow/overflow、LSQ/ROB 定向合同、perf20 不退化、func58 | 当前 dirty batch，待单变量隔离 | R21 聚合相对 R20 setup WNS `-0.047 -> +0.113 ns`、hold `+0.052 -> +0.048 ns`，但同批还含 FT09/MT09，不能归因；perf20 总周期 `3,910,163`，无可归因的周期收益 |
-| FQ02 | LSQ pending-load 与 `requestSent` CE 局部化 | 将 `pendingLoads` 的旋转 oldest 选择改为 2 级归约或 2x8 bank-local select，再把 `requestSent` 的资格化拆到局部 CE；保留既有 `loadHead`、`scheduledLoad` 和 retry-token 寄存边界，直接命中历史 LSQ `requestSent -> scheduledLoad` 宽扇出路径 | 年龄、C04 物理 alias、C06 SUC/order、multiple forwarding store、translation owner、backpressure、flush/epoch 和 load wakeup 不能改变；第一版不得改变可见周期或 forwarding priority | fresh matching top-N、LSQ selector/CE worst/median path、`scheduledLoad` latency、L02 retry 活性、MSHR overlap、perf20/func58/Linux memory smoke | 待实验，P0 双赢候选 | 现有 Observer 报告 `oldest_blocked_with_alternate_address_ready=425,678`，说明存在真实的年轻 Load 提前请求机会；历史 R20 `requestSent -> scheduledLoad` 多条约 `9.64--9.71 ns`、route 约 75%，尚无 FQ02 A/B 物理结果 |
+| FQ02 | LSQ pending-load 与 `requestSent` CE 局部化 | 将 `pendingLoads` 的旋转 oldest 选择改为 2 级归约或 2x8 bank-local select，再把 `requestSent` 的资格化拆到局部 CE；保留既有 `loadHead`、`scheduledLoad` 和 retry-token 寄存边界，直接命中历史 LSQ `requestSent -> scheduledLoad` 宽扇出路径 | 年龄、C04 物理 alias、C06 SUC/order、multiple forwarding store、translation owner、backpressure、flush/epoch 和 load wakeup 不能改变；第一版不得改变可见周期或 forwarding priority | fresh matching top-N、LSQ selector/CE worst/median path、`scheduledLoad` latency、L02 retry 活性、MSHR overlap、perf20/func58/Linux memory smoke | R23 已实现；软件门禁通过；matching direct fully routed 但 100 MHz setup 未闭合 | `6af20e8`、`06dbbdd`、`848d936`、`36e6ff9`、`b9dd194`、`68ddd1c`。LSQ 定向 35/35；完整门禁 39 suites/237 tests、Yosys pass；clean perf20 20/20 且总周期 `3,910,163`，20 项逐项精确相等；func58 seeds `240/255/141` 均 58/58。R23 matching setup/hold `-0.270/+0.055 ns`、TNS `-4.161 ns`，DRC errors 0、route errors 0、bitstream 成功。top-50 从 R22 的 LSQ 48/50 迁移为 predictor 27、ROB/CSR 11、IQ 6、cache/L2 4、LSQ 0；最差为 ROB/CSR `-0.270 ns`。Yosys 相对 R22：LSQ `7,898 -> 7,974` cells、`35,738 -> 36,788` wire bits、`4,323 -> 4,367` mux、DFF `512 -> 513`；整核 `70,233 -> 70,309` cells。资源为 95,111 LUT、60,007 FF、66.5 BRAM、8 DSP；拥挤峰值约 East 90.35%、South 89.19%。R23 不是 100 MHz 稳定里程碑。 |
 
 已有候选的本轮细化：`T03` 应把“当前同时生成 signed/unsigned 两个 `$mul`，再由 `Mux` 选择”作为单乘法器 A/B 的明确起点；`D02` 的当前实现确实包含 `portUsed`/`laneOpen` 的三 lane 串行链和反向 payload mux；`BT03`、`WT05` 与 `MT06` 的既有 token、wakeup 解耦和 banked forwarding 不回退，但 IQ 动态 payload read、LSQ forwarding bank 和剩余关联比较只作为测量项。上述已有候选均不得引用已清理 bundle 的旧物理结果。
 
@@ -249,6 +249,36 @@ setup/hold `-0.271/+0.057 ns`，TNS `-5.109 ns`，fully routed、DRC 0 error、b
 成功；94,468 LUT、59,834 FF，较 R21 少 800 LUT、274 FF。top-50 为 LSQ 48、IQ 1、
 ROB/CSR 1；前 47 条都落在 `loads_10_completed -> scheduledLoad_*`，因此组合完成了
 frontend/predictor 路径迁移但没有形成里程碑，FQ02-R 已由 fresh route 正式触发。
+
+### R23：FQ02-R LSQ 局部选择批次
+
+R23 针对 R22 fresh top-50 中占主导的 `loads_10_completed -> scheduledLoad_*` LSQ 路径，
+在同一批次累积六个保持可见周期的局部化步骤：
+
+| 提交 | 结构变化 | 语义边界 |
+| --- | --- | --- |
+| `6af20e8` | pending Load oldest 选择按两个 bank 的 suffix/other/prefix 三段循环选择 | 精确保持 `loadBase` 起始的年龄顺序，不增加拍数 |
+| `06dbbdd` | scheduled-load payload 使用 bank-local one-hot 选择，再做窄 bank mux | ROB、epoch、地址和翻译 payload 与选中 index 配对 |
+| `848d936` | 增加 scheduler-only pending bitmap，并保留 legacy/sidecar 配置对照 | 分配、请求、提交、异常、flush 的所有权状态保持一致 |
+| `36e6ff9` | L02 younger-load retry 采用相同 bank-local 循环选择 | retry token、alias/forwarding 优先级和请求时刻不变 |
+| `b9dd194` | 选择结果以 one-hot 进入 payload `OHMux` | 仅窄 identity/index 使用 binary 编码 |
+| `68ddd1c` | 将 sidecar 的清除/分配事件合并为局部 one-hot mask next-state | 保留 request-clear < allocation-set < terminal-clear 优先级，flush 最高优先级 |
+
+R23 的完整证据身份为
+`build/reports/experiments/R23-FQ02-R-20260818/experiment-manifest.json`；A/B 为
+`build/reports/comparisons/R23-FQ02-R.json`。39 suites / 237 tests、strict-zero
+Verilator、Yosys 和 77 项 Python 合同均通过；clean perf20 为 20/20，逐项与 R22
+精确相等（总周期 `3,910,163`），func58 random-AXI seeds `240/255/141` 均为 58/58。
+Yosys 只显示有限结构代价：LSQ `7,898 -> 7,974` cells，整核 `70,233 -> 70,309`
+cells；sidecar mask 合并后没有保留此前动态 bit 写入造成的 mux 膨胀。R23 matching
+100 MHz direct implementation 已归档到
+`Post_Impl_Bundles/cpu_68ddd1c77097_chiplab_c398d274812f_perf_100mhz_20260818-163551/`：
+setup/hold `-0.270/+0.055 ns`、setup TNS `-4.161 ns`，62 个 failing endpoints；fully
+routed、route/DRC errors 0 且 bitstream 成功，但 setup 未闭合。资源为 95,111 LUT、
+60,007 FF、66.5 BRAM、8 DSP，相对 R22 增加 643 LUT、173 FF；拥挤峰值约 East
+90.35%、South 89.19%。top-50 已迁移为 predictor 27、ROB/CSR 11、IQ 6、cache/L2 4、
+other CPU 2、LSQ 0。FQ02-R 完整移除了目标 LSQ 路径族，但没有形成整体闭合；R23
+不是稳定里程碑，也不把 Observer v2 结果作为本轮 clean 证据。
 
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
