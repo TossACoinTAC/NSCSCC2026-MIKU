@@ -41,6 +41,11 @@ final case class ReorderBufferState(config: OooCoreConfig) extends Bundle {
   val pointer = UInt(config.robPointerWidth bits)
   val result = Bits(config.xlen bits)
   val sideEffectData = Bits(config.xlen bits)
+  val completionExceptionValid = Bool()
+  val completionException = ExceptionMetadata()
+  val branchMispredict = Bool()
+  val branchTaken = Bool()
+  val branchTarget = UInt(config.xlen bits)
 }
 
 final case class ReorderBufferEntry(config: OooCoreConfig) extends Bundle {
@@ -118,14 +123,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   val entryPayloadReady = Reg(Bits(config.robEntries bits)) init (0)
   val entryDecodedExceptionValid = Reg(Bits(config.robEntries bits)) init (0)
   val entrySerializing = Reg(Bits(config.robEntries bits)) init (0)
-  val entryCompletionExceptionValid = Reg(Bits(config.robEntries bits)) init (0)
-  // The valid bitmap is the ownership boundary for this sparse payload.  The
-  // metadata itself need not be reset: it is never observed while the bit is
-  // clear, avoiding a wide reset fanout for a rare completion class.
-  val entryCompletionException = Vec.fill(config.robEntries)(Reg(ExceptionMetadata()))
-  val entryBranchTaken = Reg(Bits(config.robEntries bits)) init (0)
-  val entryBranchMispredict = Reg(Bits(config.robEntries bits)) init (0)
-  val entryBranchTarget = Vec.fill(config.robEntries)(Reg(UInt(config.xlen bits)))
   for (entry <- entries) {
     entry.systemOperation.init(SystemOperation.none)
     entry.systemOperationIsNone.init(True)
@@ -203,10 +200,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         io.allocate(lane).uop.decoded.exception.valid
       entrySerializing(entryIndex) :=
         io.allocate(lane).uop.decoded.serializing
-      entryCompletionExceptionValid(entryIndex) := False
-      entryBranchTaken(entryIndex) := False
-      entryBranchMispredict(entryIndex) := False
-      entryBranchTarget(entryIndex) := U(0, config.xlen bits)
       entries(entryIndex).systemOperation :=
         io.allocate(lane).uop.decoded.systemOperation
       entries(entryIndex).systemOperationIsNone :=
@@ -233,6 +226,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       entries(entryIndex).result := B(0, config.xlen bits)
       entries(entryIndex).sideEffectData :=
         B(0, config.xlen bits)
+      entries(entryIndex).completionExceptionValid := False
+      entries(entryIndex).branchMispredict := False
+      entries(entryIndex).branchTaken := False
     }
   }
 
@@ -341,8 +337,8 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       candidates(lane).payload.decodedException.badVAddrValid
     candidates(lane).exception.badVAddr := candidates(lane).payload.decodedException.badVAddr
     candidates(lane).exception.tlbRefill := candidates(lane).payload.decodedException.tlbRefill
-    when(entryCompletionExceptionValid(entryIndex)) {
-      candidates(lane).exception := entryCompletionException(entryIndex)
+    when(candidates(lane).state.completionExceptionValid) {
+      candidates(lane).exception := candidates(lane).state.completionException
     }
   }
 
@@ -371,28 +367,22 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       effectiveBranchTaken(lane) := Mux(
         headBranchBypass,
         stagedHeadBranchBypassTaken,
-        entryBranchTaken(candidatePointer(lane)(config.robIndexWidth - 1 downto 0))
+        candidates(lane).state.branchTaken
       )
       effectiveBranchTarget(lane) := Mux(
         headBranchBypass,
         stagedHeadBranchBypassTarget,
-        entryBranchTarget(candidatePointer(lane)(config.robIndexWidth - 1 downto 0))
+        candidates(lane).state.branchTarget
       )
       effectiveBranchMispredict(lane) := Mux(
         headBranchBypass,
         stagedHeadBranchBypassMispredict,
-        entryBranchMispredict(candidatePointer(lane)(config.robIndexWidth - 1 downto 0))
+        candidates(lane).state.branchMispredict
       )
     } else {
-      effectiveBranchTaken(lane) := entryBranchTaken(
-        candidatePointer(lane)(config.robIndexWidth - 1 downto 0)
-      )
-      effectiveBranchTarget(lane) := entryBranchTarget(
-        candidatePointer(lane)(config.robIndexWidth - 1 downto 0)
-      )
-      effectiveBranchMispredict(lane) := entryBranchMispredict(
-        candidatePointer(lane)(config.robIndexWidth - 1 downto 0)
-      )
+      effectiveBranchTaken(lane) := candidates(lane).state.branchTaken
+      effectiveBranchTarget(lane) := candidates(lane).state.branchTarget
+      effectiveBranchMispredict(lane) := candidates(lane).state.branchMispredict
     }
     if (lane == 0) {
       branchPrefix(lane) := retiringBranch.asUInt.resized
@@ -670,12 +660,12 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         entryComplete(entryIndex) := True
         entries(entryIndex).result := stagedResult(lane)
         entries(entryIndex).sideEffectData := stagedSideEffectData(lane)
-        entryCompletionExceptionValid(entryIndex) := stagedException(lane).valid
-        entryCompletionException(entryIndex) := stagedException(lane)
+        entries(entryIndex).completionExceptionValid := stagedException(lane).valid
+        entries(entryIndex).completionException := stagedException(lane)
         when(stagedBranchResolved(lane)) {
-          entryBranchTaken(entryIndex) := stagedBranchTaken(lane)
-          entryBranchMispredict(entryIndex) := stagedBranchMispredict(lane)
-          entryBranchTarget(entryIndex) := stagedBranchTarget(lane)
+          entries(entryIndex).branchTaken := stagedBranchTaken(lane)
+          entries(entryIndex).branchMispredict := stagedBranchMispredict(lane)
+          entries(entryIndex).branchTarget := stagedBranchTarget(lane)
         }
       }
     }
@@ -683,7 +673,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       entryComplete(entryIndex) := True
       entries(entryIndex).result := B(0, config.xlen bits)
       entries(entryIndex).sideEffectData := B(0, config.xlen bits)
-      entryCompletionExceptionValid(entryIndex) := False
+      entries(entryIndex).completionExceptionValid := False
     }
   }
 
@@ -728,12 +718,6 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     entryPayloadReady := 0
     entryDecodedExceptionValid := 0
     entrySerializing := 0
-    entryCompletionExceptionValid := 0
-    entryBranchTaken := 0
-    entryBranchMispredict := 0
-    for (target <- entryBranchTarget) {
-      target := U(0, config.xlen bits)
-    }
   }.otherwise {
     when(io.allocateAccept) {
       allocatePointer := allocatePointer + requested
@@ -782,9 +766,7 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
   perfObservationV1Word4(43) := observationHeadPredictorHasCapacity
   perfObservationV1Word4(44) := candidates(0).exception.valid
   perfObservationV1Word4(45) := candidateSerializing(0)
-  perfObservationV1Word4(46) := entryBranchMispredict(
-    candidatePointer(0)(config.robIndexWidth - 1 downto 0)
-  )
+  perfObservationV1Word4(46) := candidates(0).state.branchMispredict
   perfObservationV1Word4(47) := candidates(0).state.isLoad
   perfObservationV1Word4(48) := candidates(0).state.isStore
   perfObservationV1Word4(49) := candidates(0).state.isBranch
