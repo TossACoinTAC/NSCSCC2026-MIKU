@@ -133,14 +133,6 @@ private final class ReorderBufferProbe(config: OooCoreConfig) extends Component 
 }
 
 class ReorderBufferSpec extends AnyFunSuite {
-  private def branchCompletionLane(config: OooCoreConfig): Int = {
-    val lanes = config.executionPorts.zipWithIndex.collect {
-      case (port, lane) if port.capabilities.contains(ExecutionUnitKind.Branch) => lane
-    }
-    require(lanes.size == 1)
-    lanes.head
-  }
-
   private def initialize(dut: ReorderBufferProbe, config: OooCoreConfig): Unit = {
     dut.io.allocateValid #= 0
     dut.io.allocateAccept #= false
@@ -560,7 +552,6 @@ class ReorderBufferSpec extends AnyFunSuite {
 
   test("branch completion overwrites a reused ROB slot target before retirement") {
     val config = OooCoreConfig.FourIssueThreeCommit
-    val branchLane = branchCompletionLane(config)
     SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-rob")
       .compile(new ReorderBufferProbe(config))
@@ -580,11 +571,10 @@ class ReorderBufferSpec extends AnyFunSuite {
           sample()
           dut.io.allocateValid #= 0
           dut.io.allocateAccept #= false
-          val completionLane = if (isBranch) branchLane else 0
-          dut.io.completionRobPointer(completionLane) #= pointer
-          dut.io.completionBranchResolved #= (if (isBranch) 1 << branchLane else 0)
-          dut.io.completionBranchTarget(branchLane) #= target
-          dut.io.completionValid #= 1 << completionLane
+          dut.io.completionRobPointer(0) #= pointer
+          dut.io.completionBranchResolved #= (if (isBranch) 1 else 0)
+          dut.io.completionBranchTarget(0) #= target
+          dut.io.completionValid #= 1
           sample()
           var commitObservations = 0
           def observeCommit(): Unit = {
@@ -789,7 +779,6 @@ class ReorderBufferSpec extends AnyFunSuite {
       enableHeadCompletionCommitBypass = true,
       enableBranchHeadCompletionBypass = false
     )
-    val branchLane = branchCompletionLane(config)
     val compiled = SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") + "/sim-workspace-ooo-rob-head-completion-boundaries")
       .compile(new ReorderBufferProbe(config))
@@ -827,13 +816,10 @@ class ReorderBufferSpec extends AnyFunSuite {
 
         dut.io.allocateValid #= 0
         dut.io.allocateAccept #= false
-        val completionLane = if (branchResolved) branchLane else 0
-        dut.io.completionRobPointer(completionLane) #= pointer
-        dut.io.completionExceptionValid #=
-          (if (completionException) 1 << completionLane else 0)
-        dut.io.completionBranchResolved #=
-          (if (branchResolved) 1 << branchLane else 0)
-        dut.io.completionValid #= 1 << completionLane
+        dut.io.completionRobPointer(0) #= pointer
+        dut.io.completionExceptionValid #= (if (completionException) 1 else 0)
+        dut.io.completionBranchResolved #= (if (branchResolved) 1 else 0)
+        dut.io.completionValid #= 1
         sample()
         withClue(s"$name must not retire from the bypass stage: ") {
           assert(dut.io.commitValid.toBigInt == 0)
@@ -846,7 +832,7 @@ class ReorderBufferSpec extends AnyFunSuite {
         withClue(s"$name must retain normal registered completion: ") {
           assert((dut.io.commitValid.toBigInt & 1) == 1)
           assert(dut.io.commitPc(0).toBigInt == BigInt("1c000100", 16))
-          assert(dut.io.commitResult(0).toBigInt == 0x100 + completionLane)
+          assert(dut.io.commitResult(0).toBigInt == 0x100)
         }
         sample()
         assert(dut.io.occupancy.toBigInt == 0)
@@ -860,7 +846,6 @@ class ReorderBufferSpec extends AnyFunSuite {
         enableHeadCompletionCommitBypass = true,
         enableBranchHeadCompletionBypass = enabled
       )
-      val branchLane = branchCompletionLane(config)
       SimConfig.withVerilator
         .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
           s"/sim-workspace-ooo-rob-branch-head-bypass-$enabled")
@@ -890,11 +875,11 @@ class ReorderBufferSpec extends AnyFunSuite {
             dut.io.allocateValid #= 0
             dut.io.allocateAccept #= false
             dut.io.allocateIsBranch #= 0
-            dut.io.completionRobPointer(branchLane) #= pointer
-            dut.io.completionBranchResolved #= 1 << branchLane
-            dut.io.completionBranchTaken #= 1 << branchLane
-            dut.io.completionBranchTarget(branchLane) #= 0x1c001234
-            dut.io.completionValid #= 1 << branchLane
+            dut.io.completionRobPointer(0) #= pointer
+            dut.io.completionBranchResolved #= 1
+            dut.io.completionBranchTaken #= 1
+            dut.io.completionBranchTarget(0) #= 0x1c001234
+            dut.io.completionValid #= 1
             sample()
 
             withClue(s"enabled=$enabled bypass cycle: ") {
@@ -905,7 +890,7 @@ class ReorderBufferSpec extends AnyFunSuite {
               sample()
               assert((dut.io.commitValid.toBigInt & 1) == 1)
             }
-            assert(dut.io.commitResult(0).toBigInt == 0x100 + branchLane)
+            assert(dut.io.commitResult(0).toBigInt == 0x100)
             assert((dut.io.commitBranchTaken.toBigInt & 1) == 1)
             assert(dut.io.commitBranchTarget(0).toBigInt == 0x1c001234)
             assert(!dut.io.recoveryValid.toBoolean)
@@ -922,7 +907,6 @@ class ReorderBufferSpec extends AnyFunSuite {
       enableHeadCompletionCommitBypass = true,
       enableBranchHeadCompletionBypass = true
     )
-    val branchLane = branchCompletionLane(config)
     val compiled = SimConfig.withVerilator
       .workspacePath(sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
         "/sim-workspace-ooo-rob-branch-head-qualification")
@@ -952,10 +936,10 @@ class ReorderBufferSpec extends AnyFunSuite {
       dut.io.allocateValid #= 0
       dut.io.allocateAccept #= false
       dut.io.allocateIsBranch #= 0
-      dut.io.completionRobPointer(branchLane) #= pointer
-      dut.io.completionRecoveryEpoch(branchLane) #= 1
-      dut.io.completionBranchResolved #= 1 << branchLane
-      dut.io.completionValid #= 1 << branchLane
+      dut.io.completionRobPointer(0) #= pointer
+      dut.io.completionRecoveryEpoch(0) #= 1
+      dut.io.completionBranchResolved #= 1
+      dut.io.completionValid #= 1
       sample()
       assert(dut.io.commitValid.toBigInt == 0)
       dut.io.completionValid #= 0
@@ -987,10 +971,10 @@ class ReorderBufferSpec extends AnyFunSuite {
       dut.io.allocateValid #= 0
       dut.io.allocateAccept #= false
       dut.io.allocateIsBranch #= 0
-      dut.io.completionRobPointer(branchLane) #= pointer
-      dut.io.completionExceptionValid #= 1 << branchLane
-      dut.io.completionBranchResolved #= 1 << branchLane
-      dut.io.completionValid #= 1 << branchLane
+      dut.io.completionRobPointer(0) #= pointer
+      dut.io.completionExceptionValid #= 1
+      dut.io.completionBranchResolved #= 1
+      dut.io.completionValid #= 1
       sample()
       assert(dut.io.commitValid.toBigInt == 0)
       dut.io.completionValid #= 0
@@ -1025,12 +1009,12 @@ class ReorderBufferSpec extends AnyFunSuite {
       dut.io.allocateAccept #= false
       dut.io.allocateIsBranch #= 0
       dut.io.predictorUpdateCapacity #= 0
-      dut.io.completionRobPointer(branchLane) #= pointer
-      dut.io.completionBranchResolved #= 1 << branchLane
-      dut.io.completionBranchTaken #= 1 << branchLane
-      dut.io.completionBranchMispredict #= 1 << branchLane
-      dut.io.completionBranchTarget(branchLane) #= 0x1c002468
-      dut.io.completionValid #= 1 << branchLane
+      dut.io.completionRobPointer(0) #= pointer
+      dut.io.completionBranchResolved #= 1
+      dut.io.completionBranchTaken #= 1
+      dut.io.completionBranchMispredict #= 1
+      dut.io.completionBranchTarget(0) #= 0x1c002468
+      dut.io.completionValid #= 1
       sample()
       assert(dut.io.commitValid.toBigInt == 0)
       assert(!dut.io.recoveryValid.toBoolean)
@@ -1041,7 +1025,7 @@ class ReorderBufferSpec extends AnyFunSuite {
       dut.io.predictorUpdateCapacity #= 1
       sleep(1)
       assert((dut.io.commitValid.toBigInt & 1) == 1)
-      assert(dut.io.commitResult(0).toBigInt == 0x100 + branchLane)
+      assert(dut.io.commitResult(0).toBigInt == 0x100)
       assert((dut.io.commitBranchTaken.toBigInt & 1) == 1)
       assert(dut.io.commitBranchTarget(0).toBigInt == 0x1c002468)
       assert(dut.io.recoveryValid.toBoolean)
