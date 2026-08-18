@@ -26,11 +26,24 @@ warning、bitstream 成功。归档位于
 `Post_Impl_Bundles/cpu_5be1257ab976_chiplab_c398d274812f_perf_100mhz_20260818-122325/`。
 
 R21 top200 为 cache/L2 106、ROB/CSR 31、LSQ 30、predictor 25、IQ 5、other CPU 3。
-ROB 约占 CPU LUT 三成；R24 因此从整面 ROB completion/commit/recovery 控制网络入手，
-组合候选为 ROB01、ROB02、ROB03、ROB04、FCTX01、SYS01。每项独立提交、定向验证和
-Yosys 结构审计，至少五项通过静态/软件门禁后才做一次组合 direct full。全局评价执行
+ROB 约占 CPU LUT 三成；R24 因此从整面 ROB completion/commit/recovery 控制网络入手。
+R24 当前保留六项：ROB02 (`c611d12`)、ROB04 (`f34689c`)、SYS01 (`04def5c`)、
+ROB06 (`ed133b3`)、ROB07 (`400e4f8`) 和 ROB08 (`129cd28`)。ROB01/ROB03/ROB05
+虽通过过局部测试，但其隔离 Yosys 结构分别表现为无效/膨胀/依赖性回归，已回退，不进入
+组合。FCTX01 在 clean RTL 中已有 active/pending context 槽位，本轮不重复改写。SYS01
+初版暴露的 redirect translation owner 丢失问题已由 C11 (`0f4afb7`) 关闭。当前 source tree
+为 `b0293473559c...`，published RTL SHA-256 为 `805245468508...`；完整 `cpu-check` 为
+39 suites/236 tests、Python 85/85，RTL 接口、strict-zero lint 和基础 Yosys gate 均通过。
+
+当前组合的 clean ideal perf20 为 20/20、`3,910,163` cycles，与 R21 baseline 的 CSV
+逐字节相同；因此官方等权 `IPC_factor=1.000000000x`、总周期因子也为 `1.000000000x`，
+控制流与规则吞吐各簇均无跷跷板。func58 random-AXI seeds `240/255/141` 均为 58/58；
+Linux seed `5570815` 跑满固定 50 ms 窗口，结束原因 `linux-time-window-complete`。这些软件
+证据不继承 R21 的物理实现；下一门禁仍是当前 RTL 的 matching direct full。全局评价执行
 [optimization-evaluation-contract.md](optimization-evaluation-contract.md)，不能再用某一
-目标族退出 top50 代替 WNS/TNS/top200/资源/IPC 的整体判断。
+目标族退出 top50 代替 WNS/TNS/top200/资源/IPC 的整体判断。稳定版 perf20 的程序模式、
+分项周期和对照簇见 [perf20-benchmark-patterns.md](perf20-benchmark-patterns.md)；它只用于
+选择观测簇和解释回归，不替代完整 20 项 A/B 或实现证据。
 
 Yosys 与 Vivado 的历史配对审计结论如下：
 
@@ -48,6 +61,18 @@ R14-R19 的 `Yosys cell delta` 与 WNS delta 描述性 Pearson 相关约 `0.24`�
 批次，不能建立预测模型。Yosys 只作为结构预筛选和回归拒绝门：验证结构确实删除/新增、
 memory inference、generic cell/mux/DFF/memory bits 和模块级逻辑深度；Vivado 负责判断
 Xilinx primitive 映射、placement/route、congestion、WNS/TNS 和路径迁移。
+
+R24 的隔离结果进一步限定了这条规则：ROB01 的结构变化没有形成预期的比较器削减，
+ROB02 的 hot-state sidecar 有明确的 generic cell/mux 减少，ROB03 重新复制分支/异常
+状态并增加逻辑深度，ROB04 基本中性，ROB05 依赖 ROB03 且保留其不利结构。它们只用于
+筛选和拒绝，不能据此宣称 WNS 会改善；最终判断仍以六项组合的完整周期、top200、拥挤、
+WNS/TNS 和资源报告为准。此后不根据小幅 Yosys delta 排候选或追加结构迭代；只有设计意图
+没有形成或出现明确大规模膨胀时才让该门禁阻断开发。
+
+最终组合只运行了一次结构快照 `build/reports/yosys/R24-final/summary.json`。相对相同配置的
+R21 快照，ROB generic cells 从 `14,262` 降至 `11,330`、word bits 从 `92,062` 降至
+`82,437`；整核 top LTP 仍为 53 且路径指纹发生迁移。这只确认 ROB 状态拆分和清理实际形成，
+同时再次说明结构缩小不能推出 WNS 改善。
 
 ### 2026-08-18 历史状态修正
 
