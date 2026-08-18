@@ -778,16 +778,26 @@ class LoadStoreQueueSpec extends AnyFunSuite {
         dut.io.aguValid #= false
         dut.io.dataRequestReady #= true
 
-        val requests = scala.collection.mutable.ArrayBuffer.empty[BigInt]
+        val requests = scala.collection.mutable.ArrayBuffer.empty[(BigInt, BigInt, BigInt)]
         var requestWait = 0
         while (requests.size < loads.size && requestWait < 32) {
           if (dut.io.dataRequestValid.toBoolean) {
-            requests += dut.io.dataRequest.robPointer.toBigInt
+            requests += ((
+              dut.io.dataRequest.robPointer.toBigInt,
+              dut.io.dataRequest.virtualAddress.toBigInt,
+              dut.io.dataRequest.physicalAddress.toBigInt
+            ))
           }
           sample(dut)
           requestWait += 1
         }
-        assert(requests.toSeq == Seq(BigInt(10), BigInt(11), BigInt(12)))
+        assert(
+          requests.toSeq == Seq(
+            (BigInt(10), BigInt(0x600), BigInt(0x80000600L)),
+            (BigInt(11), BigInt(0x900), BigInt(0x80000900L)),
+            (BigInt(12), BigInt(0x200), BigInt(0x80000200L))
+          )
+        )
       }
   }
 

@@ -297,7 +297,23 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // one long combinational loop on the storage timing path.
   val scheduledLoadReselect =
     selectedLoadValid && (!scheduledLoadValid || selectedLoadHead =/= loadHead)
-  val selectedLoadForAgu = loads(selectedLoadHead)
+  val selectedLoadLocal = selectedLoadHead(loadSelectLocalWidth - 1 downto 0)
+  val selectedLoadByBank = Vec(LoadQueueEntry(config), 2)
+  for (bank <- 0 until 2) {
+    selectedLoadByBank(bank) := loads(bank * loadSelectBankEntries)
+    switch(selectedLoadLocal) {
+      for (entry <- 0 until loadSelectBankEntries) {
+        is(U(entry, loadSelectLocalWidth bits)) {
+          selectedLoadByBank(bank) := loads(bank * loadSelectBankEntries + entry)
+        }
+      }
+    }
+  }
+  val selectedLoadForAgu = Mux(
+    selectedLoadHead.msb,
+    selectedLoadByBank(1),
+    selectedLoadByBank(0)
+  )
   val scheduledLoadAguMatch =
     selectedLoadValid && aguFire && !io.agu.isWrite && !aguMisaligned &&
       io.agu.uop.loadQueueIndex === selectedLoadHead &&
@@ -309,20 +325,19 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     scheduledLoadValid := selectedLoadValid
     when(scheduledLoadReselect) {
       loadHead := selectedLoadHead
-      val selectedLoad = loads(selectedLoadHead)
-      scheduledLoad.robPointer := selectedLoad.robPointer
-      scheduledLoad.recoveryEpoch := selectedLoad.recoveryEpoch
-      scheduledLoad.memoryEpoch := selectedLoad.memoryEpoch
-      scheduledLoad.pdst := selectedLoad.pdst
-      scheduledLoad.writesPdst := selectedLoad.writesPdst
-      scheduledLoad.virtualAddress := selectedLoad.virtualAddress
-      scheduledLoad.physicalAddress := selectedLoad.physicalAddress
-      scheduledLoad.translationDone := selectedLoad.translationDone
-      scheduledLoad.uncached := selectedLoad.uncached
-      scheduledLoad.size := selectedLoad.size
-      scheduledLoad.byteMask := selectedLoad.byteMask
-      scheduledLoad.signExtend := selectedLoad.signExtend
-      scheduledLoad.isLl := selectedLoad.isLl
+      scheduledLoad.robPointer := selectedLoadForAgu.robPointer
+      scheduledLoad.recoveryEpoch := selectedLoadForAgu.recoveryEpoch
+      scheduledLoad.memoryEpoch := selectedLoadForAgu.memoryEpoch
+      scheduledLoad.pdst := selectedLoadForAgu.pdst
+      scheduledLoad.writesPdst := selectedLoadForAgu.writesPdst
+      scheduledLoad.virtualAddress := selectedLoadForAgu.virtualAddress
+      scheduledLoad.physicalAddress := selectedLoadForAgu.physicalAddress
+      scheduledLoad.translationDone := selectedLoadForAgu.translationDone
+      scheduledLoad.uncached := selectedLoadForAgu.uncached
+      scheduledLoad.size := selectedLoadForAgu.size
+      scheduledLoad.byteMask := selectedLoadForAgu.byteMask
+      scheduledLoad.signExtend := selectedLoadForAgu.signExtend
+      scheduledLoad.isLl := selectedLoadForAgu.isLl
     }
     // AGU and scheduler can target the same newly-ready entry on one edge.
     // Bypass that write into the registered payload so this timing cut does
