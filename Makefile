@@ -64,6 +64,14 @@ PERF_OBSERVATION_MATRIX ?=
 PERF_OBSERVATION_OUT ?= $(BUILD_ROOT)/reports/observations/perf20-$(shell date +%Y%m%d-%H%M%S).json
 TEST_BASE ?= HEAD
 TEST_IMPACT_OUT ?= $(BUILD_ROOT)/reports/test-impact/$(shell date +%Y%m%d-%H%M%S).json
+YOSYS_RTL ?= $(BUILD_ROOT)/rtl/mycpu_top.v
+YOSYS_LABEL ?= $(notdir $(basename $(YOSYS_RTL)))
+YOSYS_ANALYSIS_OUT ?= $(BUILD_ROOT)/reports/yosys/$(YOSYS_LABEL)-$(shell date +%Y%m%d-%H%M%S)
+YOSYS_BASE_REPORT ?=
+YOSYS_CANDIDATE_REPORT ?=
+YOSYS_COMPARE_OUT ?= $(BUILD_ROOT)/reports/yosys/compare-$(shell date +%Y%m%d-%H%M%S).json
+YOSYS_ANALYSIS_TIMEOUT ?= 180
+YOSYS_LTP_MAX_MB ?= 8
 BOARD_JOB ?=
 POST_ROUTE_INPUT_DCP ?= $(BUILD_ROOT)/chiplab-perf/fpga/nscscc-team/run_vivado/project/loongson.runs/impl_1/soc_top_routed.dcp
 POST_ROUTE_OUTPUT ?= $(BUILD_ROOT)/vivado/postroute-$(shell date +%Y%m%d-%H%M%S)
@@ -77,7 +85,7 @@ FUNC58_WORKLOADS := func58
 CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_CACHE_VOLUME=$(DOCKER_CACHE_VOLUME) $(ROOT_DIR)/scripts/env/run-in-container
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-.PHONY: help doctor status ide-setup env-build toolchain-check experiment-freeze experiment-compare timing-analyze optimization-evaluate test-impact perf-observation-summary \
+.PHONY: help doctor status ide-setup env-build toolchain-check experiment-freeze experiment-compare timing-analyze optimization-evaluate yosys-analyze yosys-compare test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim branch-trace-summary wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
@@ -94,6 +102,8 @@ help:
 		'  make experiment-compare 比较两组身份兼容的完整 perf20' \
 		'  make timing-analyze      自动归类 Vivado top timing paths' \
 		'  make optimization-evaluate 生成 IPC×频率全局评价' \
+		'  make yosys-analyze       对冻结 RTL 做结构/逻辑深度分析' \
+		'  make yosys-compare       比较两份同配置 Yosys 结构报告' \
 		'  make test-impact         按变更路径列出必须运行的测试' \
 		'  make perf-observation-summary 汇总 instrumented perf20 ROI' \
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
@@ -171,6 +181,20 @@ experiment-compare:
 timing-analyze:
 	@test -n "$(strip $(TIMING_REPORT))" || { printf 'TIMING_REPORT 不能为空\n' >&2; exit 2; }
 	@python3 scripts/experiment/timing_analyze.py --report "$(TIMING_REPORT)" --out "$(TIMING_OUT)"
+
+yosys-analyze:
+	@test -f "$(YOSYS_RTL)" || { printf 'YOSYS_RTL 不存在: %s\n' "$(YOSYS_RTL)" >&2; exit 2; }
+	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/experiment/yosys_analyze.py" analyze \
+		--rtl "$(YOSYS_RTL)" --label "$(YOSYS_LABEL)" --out "$(YOSYS_ANALYSIS_OUT)" \
+		--yosys /usr/bin/yosys --timeout "$(YOSYS_ANALYSIS_TIMEOUT)" \
+		--max-ltp-mb "$(YOSYS_LTP_MAX_MB)"
+
+yosys-compare:
+	@test -f "$(YOSYS_BASE_REPORT)" || { printf 'YOSYS_BASE_REPORT 不存在: %s\n' "$(YOSYS_BASE_REPORT)" >&2; exit 2; }
+	@test -f "$(YOSYS_CANDIDATE_REPORT)" || { printf 'YOSYS_CANDIDATE_REPORT 不存在: %s\n' "$(YOSYS_CANDIDATE_REPORT)" >&2; exit 2; }
+	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/experiment/yosys_analyze.py" compare \
+		--baseline "$(YOSYS_BASE_REPORT)" --candidate "$(YOSYS_CANDIDATE_REPORT)" \
+		--out "$(YOSYS_COMPARE_OUT)"
 
 optimization-evaluate:
 	@test -n "$(strip $(COMPARE_OUT))" || { printf 'COMPARE_OUT 不能为空\n' >&2; exit 2; }
