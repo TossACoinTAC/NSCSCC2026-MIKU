@@ -44,7 +44,6 @@ final class AddressTranslationUnit(
     val reset = in Bool ()
     val instructionRequest = slave(Stream(TranslationRequest(config)))
     val instructionResponse = master(Stream(TranslationResponse(config)))
-    val instructionFlush = in Bool ()
     val dataRequest = slave(Stream(TranslationRequest(config)))
     val dataResponse = master(Stream(TranslationResponse(config)))
     val dataBypassAddress = in UInt (config.xlen bits)
@@ -202,8 +201,7 @@ final class AddressTranslationUnit(
     // The iTLB port is idle whenever the ATU owner slot is available; both layers are blocked by
     // the same TLB mutation.  Qualify ready with capacity directly so the request VA's DMW/paging
     // decode cannot feed back through ready into the frontend turnover handshake.
-    val instructionRequestReady = !io.instructionFlush && !tlbMutation &&
-      instructionOwnerSlotAvailable &&
+    val instructionRequestReady = !tlbMutation && instructionOwnerSlotAvailable &&
       tlb.io.instructionRequest.ready
     io.instructionRequest.ready := instructionRequestReady
     val instructionRequestFire = io.instructionRequest.valid && io.instructionRequest.ready
@@ -482,14 +480,6 @@ final class AddressTranslationUnit(
         dataResponseValid := False
       }
       dataSearchPending := False
-    }
-    // A precise redirect discards the frontend's instruction owner.  Give the
-    // local token final priority so a request, TLB response, or mutation in the
-    // same cycle cannot recreate stale ownership.  Data translation belongs to
-    // older in-flight memory operations and retains its existing flush policy.
-    when(io.instructionFlush) {
-      instructionSearchPending := False
-      instructionResponseValid := False
     }
   }
 }
