@@ -98,7 +98,7 @@ help:
 		'  make func58-sim         全 func58 固定 seeds' \
 		'  make perf20-sim         完整 perf20（包含 stringsearch）' \
 		'  make linux-sim          Linux 软件仿真入口' \
-		'  make branch-trace-summary BRANCH_TRACE=... 汇总逐分支 predictor trace' \
+		'  make branch-trace-summary BRANCH_TRACE=... 汇总逐分支 predictor trace（含 v2 ROI markers）' \
 		'  make board-queue        查询远程 LabAgent 队列' \
 		'  make board-status BOARD_JOB=<id>  查询板测状态' \
 		'  make board-result BOARD_JOB=<id>  查询板测终态证据' \
@@ -111,7 +111,7 @@ help:
 		'路径覆盖：VIVADO_HOME VIVADO SURFER LABAGENT_HOST LABAGENT_SSH_KEY DOCKER_IMAGE JOBS SIM_LANES' \
 		'实现归档：SOC_EXPERIMENT_MANIFEST=... SOC_ARCHIVE_CLASS=auto|candidate|stable' \
 		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项' \
-		'分支观察：SIM_BRANCH_TRACE=1 生成仿真专用 branch-trace-v1 sidecar'
+		'分支观察：SIM_BRANCH_TRACE=1 生成仿真专用 branch-trace-v2 sidecar'
 
 board-queue:
 	@LABAGENT_HOST="$(LABAGENT_HOST)" LABAGENT_SSH_KEY="$(LABAGENT_SSH_KEY)" $(BOARDCTL) queue

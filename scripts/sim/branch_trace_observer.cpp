@@ -8,12 +8,15 @@ namespace {
 FILE *trace_file = nullptr;
 bool trace_disabled = false;
 std::uint64_t event_sequence = 0;
+std::uint64_t marker_sequence = 0;
+std::uint8_t configured_pht_index_width = 12;
+std::uint8_t configured_metadata_valid_bit = 14;
 
 const char *trace_path() {
     const char *configured = std::getenv("MIKU_BRANCH_TRACE_PATH");
     return configured != nullptr && configured[0] != '\0'
                ? configured
-               : "branch-trace-v1.jsonl";
+               : "branch-trace-v2.jsonl";
 }
 
 void close_trace() {
@@ -40,8 +43,8 @@ void open_trace(std::uint8_t pht_index_width, std::uint8_t metadata_valid_bit) {
     std::setvbuf(trace_file, nullptr, _IOFBF, 1U << 20);
     std::fprintf(
         trace_file,
-        "{\"kind\":\"header\",\"format\":\"miku-branch-trace-v1\","
-        "\"schema_version\":1,\"pht_index_width\":%u,\"metadata_valid_bit\":%u}\n",
+        "{\"kind\":\"header\",\"format\":\"miku-branch-trace-v2\","
+        "\"schema_version\":2,\"pht_index_width\":%u,\"metadata_valid_bit\":%u}\n",
         static_cast<unsigned>(pht_index_width),
         static_cast<unsigned>(metadata_valid_bit));
     std::atexit(close_trace);
@@ -51,7 +54,29 @@ void open_trace(std::uint8_t pht_index_width, std::uint8_t metadata_valid_bit) {
 
 extern "C" void miku_branch_trace_init(std::uint8_t pht_index_width,
                                         std::uint8_t metadata_valid_bit) {
+    configured_pht_index_width = pht_index_width;
+    configured_metadata_valid_bit = metadata_valid_bit;
     open_trace(pht_index_width, metadata_valid_bit);
+}
+
+extern "C" void miku_branch_trace_marker(
+    std::uint64_t cycle,
+    std::uint8_t lane,
+    std::uint32_t pc,
+    std::uint32_t instruction) {
+    open_trace(configured_pht_index_width, configured_metadata_valid_bit);
+    if (trace_file == nullptr) {
+        return;
+    }
+    std::fprintf(
+        trace_file,
+        "{\"kind\":\"marker\",\"seq\":%llu,\"cycle\":%llu,\"lane\":%u,"
+        "\"pc\":\"0x%08x\",\"instruction\":\"0x%08x\"}\n",
+        static_cast<unsigned long long>(marker_sequence++),
+        static_cast<unsigned long long>(cycle),
+        static_cast<unsigned>(lane),
+        pc,
+        instruction);
 }
 
 extern "C" void miku_branch_trace_event(

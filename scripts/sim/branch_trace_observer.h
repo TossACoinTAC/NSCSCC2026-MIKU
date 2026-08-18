@@ -6,6 +6,12 @@
 extern "C" void miku_branch_trace_init(std::uint8_t pht_index_width,
                                         std::uint8_t metadata_valid_bit);
 
+extern "C" void miku_branch_trace_marker(
+    std::uint64_t cycle,
+    std::uint8_t lane,
+    std::uint32_t pc,
+    std::uint32_t instruction);
+
 extern "C" void miku_branch_trace_event(
     std::uint64_t cycle,
     std::uint8_t lane,

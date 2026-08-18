@@ -64,6 +64,36 @@ class BranchTraceSummaryTest(unittest.TestCase):
         self.assertEqual(result["by_type"]["conditional"], 1)
         self.assertEqual(result["low_confidence_pht_by_type"]["call"], 1)
         self.assertEqual(result["unique_low_confidence_pht_indices"], 2)
+        self.assertEqual(result["trace_markers"], 0)
+
+    def test_accepts_v2_markers(self) -> None:
+        records = [
+            {
+                "kind": "header",
+                "format": "miku-branch-trace-v2",
+                "schema_version": 2,
+                "pht_index_width": 12,
+                "metadata_valid_bit": 14,
+            },
+            {
+                "kind": "marker",
+                "seq": 0,
+                "cycle": 11,
+                "lane": 0,
+                "pc": "0x1c000010",
+                "instruction": "0x00006000",
+            },
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / "trace.jsonl"
+            trace.write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8",
+            )
+            result = summarize(trace)
+
+        self.assertEqual(result["trace_markers"], 1)
+        self.assertEqual(result["marker_cycles"], [11])
 
     def test_rejects_missing_header(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -21,6 +21,8 @@ final class BranchTraceObserver(config: OooCoreConfig) extends BlackBox {
     val clock = in Bool ()
     val cycle = in Bits (64 bits)
     val valid = in Bits (commitWidth bits)
+    val commitValid = in Bits (commitWidth bits)
+    val commitRetired = in Bits (commitWidth bits)
     val robPointer = in Bits (commitWidth * robPointerWidth bits)
     val pc = in Bits (commitWidth * xlen bits)
     val instruction = in Bits (commitWidth * 32 bits)
@@ -60,11 +62,28 @@ final class BranchTraceObserver(config: OooCoreConfig) extends BlackBox {
     }
     .mkString("\n")
 
+  private val markerCalls = (0 until commitWidth)
+    .map { lane =>
+      s"""
+    if (commitValid[$lane] && commitRetired[$lane] &&
+        ((${slice("instruction", lane, 32)} & 32'hffffffe0) == 32'h00006000)) begin
+      miku_branch_trace_marker(
+        cycle,
+        8'd$lane,
+        ${slice("pc", lane, xlen)},
+        ${slice("instruction", lane, 32)}
+      );
+    end"""
+    }
+    .mkString("\n")
+
   setInlineVerilog(s"""
 module $moduleName (
     input wire clock,
     input wire [63:0] cycle,
     input wire [${commitWidth - 1}:0] valid,
+    input wire [${commitWidth - 1}:0] commitValid,
+    input wire [${commitWidth - 1}:0] commitRetired,
     input wire [${commitWidth * robPointerWidth - 1}:0] robPointer,
     input wire [${commitWidth * xlen - 1}:0] pc,
     input wire [${commitWidth * 32 - 1}:0] instruction,
@@ -77,6 +96,12 @@ module $moduleName (
   import "DPI-C" function void miku_branch_trace_init(
     input byte unsigned pht_index_width,
     input byte unsigned metadata_valid_bit
+  );
+  import "DPI-C" function void miku_branch_trace_marker(
+    input longint unsigned cycle,
+    input byte unsigned lane,
+    input int unsigned pc,
+    input int unsigned instruction
   );
   import "DPI-C" function void miku_branch_trace_event(
     input longint unsigned cycle,
@@ -97,6 +122,7 @@ module $moduleName (
   end
 
   always @(posedge clock) begin
+$markerCalls
 $eventCalls
   end
 `endif

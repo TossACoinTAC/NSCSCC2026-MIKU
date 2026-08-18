@@ -17,11 +17,11 @@ make sim-matrix SIM_PROFILE=instrumented SIM_SUITE=perf20 \
   SIM_LANES=1 TIME_LIMIT=600000000
 ```
 
-The matrix run writes `branch-trace-v1.jsonl` beside the workload logs. Summarize
+The matrix run writes `branch-trace-v2.jsonl` beside the workload logs. Summarize
 it with:
 
 ```sh
-make branch-trace-summary BRANCH_TRACE=/absolute/path/to/branch-trace-v1.jsonl
+make branch-trace-summary BRANCH_TRACE=/absolute/path/to/branch-trace-v2.jsonl
 ```
 
 The run manifest stores the trace hash. The model cache key also includes the
@@ -38,6 +38,14 @@ decodes the configured PHT index, two-bit state, and valid bit. A branch is
 weakly not-taken (`01` or `10`). Direct, indirect, return, and call records are
 retained for category comparison; their PHT field is diagnostic metadata rather
 than a claim that those classes use the conditional PHT for prediction.
+
+Schema v2 also emits a `marker` record for every retired `rdtimel.w` counter
+read. A marker is a commit-cycle boundary, not a branch event. The
+`m01-counters.json` monitor uses the same instruction encoding and reports the
+ROI mode (`outermost-counter-read-pair`); consumers must select the marker
+interval that matches its cycle and retired-branch counts before attributing
+predictor behavior to a benchmark. Older v1 traces remain readable but have no
+ROI markers.
 
 This first observer does not record predicted direction, BTB hit/miss, target
 prediction, or RAS hit/miss. Those require a separate fetch-side observation and

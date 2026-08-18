@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize the simulator-owned miku-branch-trace-v1 sidecar."""
+"""Summarize the simulator-owned branch-trace sidecar."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ def _nonnegative_int(record: dict[str, Any], key: str) -> int:
 def summarize(path: Path) -> dict[str, Any]:
     header: dict[str, Any] | None = None
     events: list[dict[str, Any]] = []
+    markers: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as stream:
         for line_number, line in enumerate(stream, start=1):
             if not line.strip():
@@ -45,11 +46,16 @@ def summarize(path: Path) -> dict[str, Any]:
                 header = record
             elif kind == "branch":
                 events.append(record)
+            elif kind == "marker":
+                markers.append(record)
             else:
                 raise ValueError(f"unknown trace record kind at line {line_number}: {kind!r}")
 
-    if header is None or header.get("format") != "miku-branch-trace-v1":
-        raise ValueError("missing miku-branch-trace-v1 header")
+    if header is None or header.get("format") not in {
+        "miku-branch-trace-v1",
+        "miku-branch-trace-v2",
+    }:
+        raise ValueError("missing miku-branch-trace-v1/v2 header")
     pht_index_width = _nonnegative_int(header, "pht_index_width")
     metadata_valid_bit = _nonnegative_int(header, "metadata_valid_bit")
     if pht_index_width == 0 or pht_index_width > 16 or metadata_valid_bit >= 32:
@@ -63,6 +69,14 @@ def summarize(path: Path) -> dict[str, Any]:
     indices: set[int] = set()
     low_indices: set[int] = set()
     low_events = 0
+
+    for marker in markers:
+        _nonnegative_int(marker, "cycle")
+        _nonnegative_int(marker, "lane")
+        for key in ("pc", "instruction"):
+            value = marker.get(key)
+            if not isinstance(value, str):
+                raise ValueError(f"{key} must be a hexadecimal string")
 
     for event in events:
         branch_type = BRANCH_TYPES.get(_nonnegative_int(event, "predictor_type"), "unknown")
@@ -97,7 +111,7 @@ def summarize(path: Path) -> dict[str, Any]:
 
     total = len(events)
     return {
-        "format": "miku-branch-trace-summary-v1",
+        "format": "miku-branch-trace-summary-v2",
         "source": str(path),
         "trace_header": header,
         "branch_events": total,
@@ -110,6 +124,8 @@ def summarize(path: Path) -> dict[str, Any]:
         "unique_pcs": len(pcs),
         "unique_pht_indices": len(indices),
         "unique_low_confidence_pht_indices": len(low_indices),
+        "trace_markers": len(markers),
+        "marker_cycles": [marker["cycle"] for marker in markers],
     }
 
 

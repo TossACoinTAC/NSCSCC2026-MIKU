@@ -58,6 +58,8 @@ final class OooCoreSystem(
       branchTrace.io.cycle := branchTraceCycle.asBits
       for (lane <- 0 until config.commitWidth) {
         val record = core.io.commit(lane)
+        branchTrace.io.commitValid(lane) := core.io.commitValid(lane)
+        branchTrace.io.commitRetired(lane) := record.retired
         branchTrace.io.valid(lane) :=
           core.io.commitValid(lane) && record.retired && record.isBranch
         branchTrace.io.robPointer(
