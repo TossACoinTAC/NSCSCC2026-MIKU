@@ -21,6 +21,7 @@ VIVADO ?= $(VIVADO_HOME)/bin/vivado
 SURFER ?= /mnt/d/Surfer/surfer.exe
 JOBS ?= 8
 CPU_TEST ?=
+CUSTOM_PROFILE := disabled
 RUN_SOFTWARE ?= func/func_lab19
 TIME_LIMIT ?= 1300000
 AXI_SEED ?= 5570815
@@ -90,6 +91,8 @@ help:
 		'  make perf-observation-summary 汇总 instrumented perf20 ROI' \
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
 		'  make cpu-contract-test 运行全部轻量 Python 合同测试' \
+		'  make custom-test       运行自定义指令 Scala 与编码工具测试' \
+		'  make custom-check CUSTOM_PROFILE=<name> 生成赛题 profile 并运行 RTL 检查' \
 		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
 		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
 		'  make sim                单个软件仿真（RUN_SOFTWARE 可覆盖）' \
@@ -192,14 +195,19 @@ custom-test:
 	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "testOnly miku.compat.CoreTopCompatGeneratorSpec miku.core.CustomInstructionProfileSpec miku.execute.CustomExecutionSpec"'
 	@$(CONTAINER_RUN) python3 -I "$(CPU_DIR)/tests/python/test_custom_instruction_word.py"
 
-custom-check: custom-test cpu-locked-gates
+custom-check: custom-test
+	@profile="$$(printf '%s' "$(CUSTOM_PROFILE)" | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//' | tr '[:upper:]' '[:lower:]')"; \
+		case "$$profile" in ''|disabled|off) \
+			printf 'CUSTOM_PROFILE 必须是已注册的赛题 profile\n' >&2; exit 2 ;; \
+		esac
+	@$(MAKE) cpu-locked-gates CUSTOM_PROFILE="$(CUSTOM_PROFILE)"
 
 cpu-generate:
 	@test "$(CPU_BRANCH_TRACE)" = 0 || test "$(CPU_BRANCH_TRACE)" = 1
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@rm -rf "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
-	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw$(if $(filter 1,$(CPU_BRANCH_TRACE)), --branch-trace,)"'
+	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw$(if $(filter 1,$(CPU_BRANCH_TRACE)), --branch-trace,) --custom-profile $(CUSTOM_PROFILE)"'
 	@test -f "$(BUILD_ROOT)/rtl/raw/core_top.v"
 	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" package \
 		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
@@ -208,6 +216,7 @@ cpu-generate:
 	@install -m 0644 "$(BUILD_ROOT)/rtl/package/rtl/mycpu_top.v" "$(BUILD_ROOT)/rtl/mycpu_top.v"
 	@$(CONTAINER_RUN) python3 scripts/cpu/write_generation_manifest.py --root "$(ROOT_DIR)" \
 		--raw "$(BUILD_ROOT)/rtl/raw/core_top.v" --published "$(BUILD_ROOT)/rtl/mycpu_top.v" \
+		--custom-profile "$(CUSTOM_PROFILE)" \
 		--out "$(BUILD_ROOT)/rtl/generation-manifest.json"
 
 cpu-locked-gates: cpu-generate

@@ -44,8 +44,7 @@ class CustomInstructionProfileSpec extends AnyFunSuite {
     assert(profile.indexedSpecifications.map(_._2) == Vector(0x3000, 0x3001))
   }
 
-  test("framework enabled profile may be empty while arbitrary profiles cannot") {
-    assert(CustomInstructionProfile("enabled", Vector.empty).specifications.isEmpty)
+  test("enabled profiles cannot be empty and disabled cannot contain instructions") {
     intercept[IllegalArgumentException] {
       CustomInstructionProfile("empty-enabled", Vector.empty)
     }

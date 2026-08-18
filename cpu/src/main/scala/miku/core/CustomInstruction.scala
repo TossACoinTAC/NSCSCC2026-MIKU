@@ -842,8 +842,8 @@ final case class CustomInstructionProfile(
     s"custom instruction profile name '$name' must use lowercase letters, digits, '.', '_', or '-'"
   )
   require(
-    specifications.nonEmpty || name.equalsIgnoreCase("disabled") || name.equalsIgnoreCase("enabled"),
-    s"custom instruction profile $name is empty; use disabled or enabled explicitly"
+    specifications.nonEmpty || name.equalsIgnoreCase("disabled"),
+    s"custom instruction profile $name is empty; use the disabled profile instead"
   )
   require(
     specifications.isEmpty || (name != "disabled" && name != "off"),

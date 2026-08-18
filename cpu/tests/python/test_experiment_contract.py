@@ -192,7 +192,7 @@ Slack (MET) : 0.100ns
         mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
         result = calculate_impact(
             [
-                "cpu/src/main/scala/miku/custom/ContestCustomInstructionProfiles.scala",
+                "cpu/src/main/scala/miku/core/ContestCustomInstructionProfiles.scala",
                 "scripts/cpu/custom_instruction_word.py",
                 "docs/custom-instructions.md",
             ],
@@ -206,13 +206,6 @@ Slack (MET) : 0.100ns
             "tests/python/test_custom_instruction_word.py",
             result["python_contracts"],
         )
-
-        moved_test = calculate_impact(
-            ["cpu/src/test/scala/miku/custom/CustomExecutionSpec.scala"],
-            mapping,
-        )
-        self.assertIn("miku.execute.CustomExecutionSpec", moved_test["scala_suites"])
-        self.assertNotIn("miku.custom.CustomExecutionSpec", moved_test["scala_suites"])
 
     def test_backend_completion_and_changed_suite_are_mapped(self) -> None:
         mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))

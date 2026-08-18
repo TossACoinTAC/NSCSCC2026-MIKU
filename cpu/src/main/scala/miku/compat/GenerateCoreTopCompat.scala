@@ -1,17 +1,24 @@
 package miku.compat
 
 import java.nio.file.{Files, Path, Paths}
+import miku.core.CustomInstructionProfile
 import spinal.core._
 
 private[compat] object CoreTopCompatGeneratorSupport {
   private[compat] final case class GeneratorArguments(
       outputDirectory: String,
-      branchTrace: Boolean
+      branchTrace: Boolean,
+      customInstructionProfile: CustomInstructionProfile
   )
+
+  private val usage =
+    "usage: GenerateCoreTopCompat [--out-dir] <output-directory> " +
+      "[--branch-trace] [--custom-profile PROFILE_NAME]"
 
   private[compat] def parseArguments(args: Array[String]): GeneratorArguments = {
     var outputDirectory: Option[String] = None
     var branchTrace = false
+    var customProfile = Option.empty[CustomInstructionProfile]
     var index = 0
     while (index < args.length) {
       args(index) match {
@@ -28,6 +35,11 @@ private[compat] object CoreTopCompatGeneratorSupport {
           require(!branchTrace, "branch trace was specified more than once")
           branchTrace = true
           index += 1
+        case "--custom-profile" =>
+          require(index + 1 < args.length, s"--custom-profile requires a profile name; $usage")
+          require(customProfile.isEmpty, s"custom profile was specified more than once; $usage")
+          customProfile = Some(CustomInstructionProfile.fromName(args(index + 1)))
+          index += 2
         case value if outputDirectory.isEmpty && value.nonEmpty =>
           outputDirectory = Some(value)
           index += 1
@@ -42,7 +54,11 @@ private[compat] object CoreTopCompatGeneratorSupport {
           "output directory is required as an argument or OUT_DIR"
         )
       )
-    GeneratorArguments(directory, branchTrace)
+    GeneratorArguments(
+      directory,
+      branchTrace,
+      customProfile.getOrElse(CustomInstructionProfile.Disabled)
+    )
   }
 
   private def findRepositoryRoot(path: Path): Option[Path] =
@@ -94,7 +110,10 @@ private[compat] object CoreTopCompatGeneratorSupport {
     spinalConfig.withTimescale = false
     spinalConfig.generateVerilog {
       val dut = new CoreTopCompat(
-        CoreTopCompatConfig(branchTraceObserver = generatorArguments.branchTrace)
+        CoreTopCompatConfig(
+          branchTraceObserver = generatorArguments.branchTrace,
+          customInstructionProfile = generatorArguments.customInstructionProfile
+        )
       )
       dut.setDefinitionName("core_top")
       dut

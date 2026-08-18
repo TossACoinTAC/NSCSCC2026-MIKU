@@ -146,7 +146,7 @@ final case class OooCoreConfig(
     dataCache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 128, lineBytes = 64),
     level2Cache: CoreCacheGeometry = CoreCacheGeometry(ways = 2, sets = 512, lineBytes = 64),
     executionPorts: Vector[ExecutionPortConfig] = OooCoreConfig.DefaultExecutionPorts,
-    customInstructionProfile: CustomInstructionProfile = CustomInstructionBuildConfig.selectedProfile
+    customInstructionProfile: CustomInstructionProfile = CustomInstructionProfile.Disabled
 ) {
   private def isPowerOfTwo(value: Int): Boolean = value > 0 && (value & (value - 1)) == 0
 

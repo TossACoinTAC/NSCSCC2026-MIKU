@@ -6,7 +6,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts/cpu"))
 from contracts import ContractError, validate_generation_manifest
-from write_generation_manifest import normalize_custom_profile, read_custom_profile
+from write_generation_manifest import normalize_custom_profile
 
 
 class GenerationContractTest(unittest.TestCase):
@@ -27,9 +27,7 @@ class GenerationContractTest(unittest.TestCase):
     def test_custom_profile_is_normalized_and_required(self) -> None:
         self.assertEqual(normalize_custom_profile(" disabled "), "disabled")
         self.assertEqual(normalize_custom_profile("OFF"), "disabled")
-        self.assertEqual(normalize_custom_profile(" enabled "), "enabled")
-        with self.assertRaises(ValueError):
-            normalize_custom_profile(" Final-2026 ")
+        self.assertEqual(normalize_custom_profile(" Final-2026 "), "final-2026")
         with self.assertRaises(ContractError):
             validate_generation_manifest({
                 "schema_version": 1,
@@ -39,10 +37,6 @@ class GenerationContractTest(unittest.TestCase):
                 "custom_profile": "off",
                 "toolchain": {},
             })
-
-    def test_custom_profile_is_read_from_the_scala_build_config(self) -> None:
-        self.assertEqual(read_custom_profile(Path(__file__).resolve().parents[3]), "disabled")
-
 
 if __name__ == "__main__":
     unittest.main()

@@ -57,7 +57,7 @@
     },
     {
       "name": "custom-instructions",
-      "paths": ["cpu/src/main/scala/miku/custom/*.scala", "cpu/src/main/scala/miku/core/CustomInstruction*.scala", "cpu/src/main/scala/miku/core/ContestCustomInstructionProfiles.scala", "cpu/src/main/scala/miku/execute/CustomExecution.scala", "cpu/src/main/scala/miku/compat/CoreTopCompat.scala", "cpu/src/main/scala/miku/compat/GenerateCoreTopCompat.scala", "cpu/src/test/scala/miku/custom/*.scala", "cpu/tests/python/test_custom_instruction_word.py", "scripts/cpu/custom_instruction_word.py", "docs/custom-instructions.md"],
+      "paths": ["cpu/src/main/scala/miku/core/CustomInstruction*.scala", "cpu/src/main/scala/miku/core/ContestCustomInstructionProfiles.scala", "cpu/src/main/scala/miku/execute/CustomExecution.scala", "cpu/src/main/scala/miku/compat/CoreTopCompat.scala", "cpu/src/main/scala/miku/compat/GenerateCoreTopCompat.scala", "cpu/src/test/scala/miku/compat/CoreTopCompatGeneratorSpec.scala", "cpu/src/test/scala/miku/core/CustomInstructionProfileSpec.scala", "cpu/src/test/scala/miku/execute/CustomExecutionSpec.scala", "cpu/tests/python/test_custom_instruction_word.py", "scripts/cpu/custom_instruction_word.py", "docs/custom-instructions.md"],
       "scala_suites": ["miku.compat.CoreTopCompatGeneratorSpec", "miku.core.CustomInstructionProfileSpec", "miku.execute.CustomExecutionSpec"],
       "python_contracts": ["tests/python/test_custom_instruction_word.py"]
     },

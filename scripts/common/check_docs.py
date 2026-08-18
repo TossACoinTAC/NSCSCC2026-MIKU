@@ -53,7 +53,7 @@ def main() -> int:
             "custom-instruction guide must identify the contest profile catalog")
     require("make custom-test" in custom_instructions,
             "custom-instruction guide must document the focused test target")
-    require("make custom-check" in custom_instructions,
+    require("make custom-check CUSTOM_PROFILE=" in custom_instructions,
             "custom-instruction guide must document profile RTL checks")
 
     print(f"documentation contract: {len(ids)} unique candidate IDs")

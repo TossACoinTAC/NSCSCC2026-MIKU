@@ -5,7 +5,6 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import re
 import subprocess
 import sys
 
@@ -26,29 +25,7 @@ def probe(command: list[str]) -> str:
 
 def normalize_custom_profile(value: str) -> str:
     normalized = value.strip().lower()
-    if normalized in {"disable", "disabled", "off"}:
-        return "disabled"
-    if normalized == "enabled":
-        return normalized
-    raise ValueError(
-        f"CUSTOM_PROFILE must be disable or enabled, got {value!r}"
-    )
-
-
-def read_custom_profile(root: Path) -> str:
-    config = (
-        root
-        / "cpu/src/main/scala/miku/custom/CustomInstructionBuildConfig.scala"
-    )
-    text = config.read_text(encoding="utf-8")
-    match = re.search(
-        r'^\s*final\s+val\s+CUSTOM_PROFILE\s*:\s*String\s*=\s*"([^"]*)"\s*$',
-        text,
-        flags=re.MULTILINE,
-    )
-    if match is None:
-        raise ValueError(f"cannot read CUSTOM_PROFILE from {config}")
-    return normalize_custom_profile(match.group(1))
+    return "disabled" if normalized in {"", "off"} else normalized
 
 
 def main() -> int:
@@ -56,6 +33,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--raw", type=Path, required=True)
     parser.add_argument("--published", type=Path, required=True)
+    parser.add_argument("--custom-profile", required=True)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     root = args.root.resolve()
@@ -69,7 +47,7 @@ def main() -> int:
         "source_tree": "cpu/src/main + cpu/build.sbt + cpu/project",
         "source_tree_sha256": cpu_source_hash(cpu),
         "source_commit": source_commit,
-        "custom_profile": read_custom_profile(root),
+        "custom_profile": normalize_custom_profile(args.custom_profile),
         "raw_rtl": str(args.raw.resolve()),
         "raw_rtl_sha256": file_hash(args.raw),
         "published_rtl": str(args.published.resolve()),

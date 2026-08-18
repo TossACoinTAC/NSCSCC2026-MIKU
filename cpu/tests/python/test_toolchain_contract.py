@@ -25,13 +25,10 @@ class ToolchainContractTest(unittest.TestCase):
         self.assertIn("-e LC_ALL=C.UTF-8", wrapper)
 
     def test_custom_profile_default_ignores_shell_environment(self) -> None:
-        config = (
-            ROOT
-            / "cpu/src/main/scala/miku/custom/CustomInstructionBuildConfig.scala"
-        ).read_text(encoding="utf-8")
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertRegex(
-            config,
-            re.compile(r'^\s*final\s+val\s+CUSTOM_PROFILE\s*:\s*String\s*=\s*"disable"', re.MULTILINE),
+            makefile,
+            re.compile(r"^CUSTOM_PROFILE := disabled$", re.MULTILINE),
         )
 
 

@@ -12,10 +12,10 @@
 - 题目属于基础整数指令，分为计算、分支和访存三类；
 - 具体编码和语义在决赛阶段公布。
 
-因此，仓库使用编译期 profile。正常 CPU 构建保持源码中的 `CUSTOM_PROFILE = "disable"`；只有
-把它改为 `"enabled"` 时才会增加解码和执行逻辑。不要根据往届题目预先注册正式指令，也不要
-猜测今年的 opcode。该开关不从 Makefile 参数或 shell 环境读取。生成后的
-`build/rtl/generation-manifest.json` 会记录所选 profile，
+因此，仓库使用编译期 profile。正常 CPU 构建保持 `CUSTOM_PROFILE=disabled`；只有比赛题面的
+profile 会增加解码和执行逻辑。不要根据往届题目预先注册正式指令，也不要猜测今年的 opcode。
+Makefile 会忽略 shell 中遗留的同名环境变量，只接受命令行显式的
+`CUSTOM_PROFILE=<name>`。生成后的 `build/rtl/generation-manifest.json` 会记录所选 profile，
 并在 experiment freeze 和 Vivado 归档时继续校验该身份。
 
 ## 2. 比赛当天只修改的文件
@@ -23,11 +23,10 @@
 通常只修改：
 
 ```text
-cpu/src/main/scala/miku/custom/ContestCustomInstructionProfiles.scala
-cpu/src/main/scala/miku/custom/CustomInstructionBuildConfig.scala
+cpu/src/main/scala/miku/core/ContestCustomInstructionProfiles.scala
 ```
 
-第一个文件注册正式指令，第二个文件选择 `disable` 或 `enabled`。其余框架已经负责解码、寄存器重命名、
+该文件注册一个或多个 `CustomInstructionProfile`。其余框架已经负责解码、寄存器重命名、
 发射、执行、写回、退休、分支恢复、访存和异常处理。以下示例中的编码只是说明 API，必须
 替换为正式题面给出的值。
 
@@ -79,16 +78,16 @@ object ContestCustomInstructionProfiles {
     memorySize = CustomMemorySize.Word
   )
 
-  val Enabled = CustomInstructionProfile(
-    "enabled",
+  private val Final2026 = CustomInstructionProfile(
+    "final-2026",
     Vector(IntegerExample, BranchExample, LoadExample, StoreExample)
   )
 
-  val Available: Vector[CustomInstructionProfile] = Vector(Enabled)
+  val Available: Vector[CustomInstructionProfile] = Vector(Final2026)
 
   val VerificationCases: Vector[CustomInstructionVerificationCase] = Vector(
     CustomInstructionVerificationCase.compute(
-      Enabled,
+      Final2026,
       IntegerExample,
       instruction = BigInt("d0001483", 16),
       source1 = BigInt("12345678", 16),
@@ -96,7 +95,7 @@ object ContestCustomInstructionProfiles {
       expectedResult = BigInt("9b9f9b97", 16)
     ),
     CustomInstructionVerificationCase.branch(
-      Enabled,
+      Final2026,
       BranchExample,
       instruction = BigInt("d4000c85", 16),
       source1 = 7,
@@ -105,7 +104,7 @@ object ContestCustomInstructionProfiles {
       expectedTarget = BigInt("1c00000c", 16)
     ),
     CustomInstructionVerificationCase.memory(
-      Enabled,
+      Final2026,
       LoadExample,
       instruction = BigInt("d83ff083", 16),
       source1 = BigInt("00001004", 16),
@@ -114,7 +113,7 @@ object ContestCustomInstructionProfiles {
       expectedByteMask = BigInt("f", 16)
     ),
     CustomInstructionVerificationCase.memory(
-      Enabled,
+      Final2026,
       StoreExample,
       instruction = BigInt("dc001107", 16),
       source1 = BigInt("00002000", 16),
@@ -127,8 +126,8 @@ object ContestCustomInstructionProfiles {
 }
 ```
 
-`name` 用于错误信息和生成清单。名称必须匹配 `[a-z0-9][a-z0-9._-]*`；源码开关当前只选择
-保留 profile `disabled` 或 `enabled`。profile 中的每条指令会自动获得内部
+`name` 同时用于错误信息和 `CUSTOM_PROFILE` 选择。名称必须匹配
+`[a-z0-9][a-z0-9._-]*`，且正式 profile 不得使用保留名称 `disabled` 或 `off`。profile 中的每条指令会自动获得内部
 operation 编号，不要手工分配 `decoded.operation`。每条已注册指令必须至少有一个
 `VerificationCases` 用例；通用测试会实际生成该 profile，并验证计算结果、分支结果或访存请求。
 题面给出的全部示例都应转换为用例，边界条件再另行增加。
@@ -227,14 +226,14 @@ python3 scripts/cpu/custom_instruction_word.py \
 
 ```text
 make custom-test
-make custom-check
-make cpu-check
+make custom-check CUSTOM_PROFILE=final-2026
+make cpu-check CUSTOM_PROFILE=disabled
 git diff --check
 ```
 
 `custom-test` 验证 profile 约束、解码、重命名与旧目的寄存器依赖、执行结果、分支 predicate、
 branch link、动态位域边界、Load/Store、predecode、ROB predictor metadata、实际 profile 的
-`VerificationCases` 和 `.word` 工具。`custom-check` 还会按源码开关生成完整
+`VerificationCases` 和 `.word` 工具。`custom-check` 还会为指定 profile 生成完整
 `CoreTopCompat` RTL，并运行端口、Verilator lint 和 Yosys 结构检查。
 生成的 `build/rtl/generation-manifest.json` 必须记录规范化后的 `custom_profile`，用于确认 RTL
 实际包含所选 profile。
