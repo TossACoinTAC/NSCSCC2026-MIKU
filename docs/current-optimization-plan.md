@@ -16,7 +16,7 @@ R22 合入时暴露并由 `38c4a07` 关闭的 `BankedFetchPredictor` RAS one-hot
 组合环（C10）。Observer v2 及其 trace 只保留在 `dev/freq` 作为开发期证据，不进入
 clean RTL 或稳定里程碑。
 
-### R24 当前执行状态
+### R24 完成结论
 
 当前 baseline 为 R21 聚合 RTL：CPU commit `5be1257ab976`、source tree
 `a468f0903539...`、published RTL `ce2a34d58e76...`、Chiplab `c398d274812f`。
@@ -27,23 +27,58 @@ warning、bitstream 成功。归档位于
 
 R21 top200 为 cache/L2 106、ROB/CSR 31、LSQ 30、predictor 25、IQ 5、other CPU 3。
 ROB 约占 CPU LUT 三成；R24 因此从整面 ROB completion/commit/recovery 控制网络入手。
-R24 当前保留六项：ROB02 (`c611d12`)、ROB04 (`f34689c`)、SYS01 (`04def5c`)、
+R24 最终试验组合包含 ROB02 (`c611d12`)、ROB04 (`f34689c`)、SYS01 (`04def5c`)、
 ROB06 (`ed133b3`)、ROB07 (`400e4f8`) 和 ROB08 (`129cd28`)。ROB01/ROB03/ROB05
-虽通过过局部测试，但其隔离 Yosys 结构分别表现为无效/膨胀/依赖性回归，已回退，不进入
-组合。FCTX01 在 clean RTL 中已有 active/pending context 槽位，本轮不重复改写。SYS01
-初版暴露的 redirect translation owner 丢失问题已由 C11 (`0f4afb7`) 关闭。当前 source tree
-为 `b0293473559c...`，published RTL SHA-256 为 `805245468508...`；完整 `cpu-check` 为
-39 suites/236 tests、Python 85/85，RTL 接口、strict-zero lint 和基础 Yosys gate 均通过。
+在结构预筛选阶段已回退；FCTX01 在 clean RTL 中已有 active/pending context 槽位，本轮
+没有重复改写。SYS01 初版暴露 redirect translation owner 丢失问题，试验组合由 C11
+修复 (`0f4afb7`) 恢复逐请求 completion/cancel 合同。该实现的 source tree 为
+`b0293473559c...`，published RTL SHA-256 为 `805245468508...`；完整 `cpu-check` 为
+39 suites/236 tests、Python 85/85，RTL 接口、strict-zero lint 和基础 Yosys gate均通过。
 
-当前组合的 clean ideal perf20 为 20/20、`3,910,163` cycles，与 R21 baseline 的 CSV
-逐字节相同；因此官方等权 `IPC_factor=1.000000000x`、总周期因子也为 `1.000000000x`，
-控制流与规则吞吐各簇均无跷跷板。func58 random-AXI seeds `240/255/141` 均为 58/58；
-Linux seed `5570815` 跑满固定 50 ms 窗口，结束原因 `linux-time-window-complete`。这些软件
-证据不继承 R21 的物理实现；下一门禁仍是当前 RTL 的 matching direct full。全局评价执行
-[optimization-evaluation-contract.md](optimization-evaluation-contract.md)，不能再用某一
-目标族退出 top50 代替 WNS/TNS/top200/资源/IPC 的整体判断。稳定版 perf20 的程序模式、
-分项周期和对照簇见 [perf20-benchmark-patterns.md](perf20-benchmark-patterns.md)；它只用于
-选择观测簇和解释回归，不替代完整 20 项 A/B 或实现证据。
+试验组合的 clean ideal perf20 为 20/20、`3,910,163` cycles，与 R21 CSV 逐字节相同；
+官方等权 `IPC_factor=1.000000000x`、总周期因子 `1.000000000x`。func58 random-AXI seeds
+`240/255/141` 均为 58/58；Linux seed `5570815` 跑满固定 50 ms 窗口，结束原因为
+`linux-time-window-complete`。稳定版 perf20 的程序模式、分项周期和对照簇见
+[perf20-benchmark-patterns.md](perf20-benchmark-patterns.md)；控制流、规则吞吐和混合
+kernel 各簇均未发生周期变化，因此本轮没有 IPC 收益可抵消频率回退。
+
+R24 matching 100 MHz direct full 已完成并归档到
+`Post_Impl_Bundles/cpu_a6be90c8c984_chiplab_c398d274812f_perf_100mhz_20260819-000846/`。
+实现 fully routed、route/DRC error 为 0 且 bitstream 成功，setup/hold WNS 为
+`-0.300/+0.052 ns`，setup TNS 为 `-14.545 ns`，164 个 setup endpoint 违例。资源相对
+R21 从 95,268 LUT/60,108 FF 降至 93,745 LUT/59,923 FF，即 `-1,523 LUT/-185 FF`，
+BRAM 66.5、DSP 8 不变；面积下降没有转化为物理收敛。
+
+同一 routed DCP 的 top200 对比进一步否决该组合。R21 的 worst/median/P90-pressure slack
+为 `+0.113/+0.2755/+0.155 ns`，slack `<0.1 ns` 为 0 条、`<0.2 ns` 为 35 条；R24
+变为 `-0.300/-0.045/-0.157 ns`，200 条全部低于 `0.1 ns`。路径分布变为 cache/L2 113、
+LSQ 40、ROB/CSR 31、IQ 11、predictor 5：L1I tag read 到 frontend `nextFetchPc`/prediction
+CE、LDQ complete 到 scheduled-load CE、ROB candidate pointer 到 LSQ allocator/redirect
+以及 BTB 到 ATU context 同时承压，并非单一路径族迁移。`Fproxy` 从 `101.143` 降至
+`97.087 MHz`，`SystemScoreProxy=0.959902913x`。
+
+依照 [optimization-evaluation-contract.md](optimization-evaluation-contract.md)，R24 六项
+均没有获得 matching Vivado 正向证明，已在 `dev/freq` 以逐项 revert 保留历史后整体撤回；
+SYS01 和只为它修复 C11 的改动也一起撤回。当前 CPU 源码/测试树与 R24 开始前的 R21
+baseline 字节级一致，R21 继续作为开发基线，无需把同一 RTL 再实现一次。R24 的失败说明
+不能以某一目标族退出 top50、Yosys 结构缩小或总 LUT 下降代替 WNS/TNS/top200 的整体判断。
+
+组合实现不能给六个候选提供严格的单变量因果关系，但源码、层级资源、phys_opt/route 日志和
+top200 可以把嫌疑缩小到不同证据等级：
+
+| 候选 | 细粒度物理证据 | 当前判断 |
+| --- | --- | --- |
+| ROB02 + ROB06 | ROB02 把 entry-local hot state 改为由 `candidatePointer` 动态选择的 sidecar；ROB06 又用同一 pointer 重建 commit/recovery identity。最终共享 pointer net 的实现后 fanout 为 80，R21 entry-local complete 源为 14，并直接出现在 LSQ allocator、redirect、CSR 和 RenameMap 多个负路径族。 | **高置信组合恶化源**。两项不能按原实现一起恢复；ROB02 需改为 bank-local 选择，ROB06 若重试必须保留局部 identity 副本或在消费者边界重新寄存。 |
+| SYS01 | R21 的原 rank1 `privilegedRedirectPending -> ATU instructionSearchPending` 路径消失，说明局部目标实际达成；新增 `instructionTranslationFlush` 在多轮 phys_opt 中无法复制、重放置或 rewiring，且 ATU 层级增加 35 LUT。该网没有成为最终 top200 端点。 | **有局部收益、存在中等全局风险**。不能认定它导致 WNS，但当前 baseline 已闭合且该项无 IPC 收益，只有重新设计为更局部的 owner-cancel token 后才值得隔离实现。 |
+| ROB04 | 只把 architectural destination qualification 从 Backend 前移到 ROB，Yosys 约为中性，Vivado RenameMap 仅减少 5 LUT；最终 pointer 到 architectural-map CE 仍为负路径。 | **证据不足，可能中性或轻微负面**。不参与下一批，除非重新出现 commit-destination 路径并做单项实现。 |
+| ROB07 | 固定 branch completion lane 删除五路 branch metadata/bypass 选择；完整功能和周期门禁通过，最终 top200 没有 branch-completion payload 路径。 | **结构上可能有净收益**，只是没有独立 Vivado 证明。后续可与 ROB08 组成最小低风险子集复测，不能继承 R24 WNS。 |
+| ROB08 | 删除无消费者的 staged epoch 状态，未改变 qualification 或周期。 | **低风险、收益很小且可能被综合自动裁剪**。可作为源码清理重新引入，但不应单独消耗一次实现。 |
+
+层级资源也支持“收益和代价同时存在”：R24 的 CPU 相对 R21 为 `-1,475 LUT/-175 FF`，
+其中 ROB 本身为 `-1,548 LUT/-183 FF`，说明面积收益确实来自 ROB；与此同时 ATU `+35 LUT`、
+LSQ allocator `+71 LUT`、LSQ `+22 LUT`。因此 R24 不是所有候选都无效，而是 ROB 内部压缩
+通过共享选择源和跨模块 identity 广播换来了更差的全局控制网络。下一次复测优先使用
+`ROB07 + ROB08` 低风险子集；ROB02/ROB06 先修改拓扑，不做原提交的单项或组合重跑。
 
 Yosys 与 Vivado 的历史配对审计结论如下：
 
@@ -64,15 +99,14 @@ Xilinx primitive 映射、placement/route、congestion、WNS/TNS 和路径迁移
 
 R24 的隔离结果进一步限定了这条规则：ROB01 的结构变化没有形成预期的比较器削减，
 ROB02 的 hot-state sidecar 有明确的 generic cell/mux 减少，ROB03 重新复制分支/异常
-状态并增加逻辑深度，ROB04 基本中性，ROB05 依赖 ROB03 且保留其不利结构。它们只用于
-筛选和拒绝，不能据此宣称 WNS 会改善；最终判断仍以六项组合的完整周期、top200、拥挤、
-WNS/TNS 和资源报告为准。此后不根据小幅 Yosys delta 排候选或追加结构迭代；只有设计意图
-没有形成或出现明确大规模膨胀时才让该门禁阻断开发。
+状态并增加逻辑深度，ROB04 基本中性，ROB05 依赖 ROB03 且保留其不利结构。最终六项组合
+即使明显缩小 ROB 和 Vivado LUT，也使全局 top200 与 WNS/TNS 退化，因此 Yosys 结果只用于
+确认设计意图和拒绝明显膨胀，不能据此宣称 WNS 会改善、排序候选或追加结构迭代。
 
-最终组合只运行了一次结构快照 `build/reports/yosys/R24-final/summary.json`。相对相同配置的
+试验组合只运行了一次结构快照 `build/reports/yosys/R24-final/summary.json`。相对相同配置的
 R21 快照，ROB generic cells 从 `14,262` 降至 `11,330`、word bits 从 `92,062` 降至
-`82,437`；整核 top LTP 仍为 53 且路径指纹发生迁移。这只确认 ROB 状态拆分和清理实际形成，
-同时再次说明结构缩小不能推出 WNS 改善。
+`82,437`；整核 top LTP 仍为 53 且路径指纹发生迁移。matching Vivado 随后给出
+`-0.300 ns` WNS 和 200 条近临界路径，构成“结构缩小不能推出 WNS 改善”的直接反例。
 
 ### 2026-08-18 历史状态修正
 

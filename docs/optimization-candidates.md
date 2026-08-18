@@ -1,6 +1,6 @@
 # MIKU 优化候选账本与实验状态
 
-最后同步：2026-08-18（R24 全局结构审计）。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)，全局性能/频率口径见 [optimization-evaluation-contract.md](optimization-evaluation-contract.md)。稳定版 perf20 的分项模式、周期和对照簇见 [perf20-benchmark-patterns.md](perf20-benchmark-patterns.md)，只作为观测和回归解释依据。
+最后同步：2026-08-19（R24 matching direct full 完成并回退）。本文是候选编号、状态和效果的唯一总账；微架构原理与十二阶段教学见 [architecture.md](architecture.md)，验证与流水调度合同见 [verification-workflow.md](verification-workflow.md)，全局性能/频率口径见 [optimization-evaluation-contract.md](optimization-evaluation-contract.md)。稳定版 perf20 的分项模式、周期和对照簇见 [perf20-benchmark-patterns.md](perf20-benchmark-patterns.md)，只作为观测和回归解释依据。
 
 ## 1. 状态与编号合同
 
@@ -95,12 +95,12 @@ FQ01 已被单变量证明。
 | C08 | PS=21 大页物理地址拼接 | r1p04 的 `PS=21` entry 由 `VA[21]` 选择两个 2 MiB half，PA 应为 `{selected_PPN[19:9], VA[20:0]}`；当前实现是 `{PPN[19:10], VA[21:0]}`，把所选 PPN bit 9 替换成 VA 奇偶位。连续且 4 MiB 对齐的常见映射会掩盖问题，合法的非连续/反向 half 映射会错误 | 修正会改变当前大页行为，必须先确认 Linux/bootloader 实际 PS 与 PPN 编码，并同时核对 match、odd select、TLBRD/WR/FILL 和 INVTLB page compare；不能用常见连续 huge page 启动成功否定问题 | PS=21 的 PPN0.bit9=1/PPN1.bit9=0、不同高 PPN、奇偶 VA、ASID/global、权限/dirty/MAT、TLBRD round-trip、NEMU differential | 已关闭 | PS=21 使用所选 PPN[19:9] 与 VA[20:0] 拼接，非连续/反向 half 已覆盖。 |
 | C09 | Main TLB 复位有效位 | 32 个主 TLB entry 的 payload 未初始化且 `enabled` 未复位；Verilator 寄存器布局变化可暴露伪匹配，导致 PS=21 walker 合并错误 entry 并产生错误 PPN/invalid 异常 | 只需复位 qualification bit，不复位宽 payload；必须保证 TLBRD/搜索在软件写入前均观察到 disabled | 复位后逐项读取 32 个 entry 的 enabled 位，并回归 PS=21、TLB mutation、micro-TLB negative/positive 路径 | 已关闭 | `2bc5433` 仅复位 `enabled` 位并加入 32-entry 管理接口合同；ATU suite 10/10，之后完整门禁 39 suites/225 tests 通过。该修复不计性能收益，但阻断 AT01 的错误状态已消除。 |
 | C10 | BankedFetchPredictor RAS one-hot 生成环 | BPT03 初次合入时，`architecturalRasCountOneHot`/`architecturalRasPushAccepted` 组合在 Spinal `PhaseCheckCombinationalLoops` 阶段失败，clean RTL 无法生成 | 以局部 `pushAccepted`/`popAccepted` 值打断环，保持 call/return、满空饱和和 flush 语义；缓存 instrumented trace 仍只属于 observer baseline | `make cpu-generate CPU_BRANCH_TRACE=0`、predictor/L1I/core integration、完整 `cpu-check`、RAS call/return/flush regression | **已关闭** | `38c4a07` 修复组合环；predictor 3/3、L1I 11/11、完整 39 suites/236 tests 通过。该修复不使 observer trace 成为当前 clean RTL 的 matching 证据。 |
-| C11 | redirect 丢失 instruction translation owner | SYS01 初版在 redirect 时直接清除 ATU 已接受的 instruction owner；Frontend 同拍进入 `translationDropPending` 并等待 completion/cancel，旧请求永久无响应，func58 三个 seed 均在约 1000 条提交后停止前进 | 恢复 C07 的逐请求合同：flush 把尚未完成的 owner 转成带原 VA 的 cancelled response；flush 同拍已消费的 response 不重复 cancel，无 owner 时不产生幽灵 response | ATU stalled owner/同拍 response/重新接受、Frontend cancel retry、完整门禁、func58 三 seed、perf20/Linux | 已关闭 | `0f4afb7`；ATU 11/11、Frontend 26/26、完整 39 suites/236 tests、Python 85/85。func58 seeds `240/255/141` 均为 58/58，perf20 20/20 且逐项等于 R21，Linux 50 ms 窗口通过。修复前 `13.4k` cycles 左右的失败身份不构成性能证据。 |
+| C11 | redirect 丢失 instruction translation owner | SYS01 初版在 redirect 时直接清除 ATU 已接受的 instruction owner；Frontend 同拍进入 `translationDropPending` 并等待 completion/cancel，旧请求永久无响应，func58 三个 seed 均在约 1000 条提交后停止前进 | 恢复 C07 的逐请求合同：flush 把尚未完成的 owner 转成带原 VA 的 cancelled response；flush 同拍已消费的 response 不重复 cancel，无 owner 时不产生幽灵 response | ATU stalled owner/同拍 response/重新接受、Frontend cancel retry、完整门禁、func58 三 seed、perf20/Linux | 历史实验，随 SYS01 回退 | `0f4afb7` 在试验组合中关闭问题：ATU 11/11、Frontend 26/26、完整 39 suites/236 tests、Python 85/85，func58 三 seed、perf20 和 Linux 均通过。R24 物理门禁失败后 SYS01 与该适配一起撤回，当前 R21 baseline 不存在这条新路径；失败身份不构成性能证据。 |
 | T01 | 分区/局部化 early wakeup 与 IQ ready 网络 | 旧参考最差路径有 82.7% routing 和高扇出，说明减少跨 ROB/IQ 广播仍有机会提高 Fmax | 多一级寄存可能增加 dependent-use latency；复制比较逻辑会增加 LUT | 固定 c398 完整 SoC WNS、相关路径扇出/route delay、依赖链周期数、perf20 分项 | 已由 WT/IT 具体项取代，关闭抽象总项 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | W01 | 消除同 lane 的 registered/direct wakeup 冲突 | 每个执行 lane 的 ROB 注册唤醒优先于同拍 direct wake；连续单周期 GPR writer 会使后一条的早唤醒退化为下一拍注册唤醒。抑制已经成功 direct broadcast 的下一拍 registered echo，可把 wake lane 留给更年轻的 direct tag | 抑制协议若丢 tag 会永久死锁，且可能恶化完整 SoC 路由；首次 DIV、SC 和其他没有 direct broadcast 的变长完成必须保留 | 每 lane 冲突周期、resident/late consumer、依赖链 issue 间隔、IQ 比较器/LUT、完整 SoC WNS、perf20 分项 | 已进入稳定 R21 基线；物理效果不可单项归因 | `45512a6` 的完整门禁为 39 suites/222 tests、Python 合同 56 项；perf20 `5,056,868 -> 5,014,520`（`-0.837435%`），几何平均 `1.010598877x`，18 项改善、2 项不变、无退化。相对早期 `-0.102375%` 结果，本轮真实组合显示该候选已达到性能保留门槛；matching 物理影响待最终组合 direct full 交叉验证。 |
 | W02 | 注册 LSQ completion 的 load-use 提前唤醒 | 当前 load 在 LSQ completion 已注册后仍经 ROB 再注册一拍才唤醒 IQ；从已注册且充分校验的 load completion 提前广播 tag，下一拍可借 PRF write-through 取数，理论上缩短常见 load-use 一拍 | 必须证明 exception、flush/epoch、ROB 槽位重用、store forwarding、uncached response 下绝不假唤醒；LSQ 到全 IQ 的广播可能重建已切断的关键路径 | load completion 到 consumer issue 间隔、真实 load-use 数、ROB 校验失败/flush 重叠、L1 hit/miss 分类、WNS 与 perf20 | 已采用 | 历史独立 A/B 约 -1.219%；关闭后的 route 反而更差，当前保留。 |
 | I01 | 改善 IQ 注册 enqueue credit 的满边界 turnaround | 当前 8-entry IQ 用上一拍 `count < 7` 生成 ready；接近满载时即使同拍 issue，也可能多保留空位或延迟重新接收，降低 dispatch 吞吐 | lookahead dequeue 会重新形成 select-to-dispatch ready 组合路径；需要 skid/credit 协议保持时序隔离和绝不溢出 | 各 IQ 在 count 6/7/8 时的 blocked enqueue、同拍 dequeue 事件、dispatch window occupancy、LUT/WNS、perf20 | 当前冻结 | Observer 显示 IQ 低占用，当前 perf20 可回收上界不足以进入 RTL。 |
-| T02 | 拆分 ROB 的 hot state 与 cold payload，研究 bank/存储映射 | ROB 占 CPU LUT 37.3%，同时位于关键控制路径；把 done/exception/pdst 等热字段与宽 payload 分离可能降低 LUT 和布线 | 3-wide allocate/commit、5-wide completion 使普通 BRAM 端口不足；错误 banking 会制造冲突或更深 mux | 层次 LUT、BRAM、ROB 路径、冲突率、commit stall、完整 SoC WNS | 已由 ROB01-ROB04 具体化 | R21 ROB 约占 CPU LUT 三成，进入 R24 结构审计。 |
+| T02 | 拆分 ROB 的 hot state 与 cold payload，研究 bank/存储映射 | ROB 占 CPU LUT 37.3%，同时位于关键控制路径；把 done/exception/pdst 等热字段与宽 payload 分离可能降低 LUT 和布线 | 3-wide allocate/commit、5-wide completion 使普通 BRAM 端口不足；错误 banking 会制造冲突或更深 mux | 层次 LUT、BRAM、ROB 路径、冲突率、commit stall、完整 SoC WNS | 已由 ROB01-ROB04 具体化并完成一轮实验 | R24 组合减少 1,523 LUT，但 WNS/TNS 退化至 `-0.300/-14.545 ns` 且 top200 全面转负；该实现已回退，后续不得原样重试。 |
 | T03 | 乘法流水边界与 FPGA DSP 映射重审 | standalone 最差路径为 2 DSP + 8 CARRY4；合理切级可能释放第二条 Fmax 上限 | MUL latency 增加会降低依赖链 IPC；writeback/early wakeup 时刻必须同步 | MUL latency/throughput、依赖链测试、DSP/LUT、standalone 与 SoC WNS、perf20 | 待实验 | 尚无已采纳实现或可信配对收益；按决策指标继续测量。 |
 | E01 | 除法 early-out / radix 优化 | 当前迭代除法器无论除数为 0、`+/-1`、2 的幂还是普通数都执行 32 次 quotient step；特殊数 early-out、按有效位跳步或 radix-4 可降低长延迟 producer 对 P1 IQ 和 ROB head 的占用 | 除法可能很少，复杂前导零/符号逻辑会增加 LUT 和启动路径；全流水除法器面积更高且未必提高有效 IPC | DIV 动态数、操作数分类、DIV issue-to-completion、P1 等待和 ROB-head-blocked 周期、LUT/WNS、perf20 分项 | 已实验，默认关闭 | 历史完整矩阵较 baseline +16 cycles，没有形成收益；实现与测试保留为可选实验。 |
 | E02 | ROB 头部 staged-completion 到 commit bypass | completion 输入先注册，下一拍写 PRF/匹配 ROB，再下一拍 `entry.complete` 才参与 commit；若 head 正在等这一个结果，安全旁路可理论上少一个空提交周期，并缩短 commit-time branch recovery | 会把 5 路 completion 身份、异常、branch 和 side-effect 数据拉入三路顺序提交/stop 链；错误旁路会破坏精确异常，且可能恶化 ROB/commit 时序 | head-only completion bubble、按 FU 分类、branch resolve-to-redirect、serializing 等待、ROB/commit WNS、完整回归 | 已采用 | 当前 paired perf20 5,511,672 -> 5,306,558，-205,114 cycles（-3.721448%）；时序友好重构前后逐项精确相等。 |
@@ -260,28 +260,31 @@ R24 的排序依据是全局资源、top200 近临界质量和跨模块控制面
 | ID | 方向 | 价值机制 | 主要代价或风险 | 决策所需指标 | 状态 | 已测效果 |
 | --- | --- | --- | --- | --- | --- | --- |
 | ROB01 | completion pointer 统一预译码 | 把 5 路 completion pointer 在 staged 边界统一译成 bank/local one-hot，再与 entry valid、generation 和 epoch 局部资格化，替代 32 entries x 5 lanes 的重复 binary compare | 必须保持多 lane 同 entry 优先级、store bypass、flush、epoch、pointer wrap 和 exactly-once completion | ROB 定向测试、Yosys equality/mux、ROB 层级资源、top200 ROB/CSR 分布、perf20 | 历史实验，已回退 | `6a2df46` 定向通过，但隔离 Yosys 未显示预期比较器削减；不据此推断 WNS。 |
-| ROB02 | ROB hot-state bitmap/sidecar | 将 valid、complete、payloadReady 等每拍参与提交与 completion 的状态从宽 entry bundle 拆成 bank-local bitmap，冷 metadata 保持原存储与周期 | 同拍 allocate/complete/commit/flush 的赋值优先级必须完全一致；错误拆分可能造成 entry 身份错配 | wrap/reuse、三宽 commit、五路 completion、Yosys DFF/mux、perf20 逐项、top200 | R24 保留组合 | 已提交 `c611d12`；ReorderBufferSpec 17/17；隔离 Yosys generic cells/mux 明显下降但 word bits 略增，不能单独归因 WNS。 |
+| ROB02 | ROB hot-state bitmap/sidecar | 将 valid、complete、payloadReady 等每拍参与提交与 completion 的状态从宽 entry bundle 拆成 bank-local bitmap，冷 metadata 保持原存储与周期 | 同拍 allocate/complete/commit/flush 的赋值优先级必须完全一致；共享 bitmap 的动态选择可能把 commit pointer 变成整面控制网的共同源 | wrap/reuse、三宽 commit、五路 completion、Yosys DFF/mux、perf20 逐项、top200 | 历史实验，当前实现冻结 | `c611d12`；ReorderBufferSpec 17/17，结构和 ROB LUT 明显缩小。但它与 ROB06 组合后，共享 `candidatePointer` 的实现后 fanout 为 80，进入 LSQ/redirect/CSR/RenameMap 多族负路径；R21 entry-local complete 源 fanout 为 14。当前实现由 `ace9afc` 撤回，只有改成 bank-local 选择后才可重试。 |
 | ROB03 | branch/exception completion sidecar | branch resolution 与 completion exception 是稀疏写入且 branch 来自固定执行端口；独立 sidecar 可避免这些宽字段扩散到每个普通 completion 的热写网 | exception、branch、普通 completion 同拍碰撞及 head bypass 必须选择同一身份；不能增加恢复周期 | branch/exception collision、head bypass、资源与跨 ROB route、perf20 | 历史实验，已回退 | `b96c773` 定向通过，但隔离结构复制了稀疏状态并增加 ROB 逻辑深度；不进入组合。 |
-| ROB04 | commit/recovery token 局部化 | 在现有 commit 预取边界形成窄 stop/recovery token，统一 branch、exception 与 privileged redirect 的资格，避免 candidate pointer 和宽 entry 状态跨层广播 | 不能延迟架构 commit/recovery；predictor capacity、serializing 和精确异常的程序顺序必须保持 | 三宽 prefix/stop、redirect/flush、ROB/CSR top200、perf20 与 func58 | R24 保留组合 | 已提交 `f34689c`；ROB 定向回归通过，commit qualification 复用窄 token；组合周期和物理效果待匹配证据。 |
+| ROB04 | commit destination qualification 局部化 | 在 ROB 形成窄 architectural destination token，避免 Backend 为 RenameMap 与 FreeList 重复解码 retired/writesGpr/rd | qualification 前移可能把 ROB candidate-select 直接接到远端消费者；不能改变三宽提交、异常和 x0 语义 | 三宽 prefix/stop、redirect/flush、ROB/CSR top200、perf20 与 func58 | 历史实验，已回退 | `f34689c`；门禁通过，Yosys 基本中性，Vivado RenameMap 仅 `-5 LUT`；组合中 pointer 到 architectural CE 仍为负路径。证据不足以判定单项有害或有益，已由 `a6976fd` 撤回，暂不优先重试。 |
 | ROB05 | retirement classification sidecar | 将 isLoad/isStore/isBranch、预测类型和 LSQ owner 从宽 ROB state 分离为窄分类/索引 sidecar，减少提交分类控制穿越 payload bank | 必须保持 entry wrap/reuse、三宽提交、LSQ index、branch metadata 和 observer ABI | ROB 定向、LSQ commit、branch trace、Yosys层次资源、perf20 | 历史实验，已回退 | `30b3353` 与 ROB03 依赖；isolated replay 保留较差的结构深度，不进入组合。 |
 | FCTX01 | frontend prediction context 槽位化 | translation 接受时写入稳定 context slot，L1I turnover 只携带窄 owner token，减少 L1I tag 到多份 PC/prediction context CE 的控制面 | redirect/cancel、同拍 turnover、taken-prefix 和 prediction metadata 必须保持逐请求配对 | Frontend/ATU/L1I 定向、context owner invariant、top200 frontend/cache、perf20 | R24 审计 | 当前 clean RTL 已有 active/pending response context 槽位和窄 owner valid；本轮不重复改写，保留为路径审计和局部优化候选。 |
-| SYS01 | privileged redirect 窄 handoff | 在 system/ATU 边界传递已注册的 redirect token，CSR/ATU 各自在本地恢复状态，切断 privileged redirect 对 translation pending 的跨模块广播 | TLB mutation、ERTN、异常、cancel 和 redirect 优先级不能改变；不得增加 corrected fetch 启动拍数 | OooCoreSystem/ATU/CSR 定向、Linux smoke、rank1 路径、perf20 | R24 保留组合；C11 已关闭 | `04def5c` 初版暴露 redirect 丢 completion 的 C11；`0f4afb7` 恢复 completion/cancel 合同。完整门禁、func58 三 seed、Linux 50 ms 和周期精确相等的 perf20 均通过；物理效果待 matching route。 |
-| ROB06 | ROB pointer generation sidecar | 每个 ROB entry 只存 wrap generation bit，低 index 从物理 slot 重建，completion 仍做 epoch/generation qualification | pointer wrap、flush 后 stale completion、slot reuse 和 full-width recovery pointer 必须保持一致 | ROB wrap/reuse、stale epoch、Yosys storage、perf20、top200 ROB/CSR | R24 保留组合 | 已提交 `ed133b3`；ROB 17/17；去除每 entry 5 个低 index 状态位，物理收益待 matching route。 |
-| ROB07 | 固定 branch completion lane | branch 只在唯一 Branch-capable execution port 完成，branch head bypass、entry update 和 observer 只保留一个 lane-local sidecar | branch/ALU 同拍 completion、异常优先级、head bypass、recovery 和 predictor metadata 必须保持 | ROB 17/17、branch metadata/recovery、perf20、func58、top200 ROB/CSR | R24 保留组合 | 已提交 `400e4f8`；ROB 17/17；删除五路 branch payload/bypass mux，周期与物理效果待匹配 route。 |
-| ROB08 | 删除未消费 completion epoch payload | 移除只写不读的 `stagedRecoveryEpoch` 暂存寄存器，保留实际使用的 current-epoch qualification | 必须确认无观测/提交消费者，不能影响 stale completion qualification | source consumer audit、ROB 17/17、RTL/Yosys、perf20 | R24 保留组合 | 已提交 `129cd28`；ROB 17/17；仅减少无消费者状态，预期时序收益很小。 |
+| SYS01 | privileged redirect 窄 handoff | 在 system/ATU 边界传递已注册的 redirect token，CSR/ATU 各自在本地恢复状态，切断 privileged redirect 对 translation pending 的跨模块广播 | TLB mutation、ERTN、异常、cancel 和 redirect 优先级不能改变；新增全局 flush token 也可能形成新的跨区控制网 | OooCoreSystem/ATU/CSR 定向、Linux smoke、rank1 路径、perf20 | 历史实验，需重新局部化后再评估 | `04def5c` 初版暴露 C11，`0f4afb7` 恢复 completion/cancel 合同；完整软件门禁通过。R21 原 rank1 redirect->ATU 路径确实退出，但新 `instructionTranslationFlush` 在多轮 phys_opt 中无法复制/重布，ATU `+35 LUT`；它未进入最终 top200，故只判为中等风险而非 WNS 主因。`fecc767`/`069df9e` 已撤回。 |
+| ROB06 | ROB pointer generation sidecar | 每个 ROB entry 只存 wrap generation bit，低 index 从物理 slot 重建，completion 仍做 epoch/generation qualification | pointer wrap、flush 后 stale completion、slot reuse 和 full-width recovery pointer 必须保持一致；commit/recovery 若直接复用共享 pointer，会扩大其跨模块 fanout | ROB wrap/reuse、stale epoch、Yosys storage、perf20、top200 ROB/CSR | 历史实验，当前实现冻结 | `ed133b3`；ROB 17/17，去除每 entry 5 个低 index 状态位，但 commit/recovery identity 改为直接使用 `candidatePointer`。它与 ROB02 组合后该源 fanout 达 80，并命中多族负路径；已由 `6484d0e` 撤回。重试必须在消费者边界保留局部 identity。 |
+| ROB07 | 固定 branch completion lane | branch 只在唯一 Branch-capable execution port 完成，branch head bypass、entry update 和 observer 只保留一个 lane-local sidecar | branch/ALU 同拍 completion、异常优先级、head bypass、recovery 和 predictor metadata 必须保持 | ROB 17/17、branch metadata/recovery、perf20、func58、top200 ROB/CSR | 历史实验，可做低风险子集复测 | `400e4f8`；ROB 17/17，删除五路 branch payload/bypass mux，最终 top200 未出现 branch-completion payload 路径。没有独立 Vivado 正向证明，已由 `674da4b` 撤回；它是失败组合中最值得与 ROB08 做最小子集复测的项目。 |
+| ROB08 | 删除未消费 completion epoch payload | 移除只写不读的 `stagedRecoveryEpoch` 暂存寄存器，保留实际使用的 current-epoch qualification | 必须确认无观测/提交消费者，不能影响 stale completion qualification | source consumer audit、ROB 17/17、RTL/Yosys、perf20 | 历史实验，可随低风险子集复测 | `129cd28`；仅删除无消费者状态，功能风险低，但 Vivado 也可能原本已自动裁剪，收益上限很小。已由 `1a944f4` 撤回，不单独消耗一次实现。 |
 | REC01 | 提前 branch recovery | 在 ROB04 稳定后利用局部 recovery token评估同拍或提前 redirect，兼顾降低固定恢复周期和控制路径 | speculative RAT/FreeList/LSQ/IQ 原子恢复复杂，不能先于精确机会统计 | recovery opportunity、平均 resolve-to-recovery、完整恢复回归、IPC/WNS | ROB04 后评估 | R21 observer 的 recovery ratio 约 `0.795%`，平均 resolve-to-recovery 约 `3.445` cycles；只是上界。 |
 | A01/D02 | dispatch prefix/capability 精确归因 | 区分最老 prefix 因资源不足损失与贪心端口匹配冲突，避免用聚合 acceptance 猜测 | observer 必须周期透明且不访问普通 Verilator 层级 | 两类 lost slots、可回收周期上界、端口组合分布 | 先测量 | 只有上界超过总周期 1% 才进入 RTL。 |
 | H05-R24 | H05 真实 AXI/DDR 读写并发 | 只在真实 DDR latency 下估计 cached read 被 line write 阻塞与 write buffer 的机会 | ideal memory 会严重低估/扭曲机会；顺序与错误语义风险高 | AR/AW/W/R/B trace、barrier drain、read-blocked-by-write | 先测量 | ideal perf20 不作为准入证据。 |
 | BP02-R24 | BP02 弱状态 BTFNT 对照 | 复用已有静态方向，不扩 PHT，作为低资源、低时序压力 IPC 对照 | 当前只有退休侧 replay 上界，仍需 fetch-side 证据和 clean A/B | fetch-side prediction event、逐项 perf20、predictor top200 | 独立低压对照 | Observer v2 已稳定；尚无 production RTL 收益。 |
 
 `T01` 由 WT/IT 系列具体候选取代并关闭抽象总项；`T02/T04` 被 ROB01-ROB04 具体化。
-R24 的 ROB01/03/05 已作为结构预筛选失败项回退；ROB02/04、SYS01、ROB06-ROB08 才是
-当前组合。R24 的 perf20 分项选择遵循 [perf20-benchmark-patterns.md](perf20-benchmark-patterns.md)：
-C0、stringsearch、quick_sort 观察控制流/恢复方向，规则数组、stream_copy、coremark
-作为无退化对照；不能把任何单项分项周期直接归因给 ROB 候选。当前组合完整 perf20
-20 项与 R21 逐项精确相等，总周期均为 `3,910,163`；func58 seeds `240/255/141` 为
-58/58，Linux seed `5570815` 的 50 ms 窗口通过。最终 Yosys 快照只证明 ROB generic cells
-`14,262 -> 11,330`、word bits `92,062 -> 82,437`，整核 LTP 仍为 53；不得据此声明 WNS。
+R24 的 ROB01/03/05 在结构预筛选阶段回退；ROB02/04、SYS01、ROB06-ROB08 组成一次
+matching 实验后也已整体回退。分项解释遵循
+[perf20-benchmark-patterns.md](perf20-benchmark-patterns.md)：C0、stringsearch、quick_sort
+观察控制流/恢复方向，规则数组、stream_copy、coremark 作为无退化对照；完整 20 项与 R21
+逐项精确相等，总周期均为 `3,910,163`，func58 三 seed 和 Linux 50 ms 窗口通过。Yosys
+显示 ROB generic cells `14,262 -> 11,330`、word bits `92,062 -> 82,437`，Vivado LUT/FF
+也减少 `1,523/185`，但 matching direct full setup/hold 为 `-0.300/+0.052 ns`、setup TNS
+`-14.545 ns`，164 个 setup endpoint 违例。top200 从 R21 的全部正 slack 变为 200 条全部
+低于 `0.1 ns`，cache/L2、LSQ、ROB/CSR、IQ 和 predictor 同时承压；`SystemScoreProxy`
+仅 `0.959902913x`。该结果直接否决“结构更小即可保留”的判断，当前 RTL 已恢复为 R21。
 R02 与 L03 扩容方向冻结：历史上 ROB/LDQ 扩容有 IPC 收益，但增加了明显物理压力。I01、
 E03、K02、L01 的当前 perf20 上界分别是 IQ 低占用、DIV `0.127%`、FreeList `0.158%`
 和 partial-store blocking `0.129%`，不进入本轮 RTL。V01/V02/H07 等待 paged Linux 的
@@ -341,11 +344,11 @@ other CPU 2、LSQ 0。FQ02-R 完整移除了目标 LSQ 路径族，但没有形�
 本阶段的具体轮次、门槛与基线以 [current-optimization-plan.md](current-optimization-plan.md)
 为准；本文件继续作为候选状态与实测效果的唯一总账。
 
-当前 clean RTL 的长期正确性 gate 仍自动阻断受影响候选；C10 只属于已回退实验。R24 以
-R21 matching direct full 为 baseline，先累积 ROB01-ROB04、FCTX01、SYS01 的定向/静态/
-软件证据，至少五项通过后才启动一次组合 Vivado。所有候选按
-[optimization-evaluation-contract.md](optimization-evaluation-contract.md) 比较全局 top200、
-WNS/TNS、近临界端点、资源和 perf20，不再以“目标路径退出 top50”单独晋级。
+当前 clean RTL 的长期正确性 gate 仍自动阻断受影响候选；C10、C11 都只属于已回退实验。
+R24 已完成定向、静态、软件和 matching direct full 门禁，并因全局物理质量退化整体拒绝。
+后续候选继续按 [optimization-evaluation-contract.md](optimization-evaluation-contract.md)
+比较全局 top200、WNS/TNS、近临界端点、资源和 perf20，不以目标路径退出 top50、Yosys
+缩小或总 LUT 下降单独晋级。
 
 ## 5. 详细说明的维护边界
 

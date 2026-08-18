@@ -73,4 +73,11 @@ make optimization-evaluate \
 ```
 
 输入缺失、身份不匹配、格式错误和 DUT 失败必须分别归类，不得通过放宽阈值或删除断言
-掩盖问题。
+掩盖问题。direct-full 补充报告同时生成 `cpu_setup_top50.rpt` 和
+`cpu_setup_top200.rpt`；归档脚本将两者作为可选分析证据保存，不改变 routed DCP、DRC、
+timing summary 和 bitstream 的正式门禁身份。
+
+多候选组合实现可以依据源码拓扑、层级资源、实现日志、网扇出和 top200 给单项标注
+“高嫌疑/中等风险/证据不足/可复测”，也可以据此拒绝整个组合；它不能证明任一单项具有
+正向 WNS 收益。单项要写成“已证明物理收益”，仍须有同约束、同 strategy 的隔离 direct-full
+实现，或只有该项发生差异且身份完整的最小子集 A/B。
