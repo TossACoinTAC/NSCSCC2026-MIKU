@@ -9,7 +9,10 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     extends Component {
   private val loadStorePort =
     config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
+  private val dividePort =
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Divide))
   require(loadStorePort >= 0)
+  require(dividePort >= 0)
   // Multiply results use their own writeback lane.  For an execution-port-indexed lane whose
   // remaining operations are ALU/Branch, every physical-register producer already emits a direct
   // wake at issue acceptance; its staged ROB wake is therefore only an IQ echo.
@@ -598,5 +601,10 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     perfObservationV1Word3(58 + queue) :=
       router.io.portValid(queue) && router.io.portReady(queue)
   }
+  val observationDivideOperandBlocked = issueOperandValid(dividePort) &&
+    issueOperandUop(dividePort).decoded.fuType === ExecutionUnitType.divide &&
+    !io.issueReady(dividePort)
+  perfObservationV1Word3(62) := observationDivideOperandBlocked
+  perfObservationV1Word3(63) := io.renameValid.orR && !freeList.io.allocateCapacityReady
   PerfObservationV1.expose(perfObservationV1Word3, 3)
 }

@@ -445,5 +445,10 @@ final class SharedCacheHierarchy(
   perfObservationV1Word6(17) := io.memoryWriteValid
   perfObservationV1Word6(18) := io.memoryWriteValid && io.memoryWriteReady
   perfObservationV1Word6(19) := io.memoryWriteResponseValid
+  // Simulation-only static capacities. Existing cache event/occupancy bits
+  // remain unchanged, and the fields are outside the hardware-facing ABI.
+  perfObservationV1Word6(36 downto 32) := U(config.loadQueueEntries, 5 bits).asBits
+  perfObservationV1Word6(40 downto 37) := U(config.storeQueueEntries, 4 bits).asBits
+  perfObservationV1Word6(44 downto 41) := U(config.issueQueueEntriesPerPort, 4 bits).asBits
   PerfObservationV1.expose(perfObservationV1Word6, 6)
 }

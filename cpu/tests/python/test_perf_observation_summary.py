@@ -138,6 +138,82 @@ class PerfObservationSummaryTest(unittest.TestCase):
             )
             self.assertEqual(len(result["workloads"]), 20)
 
+    def test_carries_identity_bound_v8_capacity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            matrix = write_observation_matrix(root)
+            for counters_path in root.rglob("m01-counters.json"):
+                counters = json.loads(counters_path.read_text(encoding="utf-8"))
+                counters["schema_version"] = "miku-perf-observation-v8"
+                counters["capacity"] = {
+                    "load_queue_entries": 16,
+                    "store_queue_entries": 8,
+                    "issue_queue_entries_per_port": 8,
+                }
+                counters_path.write_text(json.dumps(counters), encoding="utf-8")
+                manifest_path = counters_path.parent / "run-manifest.txt"
+                manifest = manifest_path.read_text(encoding="utf-8")
+                counter_hash = hashlib.sha256(counters_path.read_bytes()).hexdigest()
+                manifest_path.write_text(
+                    manifest.replace(
+                        next(line for line in manifest.splitlines() if line.startswith("m01_counters_sha256=")),
+                        f"m01_counters_sha256={counter_hash}",
+                    ),
+                    encoding="utf-8",
+                )
+            result = summarize_matrix(matrix)
+            self.assertEqual(result["source_schema"], "miku-perf-observation-v8")
+            self.assertEqual(
+                result["capacity"],
+                {
+                    "load_queue_entries": 16,
+                    "store_queue_entries": 8,
+                    "issue_queue_entries_per_port": 8,
+                },
+            )
+
+    def test_summarizes_v9_backend_pressure_and_existing_dispatch_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            matrix = write_observation_matrix(root)
+            for counters_path in root.rglob("m01-counters.json"):
+                counters = json.loads(counters_path.read_text(encoding="utf-8"))
+                counters["schema_version"] = "miku-perf-observation-v9"
+                counters["capacity"] = {
+                    "load_queue_entries": 16,
+                    "store_queue_entries": 8,
+                    "issue_queue_entries_per_port": 8,
+                }
+                counters["backend_pressure"] = {
+                    "divide_operand_blocked_cycles": 1,
+                    "free_list_capacity_blocked_cycles": 0,
+                }
+                counters_path.write_text(json.dumps(counters), encoding="utf-8")
+                manifest_path = counters_path.parent / "run-manifest.txt"
+                lines = manifest_path.read_text(encoding="utf-8").splitlines()
+                counter_hash = hashlib.sha256(counters_path.read_bytes()).hexdigest()
+                manifest_path.write_text(
+                    "\n".join(
+                        f"m01_counters_sha256={counter_hash}"
+                        if line.startswith("m01_counters_sha256=")
+                        else line
+                        for line in lines
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+            result = summarize_matrix(matrix)
+            raw = result["summary"]["raw"]
+            derived = result["summary"]["derived"]
+            self.assertEqual(result["source_schema"], "miku-perf-observation-v9")
+            self.assertEqual(raw["divide_operand_blocked_cycles"], 20)
+            self.assertEqual(raw["free_list_capacity_blocked_cycles"], 0)
+            self.assertEqual(raw["dispatch_valid_sum"], 10000)
+            self.assertEqual(raw["dispatch_fire_histogram"], [9980, 10000, 0, 0, 0])
+            self.assertAlmostEqual(
+                derived["divide_operand_blocked_cycle_ratio"], 20 / 19980
+            )
+
     def test_summarizes_existing_v6_matrix_without_v7_events(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             matrix = write_observation_matrix(Path(directory))
