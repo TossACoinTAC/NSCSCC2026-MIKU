@@ -95,6 +95,10 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
     val predictorUpdateCapacity = in UInt (log2Up(config.commitWidth + 1) bits)
 
     val commitValid = out Bits (config.commitWidth bits)
+    // Narrow, ROB-local qualification shared by architectural-map and free-list retirement.
+    // It is deliberately separate from CommitRecord so the public commit/debug contract stays
+    // unchanged while downstream users do not repeat the rd/writesGpr decode cone.
+    val commitDestinationValid = out Bits (config.commitWidth bits)
     val commit = out Vec (CommitRecord(config), config.commitWidth)
     val recoveryValid = out Bool ()
     val recovery = out(RecoveryRequest(config))
@@ -413,6 +417,9 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
         predictorHasCapacity
     }
     io.commitValid(lane) := canCommit(lane)
+    io.commitDestinationValid(lane) := canCommit(lane) &&
+      !candidates(lane).exception.valid && candidates(lane).payload.writesGpr &&
+      candidates(lane).payload.rd =/= 0
     io.commit(lane).pc := (if (config.enableRobPcState) {
       candidates(lane).state.pc
     } else {
