@@ -70,7 +70,7 @@ CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 .PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
-  cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
+  cpu-test cpu-test-all cpu-contract-test custom-test custom-check cpu-generate cpu-check cpu-locked-gates \
   sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim branch-trace-summary wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
@@ -178,7 +178,7 @@ test-impact:
 
 cpu-test:
 	@test -n "$(strip $(CPU_TEST))" || { printf 'CPU_TEST 必须是完整 suite 名称\n' >&2; exit 2; }
-	@test -f "$(CPU_DIR)/src/test/scala/$(subst .,/,$(CPU_TEST)).scala" || { printf '找不到 Scala suite: %s\n' "$(CPU_TEST)" >&2; exit 2; }
+	@test -n "$$(find "$(CPU_DIR)/src/test/scala" -type f -name '$(notdir $(subst .,/,$(CPU_TEST))).scala' -print -quit)" || { printf '找不到 Scala suite: %s\n' "$(CPU_TEST)" >&2; exit 2; }
 	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "testOnly $(CPU_TEST)"'
 
 cpu-test-all:
@@ -187,6 +187,12 @@ cpu-test-all:
 cpu-contract-test:
 	@$(CONTAINER_RUN) python3 -I -m unittest discover \
 		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
+
+custom-test:
+	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "testOnly miku.compat.CoreTopCompatGeneratorSpec miku.core.CustomInstructionProfileSpec miku.execute.CustomExecutionSpec"'
+	@$(CONTAINER_RUN) python3 -I "$(CPU_DIR)/tests/python/test_custom_instruction_word.py"
+
+custom-check: custom-test cpu-locked-gates
 
 cpu-generate:
 	@test "$(CPU_BRANCH_TRACE)" = 0 || test "$(CPU_BRANCH_TRACE)" = 1

@@ -80,6 +80,22 @@ private object CustomInstructionTestCatalog {
     source2 = CustomRegister.Rj,
     destination = CustomRegister.Rd
   )
+  val Rriwinz: CustomInstructionSpec = CustomInstructionSpec.compute(
+    name = "rriwinz-test-only",
+    matchValue = BigInt("e0000000", 16),
+    matchMask = BigInt("fc000000", 16),
+    evaluator = CustomComputeEvaluator.from { (oldRd, rj, instruction) =>
+      val rjBase = instruction(14 downto 10).asUInt
+      val offset = instruction(19 downto 15).asUInt
+      val rdBase = instruction(24 downto 20).asUInt
+      val rotateAmount = CustomBitFieldHelpers.popCountWithin(rj, rjBase, offset)
+      CustomBitFieldHelpers.rotateRightWithin(oldRd, rdBase, offset, rotateAmount)
+    },
+    source1 = CustomRegister.Rd,
+    source2 = CustomRegister.Rj,
+    destination = CustomRegister.Rd,
+    immediate = CustomImmediate.RawI16
+  )
   val BitFieldPopCount: CustomInstructionSpec = CustomInstructionSpec.compute(
     name = "bit-field-pop-count",
     matchValue = BigInt("b4000000", 16),
@@ -206,8 +222,8 @@ private object CustomInstructionTestCatalog {
     )
   )
 
-  val ReadModifyWriteProfile: CustomInstructionProfile =
-    CustomInstructionProfile("test-read-modify-write", Vector(ReadModifyWrite))
+  val RriwinzProfile: CustomInstructionProfile =
+    CustomInstructionProfile("test-rriwinz", Vector(Rriwinz))
 
   def encodeMix(rd: Int, rj: Int, rk: Int, payload: Int): BigInt =
     Mix.matchValue | (BigInt(payload) << 15) | (BigInt(rk) << 10) |
@@ -215,6 +231,17 @@ private object CustomInstructionTestCatalog {
 
   def encodeReadModifyWrite(rd: Int, rj: Int): BigInt =
     ReadModifyWrite.matchValue | (BigInt(rj) << 5) | rd
+
+  def encodeRriwinz(
+      rd: Int,
+      rj: Int,
+      rjBase: Int,
+      offset: Int,
+      rdBase: Int
+  ): BigInt = {
+    val i16 = BigInt(rjBase) | (BigInt(offset) << 5) | (BigInt(rdBase) << 10)
+    Rriwinz.matchValue | (i16 << 10) | (BigInt(rj) << 5) | rd
+  }
 }
 
 private final class CustomExecutionProbe(config: OooCoreConfig) extends Component {
@@ -971,6 +998,70 @@ class CustomExecutionSpec extends AnyFunSuite {
       }
   }
 
+  test("rriwinz test fixture handles clipped fields and read-modify-write operands") {
+    val rriConfig = OooCoreConfig.FourIssueThreeCommit.copy(
+      customInstructionProfile = CustomInstructionTestCatalog.RriwinzProfile
+    )
+
+    def expected(oldRd: BigInt, rj: BigInt, rjBase: Int, offset: Int, rdBase: Int): BigInt = {
+      def field(value: BigInt, base: Int): (BigInt, Int) = {
+        val width = math.min(offset, 32 - base)
+        val mask = if (width == 0) BigInt(0) else (BigInt(1) << width) - 1
+        ((value >> base) & mask, width)
+      }
+
+      val (selectedRj, _) = field(rj, rjBase)
+      val count = selectedRj.bitCount
+      val (selectedRd, rdWidth) = field(oldRd, rdBase)
+      val amount = if (rdWidth == 0) 0 else count % rdWidth
+      val rotated =
+        if (rdWidth == 0 || amount == 0) selectedRd
+        else ((selectedRd >> amount) | (selectedRd << (rdWidth - amount))) &
+          ((BigInt(1) << rdWidth) - 1)
+      val rdMask = if (rdWidth == 0) BigInt(0) else ((BigInt(1) << rdWidth) - 1) << rdBase
+      (oldRd & (~rdMask & wordMask)) | (rotated << rdBase)
+    }
+
+    SimConfig.withVerilator
+      .workspacePath("target/sim-workspace-custom-rriwinz")
+      .compile(new CustomExecutionProbe(rriConfig))
+      .doSim("custom-rriwinz", 0x4c8a) { dut =>
+        val random = new scala.util.Random(0x4c8a)
+        val cases = Seq(
+          (BigInt("00000009", 16), BigInt("00000007", 16), 0, 4, 0),
+          (BigInt("80000001", 16), BigInt("f0000000", 16), 31, 8, 31),
+          (BigInt("12345678", 16), BigInt("89abcdef", 16), 5, 0, 7),
+          (BigInt("ffffffff", 16), BigInt("80000001", 16), 28, 16, 28)
+        ) ++ Seq.fill(128) {
+          (
+            BigInt(random.nextInt()) & wordMask,
+            BigInt(random.nextInt()) & wordMask,
+            random.nextInt(32),
+            random.nextInt(32),
+            random.nextInt(32)
+          )
+        }
+
+        for ((oldRd, rj, rjBase, offset, rdBase) <- cases) {
+          dut.io.instruction #= CustomInstructionTestCatalog.encodeRriwinz(
+            rd = 7,
+            rj = 8,
+            rjBase = rjBase,
+            offset = offset,
+            rdBase = rdBase
+          )
+          dut.io.source1 #= oldRd
+          dut.io.source2 #= rj
+          sleep(1)
+          assert(!dut.io.exceptionValid.toBoolean)
+          assert(dut.io.decodedRs1.toBigInt == 7)
+          assert(dut.io.decodedRs2.toBigInt == 8)
+          assert(dut.io.decodedRd.toBigInt == 7)
+          assert(dut.io.result.toBigInt == expected(oldRd, rj, rjBase, offset, rdBase))
+        }
+      }
+  }
+
   test("custom compute is restricted to one selected ALU port") {
     SimConfig.withVerilator
       .workspacePath("target/sim-workspace-custom-dispatch")
@@ -1095,9 +1186,9 @@ class CustomExecutionSpec extends AnyFunSuite {
       }
   }
 
-  test("old rd survives rename issue writeback retirement and a dependent instruction") {
+  test("rriwinz old rd survives rename issue writeback retirement and RAW dependencies") {
     val retirementConfig = OooCoreConfig.FourIssueThreeCommit.copy(
-      customInstructionProfile = CustomInstructionTestCatalog.ReadModifyWriteProfile
+      customInstructionProfile = CustomInstructionTestCatalog.RriwinzProfile
     )
     SimConfig.withVerilator
       .workspacePath("target/sim-workspace-custom-retirement")
@@ -1149,12 +1240,18 @@ class CustomExecutionSpec extends AnyFunSuite {
         val firstPc = retirementConfig.resetVector
         submit(
           Seq(
-            (0, firstPc, addiW(rd = 7, rj = 0, immediate = 5)),
-            (1, firstPc + 4, addiW(rd = 8, rj = 0, immediate = 3)),
+            (0, firstPc, addiW(rd = 7, rj = 0, immediate = 9)),
+            (1, firstPc + 4, addiW(rd = 8, rj = 0, immediate = 7)),
             (
               2,
               firstPc + 8,
-              CustomInstructionTestCatalog.encodeReadModifyWrite(rd = 7, rj = 8)
+              CustomInstructionTestCatalog.encodeRriwinz(
+                rd = 7,
+                rj = 8,
+                rjBase = 0,
+                offset = 4,
+                rdBase = 0
+              )
             )
           )
         )
@@ -1174,17 +1271,17 @@ class CustomExecutionSpec extends AnyFunSuite {
           cycles += 1
         }
 
-        assert(results(firstPc) == 5)
-        assert(results(firstPc + 4) == 3)
-        assert(results(firstPc + 8) == 8)
-        assert(results(firstPc + 12) == 9)
+        assert(results(firstPc) == 9)
+        assert(results(firstPc + 4) == 7)
+        assert(results(firstPc + 8) == 3)
+        assert(results(firstPc + 12) == 4)
 
         dut.io.debugReadAddress #= 7
         sample()
-        assert(dut.io.debugReadData.toBigInt == 8)
+        assert(dut.io.debugReadData.toBigInt == 3)
         dut.io.debugReadAddress #= 9
         sample()
-        assert(dut.io.debugReadData.toBigInt == 9)
+        assert(dut.io.debugReadData.toBigInt == 4)
       }
   }
 

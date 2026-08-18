@@ -48,16 +48,6 @@ def calculate_impact(paths: list[str], mapping: dict[str, Any]) -> dict[str, Any
     rules = mapping.get("rules")
     if mapping.get("schema_version") != 1 or not isinstance(rules, list):
         raise ImpactError("impact map schema 错误")
-    scala_test_paths = sorted(
-        path
-        for path in paths
-        if path.startswith("cpu/src/test/scala/") and path.endswith("Spec.scala")
-    )
-    for path in scala_test_paths:
-        suite_path = path.removeprefix("cpu/src/test/scala/").removesuffix(".scala")
-        suites.add(suite_path.replace("/", "."))
-    if scala_test_paths:
-        matches.append({"rule": "scala-test-source", "paths": scala_test_paths})
     for rule in rules:
         patterns = rule.get("paths", [])
         matched = sorted(path for path in paths if any(fnmatch.fnmatch(path, pattern) for pattern in patterns))
@@ -66,6 +56,23 @@ def calculate_impact(paths: list[str], mapping: dict[str, Any]) -> dict[str, Any
         suites.update(rule.get("scala_suites", []))
         contracts.update(rule.get("python_contracts", []))
         matches.append({"rule": rule.get("name"), "paths": matched})
+    explicitly_mapped = {
+        path
+        for match in matches
+        for path in match["paths"]
+    }
+    scala_test_paths = sorted(
+        path
+        for path in paths
+        if path.startswith("cpu/src/test/scala/")
+        and path.endswith("Spec.scala")
+        and path not in explicitly_mapped
+    )
+    for path in scala_test_paths:
+        suite_path = path.removeprefix("cpu/src/test/scala/").removesuffix(".scala")
+        suites.add(suite_path.replace("/", "."))
+    if scala_test_paths:
+        matches.append({"rule": "scala-test-source", "paths": scala_test_paths})
     unmatched = sorted(path for path in paths if not any(path in match["paths"] for match in matches))
     return {
         "schema_version": 1,

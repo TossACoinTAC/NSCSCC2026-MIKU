@@ -3,10 +3,13 @@ package miku.compat
 import java.nio.file.{Files, Path, Paths}
 import spinal.core._
 
-private object CoreTopCompatGeneratorSupport {
-  private final case class GeneratorArguments(outputDirectory: String, branchTrace: Boolean)
+private[compat] object CoreTopCompatGeneratorSupport {
+  private[compat] final case class GeneratorArguments(
+      outputDirectory: String,
+      branchTrace: Boolean
+  )
 
-  private def parseArguments(args: Array[String]): GeneratorArguments = {
+  private[compat] def parseArguments(args: Array[String]): GeneratorArguments = {
     var outputDirectory: Option[String] = None
     var branchTrace = false
     var index = 0
@@ -14,9 +17,15 @@ private object CoreTopCompatGeneratorSupport {
       args(index) match {
         case "--out-dir" =>
           require(index + 1 < args.length, "--out-dir requires a directory")
+          require(outputDirectory.isEmpty, "output directory was specified more than once")
+          require(
+            args(index + 1).nonEmpty && !args(index + 1).startsWith("--"),
+            "--out-dir requires a directory"
+          )
           outputDirectory = Some(args(index + 1))
           index += 2
         case "--branch-trace" =>
+          require(!branchTrace, "branch trace was specified more than once")
           branchTrace = true
           index += 1
         case value if outputDirectory.isEmpty && value.nonEmpty =>

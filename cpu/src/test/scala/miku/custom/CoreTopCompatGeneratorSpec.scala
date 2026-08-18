@@ -1,16 +1,15 @@
 package miku.compat
 
-import miku.core.CustomInstructionProfile
 import org.scalatest.funsuite.AnyFunSuite
 
 class CoreTopCompatGeneratorSpec extends AnyFunSuite {
-  test("generator arguments select an explicit profile and output directory") {
+  test("generator arguments select output directory and optional branch trace") {
     val arguments = CoreTopCompatGeneratorSupport.parseArguments(
-      Array("--out-dir", "build/rtl-test", "--custom-profile", "off")
+      Array("--out-dir", "build/rtl-test", "--branch-trace")
     )
 
     assert(arguments.outputDirectory == "build/rtl-test")
-    assert(arguments.customInstructionProfile == CustomInstructionProfile.Disabled)
+    assert(arguments.branchTrace)
   }
 
   test("generator arguments reject duplicate and unknown options") {
@@ -21,17 +20,12 @@ class CoreTopCompatGeneratorSpec extends AnyFunSuite {
     }
     intercept[IllegalArgumentException] {
       CoreTopCompatGeneratorSupport.parseArguments(
-        Array("--out-dir", "build/rtl-test", "--custom-profile", "off", "--custom-profile", "off")
+        Array("--branch-trace", "--branch-trace")
       )
     }
     intercept[IllegalArgumentException] {
       CoreTopCompatGeneratorSupport.parseArguments(
         Array("--out-dir", "build/rtl-test", "--unknown")
-      )
-    }
-    intercept[IllegalArgumentException] {
-      CoreTopCompatGeneratorSupport.parseArguments(
-        Array("--out-dir", "build/rtl-test", "--custom-profile", "not-registered")
       )
     }
   }
