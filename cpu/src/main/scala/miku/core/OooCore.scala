@@ -88,6 +88,10 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
   val io = new Bundle {
     val instructionTranslationRequest = master(Stream(TranslationRequest(config)))
     val instructionTranslationResponse = slave(Stream(TranslationResponse(config)))
+    // Internal handoff to the translator.  Keeping redirect ownership local to
+    // the system boundary avoids sending it through frontend request-valid
+    // logic before an in-flight instruction translation is cancelled.
+    val instructionTranslationFlush = out Bool ()
     val dataTranslationRequest = master(Stream(TranslationRequest(config)))
     val dataTranslationResponse = slave(Stream(TranslationResponse(config)))
     val dataTranslationBypassAddress = out UInt (config.xlen bits)
@@ -240,6 +244,7 @@ final class OooCore(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit) 
   val exceptionRecovery = recoveryPending &&
     recoveryPayload.cause === RecoveryCause.exception
   val internalRedirectValid = recoveryPending || io.externalRedirectValid
+  io.instructionTranslationFlush := internalRedirectValid
   val internalRedirectTarget = UInt(config.xlen bits)
   internalRedirectTarget := recoveryPayload.target
   when(exceptionRecovery) {

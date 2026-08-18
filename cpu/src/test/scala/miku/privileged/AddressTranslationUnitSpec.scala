@@ -19,6 +19,7 @@ class AddressTranslationUnitSpec extends AnyFunSuite {
     dut.io.instructionRequest.virtualAddress #= 0
     dut.io.instructionRequest.isWrite #= false
     dut.io.instructionResponse.ready #= true
+    dut.io.instructionFlush #= false
     dut.io.dataRequest.valid #= false
     dut.io.dataRequest.virtualAddress #= 0
     dut.io.dataRequest.isWrite #= false
@@ -124,6 +125,48 @@ class AddressTranslationUnitSpec extends AnyFunSuite {
     }
     assert(dut.io.dataResponse.valid.toBoolean)
     cycles
+  }
+
+  test("instruction flush discards a stalled owner and reopens the request slot") {
+    SimConfig.withVerilator
+      .workspacePath(
+        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
+          "/sim-workspace-ooo-address-translation-instruction-flush"
+      )
+      .compile(new AddressTranslationUnit(config))
+      .doSim("ooo-address-translation-instruction-flush", 0x4c85) { dut =>
+        dut.domain.forkStimulus(period = 10)
+        clearInputs(dut)
+        dut.io.instructionResponse.ready #= false
+        dut.domain.assertReset()
+        dut.domain.waitSampling(2)
+        dut.domain.deassertReset()
+        sample(dut)
+
+        dut.io.instructionRequest.valid #= true
+        dut.io.instructionRequest.virtualAddress #= BigInt(0x1c001000)
+        sleep(1)
+        assert(dut.io.instructionRequest.ready.toBoolean)
+        sample(dut)
+        dut.io.instructionRequest.valid #= false
+        assert(dut.io.instructionResponse.valid.toBoolean)
+
+        dut.io.instructionFlush #= true
+        sleep(1)
+        assert(!dut.io.instructionRequest.ready.toBoolean)
+        sample(dut)
+        dut.io.instructionFlush #= false
+        assert(!dut.io.instructionResponse.valid.toBoolean)
+
+        dut.io.instructionRequest.valid #= true
+        dut.io.instructionRequest.virtualAddress #= BigInt(0x1c002000)
+        sleep(1)
+        assert(dut.io.instructionRequest.ready.toBoolean)
+        sample(dut)
+        dut.io.instructionRequest.valid #= false
+        assert(dut.io.instructionResponse.valid.toBoolean)
+        assert(dut.io.instructionResponse.virtualAddress.toBigInt == BigInt(0x1c002000))
+      }
   }
 
   test("reset disables every main TLB entry") {

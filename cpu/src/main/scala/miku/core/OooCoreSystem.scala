@@ -205,6 +205,7 @@ final class OooCoreSystem(
     addressTranslation.io.instructionRequest.valid := core.io.instructionTranslationRequest.valid
     addressTranslation.io.instructionRequest.payload :=
       core.io.instructionTranslationRequest.payload
+    addressTranslation.io.instructionFlush := core.io.instructionTranslationFlush
     core.io.instructionTranslationRequest.ready :=
       addressTranslation.io.instructionRequest.ready
     core.io.instructionTranslationResponse.valid :=
