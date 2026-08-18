@@ -147,6 +147,64 @@ class PerfObservationContractTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertIn("PerfObservation counters pass", result.stdout)
 
+    def test_accepts_dut_reported_queue_capacity(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v8"
+        document["capacity"] = {
+            "load_queue_entries": 16,
+            "store_queue_entries": 8,
+            "issue_queue_entries_per_port": 8,
+        }
+        document["lsq"]["load_occupancy_sum"] = 16
+        document["lsq"]["load_full_cycles"] = 1
+        document["lsq"]["events"][46] = 1
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_reported_capacity_overflow(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v8"
+        document["capacity"] = {
+            "load_queue_entries": 8,
+            "store_queue_entries": 8,
+            "issue_queue_entries_per_port": 8,
+        }
+        document["lsq"]["load_occupancy_sum"] = 9
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("load queue occupancy exceeds capacity", result.stdout)
+
+    def test_accepts_v9_backend_pressure(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v9"
+        document["capacity"] = {
+            "load_queue_entries": 16,
+            "store_queue_entries": 8,
+            "issue_queue_entries_per_port": 8,
+        }
+        document["backend_pressure"] = {
+            "divide_operand_blocked_cycles": 1,
+            "free_list_capacity_blocked_cycles": 0,
+        }
+        result = self.run_checker(document)
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_rejects_v9_backend_pressure_overflow(self) -> None:
+        document = copy.deepcopy(valid_document())
+        document["schema_version"] = "miku-perf-observation-v9"
+        document["capacity"] = {
+            "load_queue_entries": 16,
+            "store_queue_entries": 8,
+            "issue_queue_entries_per_port": 8,
+        }
+        document["backend_pressure"] = {
+            "divide_operand_blocked_cycles": 2,
+            "free_list_capacity_blocked_cycles": 0,
+        }
+        result = self.run_checker(document)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("per-cycle counts", result.stdout)
+
     def test_accepts_existing_v1_evidence(self) -> None:
         document = copy.deepcopy(valid_document())
         document["schema_version"] = "miku-perf-observation-v1"
@@ -335,6 +393,7 @@ class PerfObservationContractTest(unittest.TestCase):
             self.assertNotIn(name, source)
         self.assertNotIn("load_occupancy >= 16", source)
         self.assertIn("field(lsq, 55, 1)", source)
+        self.assertIn('miku-perf-observation-v9', source)
 
     def test_monitor_detects_counter_reads_from_public_commit_instruction(self) -> None:
         source = MONITOR.read_text(encoding="utf-8")

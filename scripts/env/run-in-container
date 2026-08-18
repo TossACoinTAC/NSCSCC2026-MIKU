@@ -21,8 +21,6 @@ docker run --rm --user 0 -v "$cache_volume:/cache" "$image" sh -ec \
 exec docker run --rm -i \
   --user "$host_uid:$host_gid" \
   -e HOME=/tmp \
-  -e LANG=C.UTF-8 \
-  -e LC_ALL=C.UTF-8 \
   -e COURSIER_CACHE=/cache/coursier \
   -e SPINAL_SIM_WORKSPACE_ROOT="${SPINAL_SIM_WORKSPACE_ROOT:-$workspace_root/cpu/target/spinal-sim/workspaces}" \
   -e SPINAL_SIM_WORKSPACE="${SPINAL_SIM_WORKSPACE:-$workspace_root/cpu/target/spinal-sim/contracts}" \

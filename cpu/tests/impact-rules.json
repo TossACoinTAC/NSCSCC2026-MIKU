@@ -56,18 +56,6 @@
       "python_contracts": ["tests/python/test_generation_contract.py", "tests/python/test_core_interface.py"]
     },
     {
-      "name": "custom-instructions",
-      "paths": ["cpu/src/main/scala/miku/core/CustomInstruction*.scala", "cpu/src/main/scala/miku/core/ContestCustomInstructionProfiles.scala", "cpu/src/main/scala/miku/compat/CoreTopCompat.scala", "cpu/src/main/scala/miku/compat/GenerateCoreTopCompat.scala", "cpu/src/test/scala/miku/compat/CoreTopCompatGeneratorSpec.scala", "cpu/src/test/scala/miku/core/CustomInstructionProfileSpec.scala", "cpu/src/test/scala/miku/execute/CustomExecutionSpec.scala", "cpu/tests/python/test_custom_instruction_word.py", "scripts/cpu/custom_instruction_word.py", "docs/custom-instructions.md"],
-      "scala_suites": ["miku.compat.CoreTopCompatGeneratorSpec", "miku.core.CustomInstructionProfileSpec", "miku.execute.CustomExecutionSpec"],
-      "python_contracts": ["tests/python/test_custom_instruction_word.py"]
-    },
-    {
-      "name": "toolchain-environment",
-      "paths": ["scripts/env/*", "docker/*.Dockerfile"],
-      "scala_suites": [],
-      "python_contracts": ["tests/python/test_toolchain_contract.py"]
-    },
-    {
       "name": "experiment-harness",
       "paths": ["scripts/experiment/*.py", "scripts/vivado/archive.py", "Makefile", "cpu/tests/manifest.yml", "cpu/tests/impact-rules.json", "cpu/tests/python/test_experiment_contract.py"],
       "scala_suites": [],
@@ -81,7 +69,7 @@
     },
     {
       "name": "documentation",
-      "paths": ["README.md", "CONTRIBUTING.md", "docs/*.md", "evidence/*.json", ".github/workflows/*.yml", "scripts/common/*.py"],
+      "paths": ["README.md", "docs/*.md", "scripts/common/check_docs.py"],
       "scala_suites": [],
       "python_contracts": ["tests/python/test_repository_contract.py"]
     },
@@ -89,11 +77,11 @@
       "name": "python-contract-suite",
       "paths": ["cpu/tests/python/test_*.py"],
       "scala_suites": [],
-      "python_contracts": ["tests/python/test_cache_memory_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_core_interface.py", "tests/python/test_custom_instruction_word.py", "tests/python/test_evidence_contract.py", "tests/python/test_experiment_contract.py", "tests/python/test_generation_contract.py", "tests/python/test_perf_observation_contract.py", "tests/python/test_perf_observation_summary.py", "tests/python/test_repository_contract.py", "tests/python/test_sim_contract.py", "tests/python/test_toolchain_contract.py"]
+      "python_contracts": ["tests/python/test_cache_memory_contract.py", "tests/python/test_candidate_manifest.py", "tests/python/test_core_interface.py", "tests/python/test_experiment_contract.py", "tests/python/test_generation_contract.py", "tests/python/test_perf_observation_contract.py", "tests/python/test_perf_observation_summary.py", "tests/python/test_repository_contract.py", "tests/python/test_sim_contract.py", "tests/python/test_toolchain_contract.py"]
     },
     {
       "name": "generation-identity",
-      "paths": ["scripts/common/content_hash.py", "scripts/cpu/contracts.py", "scripts/cpu/write_generation_manifest.py", "scripts/sim/prepare", "scripts/sim/matrix"],
+      "paths": ["scripts/common/content_hash.py", "scripts/cpu/write_generation_manifest.py", "scripts/sim/prepare", "scripts/sim/matrix"],
       "scala_suites": [],
       "python_contracts": ["tests/python/test_experiment_contract.py", "tests/python/test_generation_contract.py", "tests/python/test_sim_contract.py"]
     }

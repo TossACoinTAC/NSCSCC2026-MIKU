@@ -23,17 +23,11 @@ def probe(command: list[str]) -> str:
         return "unavailable"
 
 
-def normalize_custom_profile(value: str) -> str:
-    normalized = value.strip().lower()
-    return "disabled" if normalized in {"", "off"} else normalized
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--raw", type=Path, required=True)
     parser.add_argument("--published", type=Path, required=True)
-    parser.add_argument("--custom-profile", required=True)
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     root = args.root.resolve()
@@ -47,7 +41,6 @@ def main() -> int:
         "source_tree": "cpu/src/main + cpu/build.sbt + cpu/project",
         "source_tree_sha256": cpu_source_hash(cpu),
         "source_commit": source_commit,
-        "custom_profile": normalize_custom_profile(args.custom_profile),
         "raw_rtl": str(args.raw.resolve()),
         "raw_rtl_sha256": file_hash(args.raw),
         "published_rtl": str(args.published.resolve()),

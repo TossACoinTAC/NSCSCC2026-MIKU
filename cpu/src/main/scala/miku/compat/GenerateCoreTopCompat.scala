@@ -1,52 +1,39 @@
 package miku.compat
 
 import java.nio.file.{Files, Path, Paths}
-import miku.core.CustomInstructionProfile
 import spinal.core._
 
-private[compat] object CoreTopCompatGeneratorSupport {
-  private[compat] final case class GeneratorArguments(
-      outputDirectory: String,
-      customInstructionProfile: CustomInstructionProfile
-  )
+private object CoreTopCompatGeneratorSupport {
+  private final case class GeneratorArguments(outputDirectory: String, branchTrace: Boolean)
 
-  private val usage =
-    "usage: GenerateCoreTopCompat [--out-dir] <output-directory> " +
-      "[--custom-profile PROFILE_NAME]"
-
-  private[compat] def parseArguments(args: Array[String]): GeneratorArguments = {
-    var outputDirectory = Option.empty[String]
-    var customProfile = Option.empty[CustomInstructionProfile]
+  private def parseArguments(args: Array[String]): GeneratorArguments = {
+    var outputDirectory: Option[String] = None
+    var branchTrace = false
     var index = 0
-
     while (index < args.length) {
       args(index) match {
         case "--out-dir" =>
-          require(index + 1 < args.length, s"--out-dir requires a directory; $usage")
-          require(outputDirectory.isEmpty, s"output directory was specified more than once; $usage")
-          outputDirectory = Some(args(index + 1)).filter(_.nonEmpty)
+          require(index + 1 < args.length, "--out-dir requires a directory")
+          outputDirectory = Some(args(index + 1))
           index += 2
-        case "--custom-profile" =>
-          require(index + 1 < args.length, s"--custom-profile requires a profile name; $usage")
-          require(customProfile.isEmpty, s"custom profile was specified more than once; $usage")
-          customProfile = Some(CustomInstructionProfile.fromName(args(index + 1)))
-          index += 2
-        case option if option.startsWith("--") =>
-          throw new IllegalArgumentException(s"unknown option '$option'; $usage")
-        case path =>
-          require(outputDirectory.isEmpty, s"output directory was specified more than once; $usage")
-          outputDirectory = Some(path).filter(_.nonEmpty)
+        case "--branch-trace" =>
+          branchTrace = true
           index += 1
+        case value if outputDirectory.isEmpty && value.nonEmpty =>
+          outputDirectory = Some(value)
+          index += 1
+        case value =>
+          throw new IllegalArgumentException(s"unknown generator argument: $value")
       }
     }
-
-    val selectedOutput = outputDirectory
+    val directory = outputDirectory
       .orElse(sys.env.get("OUT_DIR").filter(_.nonEmpty))
-      .getOrElse(throw new IllegalArgumentException(s"output directory is required; $usage"))
-    GeneratorArguments(
-      selectedOutput,
-      customProfile.getOrElse(CustomInstructionProfile.Disabled)
-    )
+      .getOrElse(
+        throw new IllegalArgumentException(
+          "output directory is required as an argument or OUT_DIR"
+        )
+      )
+    GeneratorArguments(directory, branchTrace)
   }
 
   private def findRepositoryRoot(path: Path): Option[Path] =
@@ -64,8 +51,8 @@ private[compat] object CoreTopCompatGeneratorSupport {
     }
 
   def generate(args: Array[String]): Unit = {
-    val arguments = parseArguments(args)
-    val outputDirectory = Paths.get(arguments.outputDirectory).toAbsolutePath.normalize()
+    val generatorArguments = parseArguments(args)
+    val outputDirectory = Paths.get(generatorArguments.outputDirectory).toAbsolutePath.normalize()
     val workingDirectory = Paths.get("").toAbsolutePath.normalize()
     val classDirectory = Paths
       .get(getClass.getProtectionDomain.getCodeSource.getLocation.toURI)
@@ -98,7 +85,7 @@ private[compat] object CoreTopCompatGeneratorSupport {
     spinalConfig.withTimescale = false
     spinalConfig.generateVerilog {
       val dut = new CoreTopCompat(
-        CoreTopCompatConfig(customInstructionProfile = arguments.customInstructionProfile)
+        CoreTopCompatConfig(branchTraceObserver = generatorArguments.branchTrace)
       )
       dut.setDefinitionName("core_top")
       dut

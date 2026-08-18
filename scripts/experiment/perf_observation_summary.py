@@ -207,6 +207,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "software_key",
     )
     reference_identity: dict[str, str] | None = None
+    reference_capacity: dict[str, int] | None = None
     source_schema: str | None = None
     workloads: list[dict[str, Any]] = []
 
@@ -232,9 +233,15 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "frontend_cache_outstanding_cycles": 0,
         "issue_occupancy_sum": [0] * 4,
         "issue_full_cycles": [0] * 4,
+        "issue_ready_cycles": [0] * 4,
         "issue_fire_by_port": [0] * 4,
+        "issue_operand_valid_sum": 0,
         "issue_fire_sum": 0,
+        "dispatch_valid_sum": 0,
         "dispatch_fire_sum": 0,
+        "dispatch_fire_histogram": [0] * 5,
+        "divide_operand_blocked_cycles": 0,
+        "free_list_capacity_blocked_cycles": 0,
         "branch_resolved": 0,
         "branch_mispredicted": 0,
         "branch_recovery_matches": 0,
@@ -278,12 +285,31 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             "miku-perf-observation-v5",
             "miku-perf-observation-v6",
             "miku-perf-observation-v7",
+            "miku-perf-observation-v8",
+            "miku-perf-observation-v9",
         }:
-            raise ExperimentError(f"观测汇总要求 v3-v7 ROI 结构: {counters_path}")
+            raise ExperimentError(f"观测汇总要求 v3-v9 ROI 结构: {counters_path}")
         if source_schema is None:
             source_schema = row_schema
         elif row_schema != source_schema:
             raise ExperimentError(f"观测矩阵 schema 不一致: {counters_path}")
+        if row_schema in {"miku-perf-observation-v8", "miku-perf-observation-v9"}:
+            capacity = counters.get("capacity")
+            expected_capacity_names = {
+                "load_queue_entries",
+                "store_queue_entries",
+                "issue_queue_entries_per_port",
+            }
+            if (
+                not isinstance(capacity, dict)
+                or set(capacity) != expected_capacity_names
+                or not all(isinstance(value, int) and value > 0 for value in capacity.values())
+            ):
+                raise ExperimentError(f"v8/v9 capacity 无效: {counters_path}")
+            if reference_capacity is None:
+                reference_capacity = capacity
+            elif capacity != reference_capacity:
+                raise ExperimentError(f"观测矩阵容量配置不一致: {counters_path}")
         roi = counters.get("roi")
         if not isinstance(roi, dict) or roi.get("mode") != "outermost-counter-read-pair":
             raise ExperimentError(f"perf20 必须使用最外层 counter-read ROI: {counters_path}")
@@ -326,6 +352,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                 "miku-perf-observation-v5",
                 "miku-perf-observation-v6",
                 "miku-perf-observation-v7",
+                "miku-perf-observation-v8",
+                "miku-perf-observation-v9",
             }
             else None
         )
@@ -338,17 +366,38 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                 "miku-perf-observation-v5",
                 "miku-perf-observation-v6",
                 "miku-perf-observation-v7",
+                "miku-perf-observation-v8",
+                "miku-perf-observation-v9",
             }
             else None
         )
         frontend_hist = _vector(counters, "frontend.occupancy_histogram", 17)
         issue_occupancy = _vector(counters, "issue.occupancy_sum", 4)
         issue_full = _vector(counters, "issue.full_cycles", 4)
+        issue_ready = _vector(counters, "issue.ready_cycles", 4)
         issue_fire = _vector(counters, "issue.fire_by_port", 4)
+        dispatch_hist = _vector(counters, "dispatch.fire_histogram", 5)
+        backend_pressure = (
+            _named_counts(
+                counters,
+                "backend_pressure",
+                (
+                    "divide_operand_blocked_cycles",
+                    "free_list_capacity_blocked_cycles",
+                ),
+            )
+            if row_schema == "miku-perf-observation-v9"
+            else {
+                "divide_operand_blocked_cycles": 0,
+                "free_list_capacity_blocked_cycles": 0,
+            }
+        )
         lsq_event_names = {
             "miku-perf-observation-v5": LSQ_EVENT_NAMES_V5,
             "miku-perf-observation-v6": LSQ_EVENT_NAMES_V6,
             "miku-perf-observation-v7": LSQ_EVENT_NAMES_V7,
+            "miku-perf-observation-v8": LSQ_EVENT_NAMES_V7,
+            "miku-perf-observation-v9": LSQ_EVENT_NAMES_V7,
         }.get(row_schema, LSQ_EVENT_NAMES_V4)
         lsq_events = _vector(counters, "lsq.events", len(lsq_event_names))
         cache_events = _vector(counters, "cache.events", len(CACHE_EVENT_NAMES))
@@ -406,6 +455,26 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                 "fire_per_cycle": _ratio(
                     _integer(counters, "issue.fire_sum"), roi_cycles
                 ),
+                "execution_blocked_slots_per_cycle": _ratio(
+                    _integer(counters, "issue.operand_valid_sum")
+                    - _integer(counters, "issue.fire_sum"),
+                    roi_cycles,
+                ),
+            },
+            "dispatch": {
+                "valid_per_cycle": _ratio(
+                    _integer(counters, "dispatch.valid_sum"), roi_cycles
+                ),
+                "fire_per_cycle": _ratio(
+                    _integer(counters, "dispatch.fire_sum"), roi_cycles
+                ),
+                "fire_width_ratio": [
+                    _ratio(value, roi_cycles) for value in dispatch_hist
+                ],
+            },
+            "backend_pressure": {
+                name.removesuffix("_cycles") + "_ratio": _ratio(value, roi_cycles)
+                for name, value in backend_pressure.items()
             },
             "branch": {
                 "resolved": _integer(counters, "branch.resolved"),
@@ -420,6 +489,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                         "miku-perf-observation-v5",
                         "miku-perf-observation-v6",
                         "miku-perf-observation-v7",
+                        "miku-perf-observation-v8",
+                        "miku-perf-observation-v9",
                     }
                     else 0
                 ),
@@ -429,6 +500,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
                         "miku-perf-observation-v5",
                         "miku-perf-observation-v6",
                         "miku-perf-observation-v7",
+                        "miku-perf-observation-v8",
+                        "miku-perf-observation-v9",
                     }
                     else 0
                 ),
@@ -481,9 +554,17 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         )
         _add_vector(totals["issue_occupancy_sum"], issue_occupancy)
         _add_vector(totals["issue_full_cycles"], issue_full)
+        _add_vector(totals["issue_ready_cycles"], issue_ready)
         _add_vector(totals["issue_fire_by_port"], issue_fire)
+        totals["issue_operand_valid_sum"] += _integer(
+            counters, "issue.operand_valid_sum"
+        )
         totals["issue_fire_sum"] += _integer(counters, "issue.fire_sum")
+        totals["dispatch_valid_sum"] += _integer(counters, "dispatch.valid_sum")
         totals["dispatch_fire_sum"] += _integer(counters, "dispatch.fire_sum")
+        _add_vector(totals["dispatch_fire_histogram"], dispatch_hist)
+        for name, value in backend_pressure.items():
+            totals[name] += value
         totals["branch_resolved"] += _integer(counters, "branch.resolved")
         totals["branch_mispredicted"] += _integer(counters, "branch.mispredicted")
         totals["branch_recovery_matches"] += _integer(
@@ -496,6 +577,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             "miku-perf-observation-v5",
             "miku-perf-observation-v6",
             "miku-perf-observation-v7",
+            "miku-perf-observation-v8",
+            "miku-perf-observation-v9",
         }:
             totals["branch_head_completion_opportunity"] += _integer(
                 counters, "branch.head_completion_opportunity"
@@ -549,7 +632,26 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             _ratio(value, cycles) for value in totals["issue_full_cycles"]
         ],
         "issue_fire_per_cycle": _ratio(totals["issue_fire_sum"], cycles),
+        "issue_execution_blocked_slots_per_cycle": _ratio(
+            totals["issue_operand_valid_sum"] - totals["issue_fire_sum"], cycles
+        ),
+        "issue_ready_cycle_ratio": [
+            _ratio(value, cycles) for value in totals["issue_ready_cycles"]
+        ],
+        "dispatch_valid_per_cycle": _ratio(totals["dispatch_valid_sum"], cycles),
         "dispatch_fire_per_cycle": _ratio(totals["dispatch_fire_sum"], cycles),
+        "dispatch_acceptance_ratio": _ratio(
+            totals["dispatch_fire_sum"], totals["dispatch_valid_sum"]
+        ),
+        "dispatch_fire_width_ratio": [
+            _ratio(value, cycles) for value in totals["dispatch_fire_histogram"]
+        ],
+        "divide_operand_blocked_cycle_ratio": _ratio(
+            totals["divide_operand_blocked_cycles"], cycles
+        ),
+        "free_list_capacity_blocked_cycle_ratio": _ratio(
+            totals["free_list_capacity_blocked_cycles"], cycles
+        ),
         "branch_mispredict_ratio": _ratio(
             totals["branch_mispredicted"], totals["branch_resolved"]
         ),
@@ -581,6 +683,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "miku-perf-observation-v5",
         "miku-perf-observation-v6",
         "miku-perf-observation-v7",
+        "miku-perf-observation-v8",
+        "miku-perf-observation-v9",
     }:
         derived["rob_zero_retire_head_reason_ratio"] = {
             name: _ratio(value, cycles)
@@ -596,6 +700,8 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
         "miku-perf-observation-v5": LSQ_EVENT_NAMES_V5,
         "miku-perf-observation-v6": LSQ_EVENT_NAMES_V6,
         "miku-perf-observation-v7": LSQ_EVENT_NAMES_V7,
+        "miku-perf-observation-v8": LSQ_EVENT_NAMES_V7,
+        "miku-perf-observation-v9": LSQ_EVENT_NAMES_V7,
     }[source_schema]
     raw_totals = {
         **totals,
@@ -610,6 +716,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
             "sha256": sha256_file(matrix["path"]),
         },
         "identity": reference_identity,
+        "capacity": reference_capacity,
         "summary": {"raw": raw_totals, "derived": derived},
         "workloads": workloads,
     }

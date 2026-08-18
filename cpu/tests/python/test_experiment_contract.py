@@ -171,22 +171,6 @@ Slack (MET) : 0.100ns
         self.assertIn("miku.backend.IssueQueueSpec", result["scala_suites"])
         self.assertNotIn("miku.backend.LoadStoreQueueSpec", result["scala_suites"])
 
-        documentation = calculate_impact(
-            [
-                "evidence/index.json",
-                "evidence/current/local-verification.json",
-                "CONTRIBUTING.md",
-                "scripts/common/run_python_contracts.py",
-                "scripts/common/write_local_evidence.py",
-            ],
-            mapping,
-        )
-        self.assertEqual(documentation["unmatched_paths"], [])
-        self.assertIn(
-            "tests/python/test_repository_contract.py",
-            documentation["python_contracts"],
-        )
-
     def test_translation_impact_includes_owner_and_system_contracts(self) -> None:
         mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
         path = "cpu/src/main/scala/miku/privileged/AddressTranslationUnit.scala"
@@ -203,25 +187,6 @@ Slack (MET) : 0.100ns
         self.assertIn("miku.execute.OooExecutionClusterSpec", result["scala_suites"])
         self.assertIn("miku.backend.OooBackendWithDataCacheSpec", result["scala_suites"])
         self.assertIn("tests/python/test_generation_contract.py", result["python_contracts"])
-
-    def test_custom_instruction_impact_includes_focused_suites(self) -> None:
-        mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))
-        result = calculate_impact(
-            [
-                "cpu/src/main/scala/miku/core/ContestCustomInstructionProfiles.scala",
-                "scripts/cpu/custom_instruction_word.py",
-                "docs/custom-instructions.md",
-            ],
-            mapping,
-        )
-        self.assertEqual(result["unmatched_paths"], [])
-        self.assertIn("miku.compat.CoreTopCompatGeneratorSpec", result["scala_suites"])
-        self.assertIn("miku.core.CustomInstructionProfileSpec", result["scala_suites"])
-        self.assertIn("miku.execute.CustomExecutionSpec", result["scala_suites"])
-        self.assertIn(
-            "tests/python/test_custom_instruction_word.py",
-            result["python_contracts"],
-        )
 
     def test_backend_completion_and_changed_suite_are_mapped(self) -> None:
         mapping = json.loads((ROOT / "cpu/tests/impact-rules.json").read_text(encoding="utf-8"))

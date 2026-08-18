@@ -690,12 +690,16 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
       predecode.target
     )
     responsePredictorMetadata(lane) := 0
+    responsePredictorMetadata(lane)(config.predictorPhtIndexWidth - 1 downto 0) :=
+      responseContextPrediction(lane).phtIndex.asBits
     responsePredictorMetadata(lane)(
-      BankedFetchPrediction.PhtRowWidth - 1 downto 0
-    ) := responseContextPrediction(lane).phtIndex.asBits
-    responsePredictorMetadata(lane)(
-      BankedFetchPrediction.PhtRowWidth + 1 downto BankedFetchPrediction.PhtRowWidth
+      config.predictorMetadataStateLsb + 1 downto config.predictorMetadataStateLsb
     ) := responseContextPrediction(lane).phtState.asBits
+    responsePredictorMetadata(lane)(config.predictorMetadataValidBit) :=
+      responseContextPrediction(lane).phtValid
+    if (!config.enableLargeGshare) {
+      responsePredictorMetadata(lane)(15 downto 13) := predecode.branchType.asBits
+    }
     responsePrefix(lane + 1) :=
       responsePrefix(lane) + responseSlotCandidateValid(lane).asUInt
   }
@@ -792,16 +796,15 @@ final class OooFrontend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeComm
     io.predictorUpdateType === PredictedBranchType.conditional
   targetPredictor.io.phtUpdatePc := io.predictorUpdatePc
   targetPredictor.io.phtUpdateIndex := io
-    .predictorUpdateMetadata(BankedFetchPrediction.PhtRowWidth - 1 downto 0)
+    .predictorUpdateMetadata(config.predictorPhtIndexWidth - 1 downto 0)
     .asUInt
   targetPredictor.io.phtUpdateOldState := io
     .predictorUpdateMetadata(
-      BankedFetchPrediction.PhtRowWidth + 1 downto BankedFetchPrediction.PhtRowWidth
+      config.predictorMetadataStateLsb + 1 downto config.predictorMetadataStateLsb
     )
     .asUInt
-  // The widened PHT is initialized by the predictor reset sweep; committed
-  // conditional branches are always authoritative updates.
-  targetPredictor.io.phtUpdateOldValid := True
+  targetPredictor.io.phtUpdateOldValid :=
+    io.predictorUpdateMetadata(config.predictorMetadataValidBit)
   targetPredictor.io.phtUpdateTaken := io.predictorUpdateTaken
   targetPredictor.io.commitRasPush := io.predictorUpdateValid && io.predictorUpdateIsCall
   targetPredictor.io.commitRasPop := io.predictorUpdateValid && io.predictorUpdateIsReturn

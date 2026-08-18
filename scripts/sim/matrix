@@ -128,6 +128,16 @@ grep -Fxq "profile=$profile" "$manifest"
 grep -Fxq "suite=$suite" "$manifest"
 grep -Fxq "workloads=$workloads" "$manifest"
 grep -Fxq "workload_key=$workload_key" "$manifest"
+branch_trace=$(awk -F= '$1 == "branch_trace" {print $2}' "$manifest")
+branch_trace=${branch_trace:-0}
+if [[ $branch_trace != 0 && $branch_trace != 1 ]]; then
+  printf 'prepared branch_trace must be 0 or 1, got %s\n' "$branch_trace" >&2
+  exit 1
+fi
+if [[ $branch_trace == 1 && $profile != instrumented ]]; then
+  printf 'prepared branch trace requires instrumented profile\n' >&2
+  exit 1
+fi
 model_key=$(awk -F= '$1 == "model_key" {print $2}' "$manifest")
 software_key=$(awk -F= '$1 == "software_key" {print $2}' "$manifest")
 grep -Fxq "model_key=$model_key" "$model_manifest"
@@ -252,6 +262,7 @@ run_one() {
     printf 'official_switch_value=0x%s\n' "$official_switch_value"
     printf 'runtime_switch_value=0x%s\n' "$runtime_switch_value"
     printf 'time_limit=%s\n' "$time_limit"
+    printf 'branch_trace=%s\n' "$branch_trace"
     printf 'end_pc=%s\n' "$end_pc"
     printf 'end_pc_strategy=%s\n' "$end_pc_strategy"
     printf 'model_sha256=%s\n' "$actual_model_sha"
@@ -276,7 +287,11 @@ run_one() {
       fi
     fi
     set +e
-    CHIPLAB_HOME="$model_dir" PATH="$sim_path:$PATH" /usr/bin/time -v \
+    run_environment=("CHIPLAB_HOME=$model_dir" "PATH=$sim_path:$PATH")
+    if [[ $branch_trace == 1 ]]; then
+      run_environment+=("MIKU_BRANCH_TRACE_PATH=$lane_dir/branch-trace-v1.jsonl")
+    fi
+    env "${run_environment[@]}" /usr/bin/time -v \
       "$model" \
       "${bus_args[@]}" \
       "${switch_args[@]}" \
@@ -300,6 +315,17 @@ run_one() {
         counter_status=1
       else
         printf 'm01_counters_sha256=%s\n' "$(sha256sum m01-counters.json | awk '{print $1}')" >> run-manifest.txt
+      fi
+    fi
+    if [[ $branch_trace == 1 ]]; then
+      if [[ ! -s branch-trace-v1.jsonl ]]; then
+        printf 'branch trace observer did not produce branch-trace-v1.jsonl\n' \
+          > branch-trace-check.txt
+        result=1
+        verdict=branch-trace-missing
+      else
+        printf 'branch_trace_sha256=%s\n' \
+          "$(sha256sum branch-trace-v1.jsonl | awk '{print $1}')" >> run-manifest.txt
       fi
     fi
     if ((counter_status != 0)); then

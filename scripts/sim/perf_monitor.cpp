@@ -170,6 +170,8 @@ void PerfMonitor::reset_accumulators() {
     dispatch_fire_sum_ = 0;
     std::fill(std::begin(dispatch_fire_hist_),
               std::end(dispatch_fire_hist_), 0);
+    divide_operand_blocked_cycles_ = 0;
+    free_list_capacity_blocked_cycles_ = 0;
 
     std::fill(std::begin(branch_commit_hist_),
               std::end(branch_commit_hist_), 0);
@@ -239,6 +241,8 @@ void PerfMonitor::save_accumulator_checkpoint() {
     SAVE_SCALAR(dispatch_valid_sum);
     SAVE_SCALAR(dispatch_fire_sum);
     SAVE_ARRAY(dispatch_fire_hist);
+    SAVE_SCALAR(divide_operand_blocked_cycles);
+    SAVE_SCALAR(free_list_capacity_blocked_cycles);
     SAVE_ARRAY(branch_commit_hist);
     SAVE_SCALAR(branch_retired);
     SAVE_SCALAR(predictor_update_cycles);
@@ -305,6 +309,8 @@ void PerfMonitor::restore_accumulator_checkpoint() {
     RESTORE_SCALAR(dispatch_valid_sum);
     RESTORE_SCALAR(dispatch_fire_sum);
     RESTORE_ARRAY(dispatch_fire_hist);
+    RESTORE_SCALAR(divide_operand_blocked_cycles);
+    RESTORE_SCALAR(free_list_capacity_blocked_cycles);
     RESTORE_ARRAY(branch_commit_hist);
     RESTORE_SCALAR(branch_retired);
     RESTORE_SCALAR(predictor_update_cycles);
@@ -365,6 +371,23 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     const std::uint64_t lsq = snapshot.words[5];
     const std::uint64_t cache = snapshot.words[6];
     const std::uint64_t axi = snapshot.words[7];
+
+    const unsigned load_capacity = static_cast<unsigned>(field(cache, 32, 5));
+    const unsigned store_capacity = static_cast<unsigned>(field(cache, 37, 4));
+    const unsigned issue_capacity = static_cast<unsigned>(field(cache, 41, 4));
+    if (!capacity_seen_) {
+        load_queue_capacity_ = load_capacity;
+        store_queue_capacity_ = store_capacity;
+        issue_queue_capacity_ = issue_capacity;
+        capacity_seen_ = true;
+        if (load_capacity == 0 || store_capacity == 0 || issue_capacity == 0) {
+            abi_errors_++;
+        }
+    } else if (load_queue_capacity_ != load_capacity ||
+               store_queue_capacity_ != store_capacity ||
+               issue_queue_capacity_ != issue_capacity) {
+        abi_errors_++;
+    }
 
     const std::uint8_t source_retired =
         static_cast<std::uint8_t>(field(core, 3, 3));
@@ -448,6 +471,8 @@ void PerfMonitor::accumulate_snapshot(const CycleSnapshot &snapshot,
     dispatch_valid_sum_ += dispatch_valid;
     dispatch_fire_sum_ += dispatch_fire;
     dispatch_fire_hist_[dispatch_fire]++;
+    divide_operand_blocked_cycles_ += field(issue, 62, 1);
+    free_list_capacity_blocked_cycles_ += field(issue, 63, 1);
 
     const unsigned committed_branches = popcount(field(core, 35, 3));
     branch_commit_hist_[committed_branches]++;
@@ -604,8 +629,12 @@ void PerfMonitor::write_json(const char *path) {
     const std::uint64_t unused_slots = cycles_ * 3 - sampled_instructions_;
 
     std::fprintf(file, "{\n");
-    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v7\",\n");
+    std::fprintf(file, "  \"schema_version\": \"miku-perf-observation-v9\",\n");
     std::fprintf(file, "  \"observation_abi\": {\"magic\": \"MIKU\", \"version\": 1, \"word_count\": 8},\n");
+    std::fprintf(file, "  \"capacity\": {\"load_queue_entries\": %llu, \"store_queue_entries\": %llu, \"issue_queue_entries_per_port\": %llu},\n",
+                 static_cast<unsigned long long>(load_queue_capacity_),
+                 static_cast<unsigned long long>(store_queue_capacity_),
+                 static_cast<unsigned long long>(issue_queue_capacity_));
     std::fprintf(file, "  \"roi\": {\"mode\": \"%s\", \"counter_read_markers\": %llu, \"nested_counter_read_pairs\": %llu, \"complete\": %s, \"boundary_cycles_included\": false},\n",
                  roi_marker_seen_ ? "outermost-counter-read-pair" : "full-run",
                  static_cast<unsigned long long>(roi_counter_read_markers_),
@@ -705,6 +734,9 @@ void PerfMonitor::write_json(const char *path) {
                  static_cast<unsigned long long>(dispatch_fire_hist_[2]),
                  static_cast<unsigned long long>(dispatch_fire_hist_[3]),
                  static_cast<unsigned long long>(dispatch_fire_hist_[4]));
+    std::fprintf(file, "  \"backend_pressure\": {\"divide_operand_blocked_cycles\": %llu, \"free_list_capacity_blocked_cycles\": %llu},\n",
+                 static_cast<unsigned long long>(divide_operand_blocked_cycles_),
+                 static_cast<unsigned long long>(free_list_capacity_blocked_cycles_));
     std::fprintf(file, "  \"branch\": {\"commit_histogram\": [%llu, %llu, %llu, %llu], \"retired\": %llu, \"predictor_update_cycles\": %llu, \"resolved\": %llu, \"mispredicted\": %llu, \"recovery_matches\": %llu, \"recovery_without_resolution\": %llu, \"resolve_to_recovery_cycles\": %llu, \"resolve_to_recovery_max\": %llu, \"resolve_to_recovery_histogram\": [%llu, %llu, %llu, %llu, %llu, %llu, %llu, %llu], \"head_completion_opportunity\": %llu, \"head_mispredict_opportunity\": %llu},\n",
                  static_cast<unsigned long long>(branch_commit_hist_[0]), static_cast<unsigned long long>(branch_commit_hist_[1]), static_cast<unsigned long long>(branch_commit_hist_[2]), static_cast<unsigned long long>(branch_commit_hist_[3]),
                  static_cast<unsigned long long>(branch_retired_), static_cast<unsigned long long>(predictor_update_cycles_),

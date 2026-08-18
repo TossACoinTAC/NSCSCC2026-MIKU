@@ -19,8 +19,8 @@ final class LoadStoreQueueAllocator(config: OooCoreConfig = OooCoreConfig.FourIs
     val allocateCapacityReady = out Bool ()
     val allocateAccept = in Bool ()
 
-    val releaseLoadValid = in Bits (config.commitWidth bits)
-    val releaseStoreValid = in Bits (config.commitWidth bits)
+    val releaseLoadCount = in UInt (log2Up(config.commitWidth + 1) bits)
+    val releaseStoreCount = in UInt (log2Up(config.commitWidth + 1) bits)
     val flush = in Bool ()
     val loadOccupancy = out UInt (countWidth bits)
     val storeOccupancy = out UInt (countWidth bits)
@@ -51,8 +51,6 @@ final class LoadStoreQueueAllocator(config: OooCoreConfig = OooCoreConfig.FourIs
   io.allocateCapacityReady := loadFree >= loadRequested && storeFree >= storeRequested
   io.allocateReady := !io.flush && io.allocateCapacityReady
 
-  val loadReleased = CountOne(io.releaseLoadValid)
-  val storeReleased = CountOne(io.releaseStoreValid)
   when(io.flush) {
     loadTail := U(0, config.loadQueueIndexWidth bits)
     storeTail := U(0, config.storeQueueIndexWidth bits)
@@ -63,8 +61,10 @@ final class LoadStoreQueueAllocator(config: OooCoreConfig = OooCoreConfig.FourIs
       loadTail := loadTail + loadRequested
       storeTail := storeTail + storeRequested
     }
-    loadOccupancy := loadOccupancy + Mux(io.allocateAccept, loadRequested, 0) - loadReleased
-    storeOccupancy := storeOccupancy + Mux(io.allocateAccept, storeRequested, 0) - storeReleased
+    loadOccupancy :=
+      loadOccupancy + Mux(io.allocateAccept, loadRequested, 0) - io.releaseLoadCount
+    storeOccupancy :=
+      storeOccupancy + Mux(io.allocateAccept, storeRequested, 0) - io.releaseStoreCount
   }
 
   io.loadOccupancy := loadOccupancy

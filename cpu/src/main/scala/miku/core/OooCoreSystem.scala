@@ -5,6 +5,7 @@ import miku.compat.Axi3Compat
 import miku.memory._
 import miku.observe.{
   ArchState,
+  BranchTraceObserver,
   ChiplabMultiCommitDiffTestAdapter,
   CommitEvent,
   PerfObservationV1
@@ -49,6 +50,35 @@ final class OooCoreSystem(
 
   val systemArea = new ClockingArea(systemClockDomain) {
     val core = new OooCore(config)
+    if (config.enableBranchTraceObserver) {
+      val branchTraceCycle = Reg(UInt(64 bits)) init (0)
+      branchTraceCycle := branchTraceCycle + 1
+      val branchTrace = new BranchTraceObserver(config)
+      branchTrace.io.clock := io.aclk
+      branchTrace.io.cycle := branchTraceCycle.asBits
+      for (lane <- 0 until config.commitWidth) {
+        val record = core.io.commit(lane)
+        branchTrace.io.valid(lane) :=
+          core.io.commitValid(lane) && record.retired && record.isBranch
+        branchTrace.io.robPointer(
+          lane * config.robPointerWidth + config.robPointerWidth - 1 downto
+            lane * config.robPointerWidth
+        ) := record.robPointer.asBits
+        branchTrace.io.pc(lane * config.xlen + config.xlen - 1 downto lane * config.xlen) :=
+          record.pc.asBits
+        branchTrace.io.instruction(lane * 32 + 31 downto lane * 32) := record.instruction
+        branchTrace.io.predictorType(
+          lane * 3 + 2 downto lane * 3
+        ) := record.predictorType.asBits
+        branchTrace.io.actualTaken(lane) := record.branchTaken
+        branchTrace.io.actualTarget(
+          lane * config.xlen + config.xlen - 1 downto lane * config.xlen
+        ) := record.branchTarget.asBits
+        branchTrace.io.predictorMetadata(
+          lane * 16 + 15 downto lane * 16
+        ) := record.predictorMetadata
+      }
+    }
     // Keep the CSR diff views in the generated design.  The view is wrapped by a conditional
     // chiplab DPI shell, so it is inert in synthesis and available to the official simulator.
     val csr = new CsrFile(config = config, diffTestEnabled = true, tlbNum = 32)

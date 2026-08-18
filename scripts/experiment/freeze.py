@@ -101,7 +101,6 @@ def main() -> int:
         },
         "cpu": {
             "source_commit": generation.get("source_commit"),
-            "custom_profile": generation.get("custom_profile"),
             "source_tree_sha256": cpu_tree,
             "raw_rtl_sha256": generation["raw_rtl_sha256"],
             "published_rtl_sha256": generation["published_rtl_sha256"],

@@ -32,10 +32,16 @@ REQUIRED_IMPL_ARTIFACTS = {
     "clock_timing_validation.txt": "clock_timing_validation.txt",
     "soc_top_drc_routed.rpt": "soc_top_drc_routed.rpt",
     "soc_top_utilization_placed.rpt": "soc_top_utilization_placed.rpt",
+    "implementation.log": "runme.log",
+}
+
+# These reports are useful for path/congestion analysis, but they are not
+# implementation gates.  A direct full run has already produced the routed
+# DCP, timing summary, DRC and bitstream before this supplemental report pass.
+OPTIONAL_ANALYSIS_ARTIFACTS = {
     "cpu_setup_top50.rpt": "cpu_setup_top50.rpt",
     "route_status.rpt": "route_status.rpt",
     "utilization_routed.rpt": "utilization_routed.rpt",
-    "implementation.log": "runme.log",
 }
 
 
@@ -119,6 +125,26 @@ def require_file(path: Path) -> None:
         raise ArchiveError(f"实现产物缺失或为空: {path}")
 
 
+def collect_implementation_sources(
+    impl_dir: Path,
+) -> tuple[dict[str, Path], list[str]]:
+    """Collect hard-gate outputs and report which analysis files are absent."""
+    sources: dict[str, Path] = {}
+    for archive_name, implementation_name in REQUIRED_IMPL_ARTIFACTS.items():
+        source = impl_dir / implementation_name
+        require_file(source)
+        sources[archive_name] = source
+
+    missing_analysis: list[str] = []
+    for archive_name, implementation_name in OPTIONAL_ANALYSIS_ARTIFACTS.items():
+        source = impl_dir / implementation_name
+        if source.is_file() and source.stat().st_size > 0:
+            sources[archive_name] = source
+        else:
+            missing_analysis.append(archive_name)
+    return sources, missing_analysis
+
+
 def normalize_frequency(value: str) -> str:
     try:
         number = float(value)
@@ -190,7 +216,6 @@ def load_experiment_evidence(
     validate_experiment_manifest(experiment, root)
     cpu = experiment["cpu"]
     expected = {
-        "custom_profile": generation["custom_profile"],
         "source_tree_sha256": generation["source_tree_sha256"],
         "raw_rtl_sha256": generation["raw_rtl_sha256"],
         "published_rtl_sha256": generation["published_rtl_sha256"],
@@ -264,8 +289,8 @@ def main() -> int:
 
     generation = json.loads(generation_path.read_text(encoding="utf-8"))
     required_generation = {
-        "custom_profile", "source_tree_sha256", "source_commit",
-        "raw_rtl_sha256", "published_rtl_sha256", "toolchain",
+        "source_tree_sha256", "source_commit", "raw_rtl_sha256",
+        "published_rtl_sha256", "toolchain",
     }
     missing_generation = required_generation - set(generation)
     if missing_generation:
@@ -280,13 +305,8 @@ def main() -> int:
             f"Chiplab HEAD 与锁定提交不一致: {actual_chiplab} != {args.chiplab_commit}"
         )
 
-    sources: dict[str, Path] = {
-        "mycpu_top.v": staged_rtl,
-    }
-    for archive_name, implementation_name in REQUIRED_IMPL_ARTIFACTS.items():
-        source = impl_dir / implementation_name
-        require_file(source)
-        sources[archive_name] = source
+    sources, missing_analysis = collect_implementation_sources(impl_dir)
+    sources["mycpu_top.v"] = staged_rtl
     generated_clock = build_dir / "fpga/nscscc-team/run_vivado/perf_clock_generated.txt"
     if args.kind == "perf" and generated_clock.is_file():
         sources["perf_clock_generated.txt"] = generated_clock
@@ -328,7 +348,6 @@ def main() -> int:
         "purpose": "physical-exploration" if args.stage == "postroute" else "competition-build",
         "source": {
             "commit": source_commit,
-            "custom_profile": generation["custom_profile"],
             "tree_sha256": generation["source_tree_sha256"],
             "raw_rtl_sha256": generation["raw_rtl_sha256"],
             "published_rtl_sha256": expected_rtl,
@@ -350,6 +369,8 @@ def main() -> int:
         },
         "evidence": [],
         "artifacts": {},
+        "analysis_artifacts_complete": not missing_analysis,
+        "analysis_artifacts_missing": missing_analysis,
     }
 
     expected_bit_hash = sha256(sources["soc_top.bit"])
@@ -424,7 +445,6 @@ def main() -> int:
             f"purpose={'physical-exploration' if args.stage == 'postroute' else 'competition-build'}",
             f"experiment_id={experiment['experiment_id']}",
             f"cpu_source_commit={source_commit}",
-            f"custom_profile={generation['custom_profile']}",
             f"cpu_source_tree_sha256={generation['source_tree_sha256']}",
             f"chiplab_commit={args.chiplab_commit}",
             f"requested_cpu_mhz={frequency}",
@@ -433,7 +453,12 @@ def main() -> int:
             f"drc_errors={drc['errors']}",
             f"drc_critical_warnings={drc['critical_warnings']}",
             f"fully_routed={str(drc['fully_routed']).lower()}",
+            f"analysis_artifacts_complete={str(not missing_analysis).lower()}",
         ]
+        if missing_analysis:
+            text_lines.append(
+                "analysis_artifacts_missing=" + ",".join(sorted(missing_analysis))
+            )
         for filename, record in sorted(manifest["artifacts"].items()):
             text_lines.append(f"{filename.replace('.', '_')}_sha256={record['sha256']}")
         (temporary / "manifest.txt").write_text(

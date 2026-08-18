@@ -9,7 +9,10 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     extends Component {
   private val loadStorePort =
     config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.LoadStore))
+  private val dividePort =
+    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Divide))
   require(loadStorePort >= 0)
+  require(dividePort >= 0)
   // Multiply results use their own writeback lane.  For an execution-port-indexed lane whose
   // remaining operations are ALU/Branch, every physical-register producer already emits a direct
   // wake at issue acceptance; its staged ROB wake is therefore only an IQ echo.
@@ -55,8 +58,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     val storeDataOccupancy = out UInt (log2Up(config.storeQueueEntries + 1) bits)
     val memoryAllocateValid = out Bits (config.renameWidth bits)
     val memoryAllocate = out Vec (LoadStoreQueueAllocate(config), config.renameWidth)
-    val releaseLoadValid = in Bits (config.commitWidth bits)
-    val releaseStoreValid = in Bits (config.commitWidth bits)
+    val releaseLoadCount = in UInt (log2Up(config.commitWidth + 1) bits)
+    val releaseStoreCount = in UInt (log2Up(config.commitWidth + 1) bits)
     val committedMemoryEpoch = out UInt (config.memoryEpochWidth bits)
     val speculativeMemoryEpoch = out UInt (config.memoryEpochWidth bits)
     val currentRecoveryEpoch = out UInt (config.recoveryEpochWidth bits)
@@ -303,8 +306,8 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
   freeList.io.allocateAccept := acceptAll
   lsqAllocator.io.allocateAccept := acceptAll
   dispatchQueue.io.enqueueAccept := acceptAll
-  lsqAllocator.io.releaseLoadValid := io.releaseLoadValid
-  lsqAllocator.io.releaseStoreValid := io.releaseStoreValid
+  lsqAllocator.io.releaseLoadCount := io.releaseLoadCount
+  lsqAllocator.io.releaseStoreCount := io.releaseStoreCount
   lsqAllocator.io.flush := io.flush
   for (lane <- 0 until config.renameWidth) {
     rob.io.allocate(lane).uop := renamedInput(lane)
@@ -598,5 +601,10 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
     perfObservationV1Word3(58 + queue) :=
       router.io.portValid(queue) && router.io.portReady(queue)
   }
+  val observationDivideOperandBlocked = issueOperandValid(dividePort) &&
+    issueOperandUop(dividePort).decoded.fuType === ExecutionUnitType.divide &&
+    !io.issueReady(dividePort)
+  perfObservationV1Word3(62) := observationDivideOperandBlocked
+  perfObservationV1Word3(63) := io.renameValid.orR && !freeList.io.allocateCapacityReady
   PerfObservationV1.expose(perfObservationV1Word3, 3)
 }

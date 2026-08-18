@@ -13,8 +13,6 @@ final case class FetchPredecode(config: OooCoreConfig) extends Bundle {
 }
 
 object FetchPredecoder {
-  private def constantBool(value: Boolean): Bool = if (value) True else False
-
   private def opcode(instruction: Bits): UInt = instruction(31 downto 26).asUInt
 
   private def isDirect(instruction: Bits): Bool = {
@@ -47,7 +45,7 @@ object FetchPredecoder {
     pc + Mux(isDirect(instruction), directOffset, conditionalOffset)
   }
 
-  private def driveStandard(
+  def drive(
       output: FetchPredecode,
       config: OooCoreConfig,
       pc: UInt,
@@ -73,61 +71,5 @@ object FetchPredecoder {
     }
     output.staticTaken := direct || (conditional && instruction(25))
     output.indirect := indirect
-  }
-
-  def drive(
-      output: FetchPredecode,
-      config: OooCoreConfig,
-      pc: UInt,
-      instruction: Bits
-  ): Unit = {
-    driveStandard(output, config, pc, instruction)
-
-    val specifications = config.customInstructionProfile.specifications
-    if (specifications.nonEmpty) {
-      val matches = specifications.map { specification =>
-        (instruction.asUInt & U(specification.matchMask, 32 bits)) ===
-          U(specification.matchValue, 32 bits)
-      }
-      val customValid = matches.reduce(_ || _)
-      val customBranch = Bool()
-      val customBranchKind = UInt(3 bits)
-      val customImmediate = Bits(config.xlen bits)
-      val customPredicate = Bool()
-      customBranch := False
-      customBranchKind := CustomBranchKind.Always
-      customImmediate := 0
-      customPredicate := False
-
-      for ((specification, matched) <- specifications.zip(matches)) {
-        when(matched) {
-          customBranch := constantBool(specification.kind == CustomInstructionKind.Branch)
-          customBranchKind := U(specification.branchKind, 3 bits)
-          customImmediate := specification.immediate.decode(instruction, config.xlen)
-          customPredicate := constantBool(specification.branchEvaluator.nonEmpty)
-        }
-      }
-
-      val customIndirect = customBranchKind === CustomBranchKind.RegisterIndirect
-      val customConditional = customPredicate ||
-        (customBranchKind =/= CustomBranchKind.Always && !customIndirect)
-      val customDirect = customBranchKind === CustomBranchKind.Always && !customPredicate
-      when(customValid) {
-        output.valid := customBranch
-        output.branchType := PredictedBranchType.direct
-        when(customIndirect) {
-          output.branchType := PredictedBranchType.indirect
-        }.elsewhen(customConditional) {
-          output.branchType := PredictedBranchType.conditional
-        }
-        output.target := pc + 4
-        when(customBranch && !customIndirect) {
-          output.target := pc + customImmediate.asUInt
-        }
-        output.staticTaken := customBranch && !customIndirect &&
-          (customDirect || (customConditional && customImmediate(config.xlen - 1)))
-        output.indirect := customBranch && customIndirect
-      }
-    }
   }
 }

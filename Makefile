@@ -13,10 +13,6 @@ LABAGENT_HOST ?= 10.19.75.72
 LABAGENT_SSH_KEY ?= $(HOME)/.ssh/id_ed25519
 BOARDCTL ?= $(ROOT_DIR)/scripts/board/boardctl
 BUILD_ROOT ?= $(ROOT_DIR)/build
-PYTHON_CONTRACT_LOG ?= $(BUILD_ROOT)/evidence/python-contract.log
-SCALA_RUN_PREPARED ?= $(BUILD_ROOT)/evidence/scala-run-input.json
-SCALA_RUN_MANIFEST ?= $(BUILD_ROOT)/evidence/scala-run.json
-LOCAL_EVIDENCE_OUT ?= $(BUILD_ROOT)/evidence/local-verification.json
 DOCKER_IMAGE ?= nscscc-dev:ubuntu24.04-v1
 DOCKERFILE ?= $(ROOT_DIR)/docker/nscscc-dev.Dockerfile
 DOCKER_CACHE_VOLUME ?= nscscc-sbt-cache-v1
@@ -25,7 +21,6 @@ VIVADO ?= $(VIVADO_HOME)/bin/vivado
 SURFER ?= /mnt/d/Surfer/surfer.exe
 JOBS ?= 8
 CPU_TEST ?=
-CUSTOM_PROFILE := disabled
 RUN_SOFTWARE ?= func/func_lab19
 TIME_LIMIT ?= 1300000
 AXI_SEED ?= 5570815
@@ -39,6 +34,8 @@ SIM_LANES ?= 2
 SIM_ALLOW_THREE ?= 0
 SIM_LANE_PEAK_MB ?=
 SIM_REBUILD ?= 0
+SIM_BRANCH_TRACE ?= 0
+CPU_BRANCH_TRACE ?= $(SIM_BRANCH_TRACE)
 PERF_CPU_MHZ ?= 100
 SOC_ARCHIVE_CLASS ?= auto
 SOC_BUILD_KIND ?= perf
@@ -72,9 +69,9 @@ FUNC58_WORKLOADS := func58
 CONTAINER_RUN := WORKSPACE_ROOT=$(ROOT_DIR) DOCKER_IMAGE=$(DOCKER_IMAGE) DOCKER_CACHE_VOLUME=$(DOCKER_CACHE_VOLUME) $(ROOT_DIR)/scripts/env/run-in-container
 CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-loongarch32r-linux-gnusf-v2.0/bin:/opt/nscscc/toolchains/la32r-QEMU-x86_64-ubuntu-22.04:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
-.PHONY: help doctor status ide-setup env-build toolchain-check docs-check local-evidence evidence-current experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
-  cpu-test cpu-test-all cpu-contract-test custom-test custom-check cpu-generate cpu-check cpu-locked-gates \
-  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
+.PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
+  cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
+  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim branch-trace-summary wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
@@ -86,8 +83,6 @@ help:
 		'  make ide-setup          生成指向 cpu/build.sbt 的 BSP 配置' \
 		'  make env-build          构建锁定 CPU/仿真工具镜像' \
 		'  make docs-check         验证文档入口与候选账本结构' \
-		'  make local-evidence     汇总最近一次完整本地 CPU 检查' \
-		'  make evidence-current   校验并更新仓库内当前验证证据' \
 		'  make experiment-freeze  冻结源码、RTL、工具和显式证据身份' \
 		'  make experiment-compare 比较两组身份兼容的完整 perf20' \
 		'  make timing-analyze      自动归类 Vivado top timing paths' \
@@ -95,8 +90,6 @@ help:
 		'  make perf-observation-summary 汇总 instrumented perf20 ROI' \
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
 		'  make cpu-contract-test 运行全部轻量 Python 合同测试' \
-		'  make custom-test       运行自定义指令 Scala 与编码工具测试' \
-		'  make custom-check CUSTOM_PROFILE=<name> 生成赛题 profile 并运行 RTL 检查' \
 		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
 		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
 		'  make sim                单个软件仿真（RUN_SOFTWARE 可覆盖）' \
@@ -105,6 +98,7 @@ help:
 		'  make func58-sim         全 func58 固定 seeds' \
 		'  make perf20-sim         完整 perf20（包含 stringsearch）' \
 		'  make linux-sim          Linux 软件仿真入口' \
+		'  make branch-trace-summary BRANCH_TRACE=... 汇总逐分支 predictor trace' \
 		'  make board-queue        查询远程 LabAgent 队列' \
 		'  make board-status BOARD_JOB=<id>  查询板测状态' \
 		'  make board-result BOARD_JOB=<id>  查询板测终态证据' \
@@ -116,7 +110,8 @@ help:
 		'  make clean-all          额外清理显式 IDE 状态' '' \
 		'路径覆盖：VIVADO_HOME VIVADO SURFER LABAGENT_HOST LABAGENT_SSH_KEY DOCKER_IMAGE JOBS SIM_LANES' \
 		'实现归档：SOC_EXPERIMENT_MANIFEST=... SOC_ARCHIVE_CLASS=auto|candidate|stable' \
-		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项'
+		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项' \
+		'分支观察：SIM_BRANCH_TRACE=1 生成仿真专用 branch-trace-v1 sidecar'
 
 board-queue:
 	@LABAGENT_HOST="$(LABAGENT_HOST)" LABAGENT_SSH_KEY="$(LABAGENT_SSH_KEY)" $(BOARDCTL) queue
@@ -155,21 +150,6 @@ toolchain-check: env-build
 docs-check:
 	@python3 scripts/common/check_docs.py
 
-local-evidence:
-	@python3 -I scripts/common/write_local_evidence.py --root "$(ROOT_DIR)" \
-		--python-log "$(PYTHON_CONTRACT_LOG)" \
-		--scala-run "$(SCALA_RUN_MANIFEST)" --out "$(LOCAL_EVIDENCE_OUT)"
-
-evidence-current:
-	@mkdir -p "$(ROOT_DIR)/evidence/current"
-	@python3 -I scripts/common/write_local_evidence.py --root "$(ROOT_DIR)" \
-		--python-log "$(PYTHON_CONTRACT_LOG)" \
-		--scala-run "$(SCALA_RUN_MANIFEST)" \
-		--recorded-python-log "$(ROOT_DIR)/evidence/current/python-contract.log" \
-		--out "$(ROOT_DIR)/evidence/current/local-verification.json" \
-		--index "$(ROOT_DIR)/evidence/index.json"
-	@$(MAKE) docs-check
-
 experiment-freeze: cpu-generate
 	@python3 scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
 		--experiment-id "$(EXPERIMENT_ID)" --chiplab-dir "$(CHIPLAB_HOME)" \
@@ -202,41 +182,18 @@ cpu-test:
 	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "testOnly $(CPU_TEST)"'
 
 cpu-test-all:
-	@rm -rf "$(CPU_DIR)/target/test-reports"
-	@rm -f "$(SCALA_RUN_PREPARED)" "$(SCALA_RUN_MANIFEST)"
-	@mkdir -p "$(BUILD_ROOT)/evidence"
-	@python3 -I scripts/common/write_scala_run_manifest.py prepare \
-		--root "$(ROOT_DIR)" --prepared "$(SCALA_RUN_PREPARED)"
 	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch test'
-	@python3 -I scripts/common/write_scala_run_manifest.py finalize \
-		--root "$(ROOT_DIR)" --prepared "$(SCALA_RUN_PREPARED)" \
-		--reports "$(CPU_DIR)/target/test-reports" --out "$(SCALA_RUN_MANIFEST)"
-	@rm -f "$(SCALA_RUN_PREPARED)"
 
 cpu-contract-test:
-	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/common/run_python_contracts.py" \
-		--root "$(ROOT_DIR)" \
-		--start-directory "$(CPU_DIR)/tests/python" --pattern 'test_*.py' \
-		--log "$(PYTHON_CONTRACT_LOG)"
-
-custom-test:
-	@SPINAL_SIM_WORKSPACE_ROOT="$(CPU_DIR)/target/spinal-sim/workspaces" SPINAL_SIM_WORKSPACE="$(CPU_DIR)/target/spinal-sim/contracts" $(CONTAINER_RUN) sh -ec \
-		'cd "$(CPU_DIR)"; sbt -batch "testOnly miku.compat.CoreTopCompatGeneratorSpec miku.core.CustomInstructionProfileSpec miku.execute.CustomExecutionSpec"'
 	@$(CONTAINER_RUN) python3 -I -m unittest discover \
-		-s "$(CPU_DIR)/tests/python" -p 'test_custom_instruction_word.py'
-
-custom-check: custom-test
-	@profile="$$(printf '%s' "$(CUSTOM_PROFILE)" | sed 's/^[[:space:]]*//;s/[[:space:]]*$$//' | tr '[:upper:]' '[:lower:]')"; \
-		case "$$profile" in ''|disabled|off) \
-			printf 'CUSTOM_PROFILE 必须是已注册的赛题 profile\n' >&2; exit 2 ;; \
-		esac
-	@$(MAKE) cpu-locked-gates CUSTOM_PROFILE="$(CUSTOM_PROFILE)"
+		-s "$(CPU_DIR)/tests/python" -p 'test_*.py'
 
 cpu-generate:
+	@test "$(CPU_BRANCH_TRACE)" = 0 || test "$(CPU_BRANCH_TRACE)" = 1
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@rm -rf "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
 	@mkdir -p "$(BUILD_ROOT)/rtl/raw" "$(BUILD_ROOT)/rtl/package"
-	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw --custom-profile $(CUSTOM_PROFILE)"'
+	@$(CONTAINER_RUN) sh -ec 'cd "$(CPU_DIR)"; sbt -batch "runMain miku.compat.GenerateCoreTopCompat --out-dir $(BUILD_ROOT)/rtl/raw$(if $(filter 1,$(CPU_BRANCH_TRACE)), --branch-trace,)"'
 	@test -f "$(BUILD_ROOT)/rtl/raw/core_top.v"
 	@$(CONTAINER_RUN) python3 -I "$(ROOT_DIR)/scripts/cpu/rtl_contract.py" package \
 		--repo-root "$(ROOT_DIR)" --manifest "$(CPU_DIR)/reference/manifest.lock" \
@@ -245,7 +202,7 @@ cpu-generate:
 	@install -m 0644 "$(BUILD_ROOT)/rtl/package/rtl/mycpu_top.v" "$(BUILD_ROOT)/rtl/mycpu_top.v"
 	@$(CONTAINER_RUN) python3 scripts/cpu/write_generation_manifest.py --root "$(ROOT_DIR)" \
 		--raw "$(BUILD_ROOT)/rtl/raw/core_top.v" --published "$(BUILD_ROOT)/rtl/mycpu_top.v" \
-		--custom-profile "$(CUSTOM_PROFILE)" --out "$(BUILD_ROOT)/rtl/generation-manifest.json"
+		--out "$(BUILD_ROOT)/rtl/generation-manifest.json"
 
 cpu-locked-gates: cpu-generate
 	@rm -rf "$(BUILD_ROOT)/gates/port" "$(BUILD_ROOT)/gates/lint" "$(BUILD_ROOT)/gates/yosys"
@@ -263,18 +220,14 @@ cpu-locked-gates: cpu-generate
 		--ports "$(CPU_DIR)/reference/core-top.ports.json" --rtl "$(BUILD_ROOT)/rtl/mycpu_top.v" \
 		--out-dir "$(BUILD_ROOT)/gates/yosys" --yosys /usr/bin/yosys
 
-cpu-check:
-	@$(MAKE) cpu-test-all
-	@$(MAKE) cpu-locked-gates
-	@$(MAKE) cpu-contract-test
-	@$(MAKE) local-evidence
-	@$(MAKE) docs-check
+cpu-check: cpu-test-all cpu-generate cpu-locked-gates docs-check cpu-contract-test
 
 sim-prepare: cpu-generate
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/prepare" \
 		--workspace "$(ROOT_DIR)" --artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" \
 		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
 		--profile "$(SIM_PROFILE)" --suite "$(SIM_SUITE)" --workloads "$(SIM_WORKLOADS)" \
+		--branch-trace "$(SIM_BRANCH_TRACE)" \
 		--config-args '--run $(RUN_SOFTWARE) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst' \
 		--jobs "$(JOBS)" --sim-path "$(CONTAINER_SIM_PATH)" --verilator-home /usr/share/verilator --extra-libs '-llz4' \
 		--rebuild "$(SIM_REBUILD)"
@@ -308,6 +261,10 @@ perf20-sim:
 linux-sim:
 	@$(MAKE) sim RUN_SOFTWARE=linux SIM_WORKLOADS=linux \
 		TIME_LIMIT="$(LINUX_TIME_LIMIT)" SIM_LANES=1
+
+branch-trace-summary:
+	@test -n "$(BRANCH_TRACE)" || { printf 'BRANCH_TRACE is required\n' >&2; exit 2; }
+	@python3 -I "$(ROOT_DIR)/scripts/experiment/branch_trace_summary.py" "$(BRANCH_TRACE)"
 
 wave:
 	@test -f "$(SURFER)" || { printf 'Surfer 不存在: %s\n' "$(SURFER)" >&2; exit 1; }

@@ -2,10 +2,6 @@
 
 范围：只处理 LSQ 转发、TLB 时序、Cache MSHR、分支预测；其他方向不启动新实验。
 
-> 状态说明（2026-08-17）：本文是按日期保留的执行记录，不是仓库现在的
-> 验证状态。当前结论见 [status.md](status.md)。文中 `.codex-tmp-linux/`
-> 下的路径是执行时的本地证据目录，不属于 Git 跟踪内容，普通 clone 中可能不存在。
-
 ## 已落地
 
 ### LSQ 转发
@@ -158,28 +154,8 @@ Vivado setup WNS `-0.506 ns`、hold `+0.024 ns`。`cpu_setup_top50.rpt` 显示�
   - `programming-summary.txt`：`780e41c2...`
   - `vivado-metrics.txt`：`3663b76b...`
 
-### 归档身份摘要
-
-| 字段 | 值 |
-| --- | --- |
-| 仓库提交 | `8f33144de808d28bb287cd358afeef02f24c8336` |
-| CPU 源码提交 | `c60dadd4fdc1c2ae3f7eb61a345a515e907ba93a` |
-| published RTL SHA256 | `e81fd3aa33da3c1987d0b1b23f9da2cc4d7813c675b6735a7dd722038556ed34` |
-| Chiplab commit | `c398d274812f164d387146fa7d8f612a4a1296d9` |
-| Vivado | `2023.2` |
-| FPGA part | `xc7a200tfbg676-2` |
-| implementation profile | `perf` |
-| CPU frequency | 100 MHz |
-| Setup WNS | `+0.018 ns` |
-| Hold WNS | `+0.050 ns` |
-| DRC | 0 Error |
-| perf20 | 20／20 passed |
-| Selected CPU cycles | `33,393,947` |
-| Selected SoC cycles | `33,404,961` |
-| LabAgent job | `20260817-030305-5a6c7f1c` |
-| Package SHA256 | `79e5498ac53d47fdf653e6db597429dc99ef5b6fa9b3f153770fd1b57705809a` |
-
 ### 结论
 
 100 MHz setup 已闭合且板测 20/20 通过。实现脚本现在默认对 perf build 执行
 AggressiveExplore phys_opt + route 后处理；func build 仍走原单遍流程。
+

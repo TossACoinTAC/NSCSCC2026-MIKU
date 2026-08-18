@@ -90,11 +90,11 @@ final class OooBackendWithExecution(
   )
   backend.io.rename := io.rename
   backend.io.predictorUpdateCapacity := io.predictorUpdateCapacity
-  backend.io.releaseLoadValid := loadStoreQueue.io.releaseLoadValid
-  backend.io.releaseStoreValid := Mux(
+  backend.io.releaseLoadCount := loadStoreQueue.io.releaseLoadCount
+  backend.io.releaseStoreCount := Mux(
     storeDrainBusy,
-    B(0, config.commitWidth bits),
-    loadStoreQueue.io.releaseStoreValid
+    U(0, log2Up(config.commitWidth + 1) bits),
+    loadStoreQueue.io.releaseStoreCount
   )
   io.renameReady := Mux(
     storeDrainBusy,

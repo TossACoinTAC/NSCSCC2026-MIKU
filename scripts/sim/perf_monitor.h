@@ -69,6 +69,8 @@ private:
         std::uint64_t dispatch_valid_sum = 0;
         std::uint64_t dispatch_fire_sum = 0;
         std::uint64_t dispatch_fire_hist[5] = {};
+        std::uint64_t divide_operand_blocked_cycles = 0;
+        std::uint64_t free_list_capacity_blocked_cycles = 0;
         std::uint64_t branch_commit_hist[4] = {};
         std::uint64_t branch_retired = 0;
         std::uint64_t predictor_update_cycles = 0;
@@ -156,6 +158,8 @@ private:
     std::uint64_t dispatch_valid_sum_ = 0;
     std::uint64_t dispatch_fire_sum_ = 0;
     std::uint64_t dispatch_fire_hist_[5] = {};
+    std::uint64_t divide_operand_blocked_cycles_ = 0;
+    std::uint64_t free_list_capacity_blocked_cycles_ = 0;
 
     std::uint64_t branch_commit_hist_[4] = {};
     std::uint64_t branch_retired_ = 0;
@@ -176,6 +180,10 @@ private:
     std::uint64_t store_queue_occupancy_sum_ = 0;
     std::uint64_t load_queue_full_cycles_ = 0;
     std::uint64_t store_queue_full_cycles_ = 0;
+    std::uint64_t load_queue_capacity_ = 0;
+    std::uint64_t store_queue_capacity_ = 0;
+    std::uint64_t issue_queue_capacity_ = 0;
+    bool capacity_seen_ = false;
     std::uint64_t lsq_events_[kLsqEventCount] = {};
     std::uint64_t cache_events_[20] = {};
     std::uint64_t cache_occupancy_sum_[3] = {};

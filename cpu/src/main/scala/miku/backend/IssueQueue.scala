@@ -62,7 +62,6 @@ final case class IssueEntry(config: OooCoreConfig, portIndex: Int) extends Bundl
   private val hasSystem = capabilities.contains(ExecutionUnitKind.Csr) ||
     capabilities.contains(ExecutionUnitKind.Serial)
   private val hasMemory = capabilities.contains(ExecutionUnitKind.LoadStore)
-  private val hasCustomInstruction = CustomInstructionRouting.portNeedsInstruction(config, portIndex)
 
   val fuType = UInt(ExecutionUnitType.Width bits)
   val alu = if (hasAlu) IssueAluPayload(config) else null
@@ -70,7 +69,6 @@ final case class IssueEntry(config: OooCoreConfig, portIndex: Int) extends Bundl
   val mulDiv = if (hasMultiply || hasDivide) IssueMulDivPayload() else null
   val system = if (hasSystem) IssueSystemPayload(config) else null
   val memory = if (hasMemory) IssueMemoryPayload(config) else null
-  val customInstruction = if (hasCustomInstruction) Bits(32 bits) else null
   // Decoded exceptions complete through an ordinary ALU-class uop.  A
   // dedicated LSU receives translation/data exceptions from the LSQ instead.
   val exception = if (!hasMemory) ExceptionMetadata() else null
@@ -108,8 +106,6 @@ final class IssueQueue(
   private val portHasSystem = portCapabilities.contains(ExecutionUnitKind.Csr) ||
     portCapabilities.contains(ExecutionUnitKind.Serial)
   private val portHasMemory = portCapabilities.contains(ExecutionUnitKind.LoadStore)
-  private val portHasCustomInstruction =
-    CustomInstructionRouting.portNeedsInstruction(config, portIndex)
 
   private def packIssueEntry(
       target: IssueEntry,
@@ -156,7 +152,6 @@ final class IssueQueue(
     } else {
       target.exception := source.decoded.exception
     }
-    if (portHasCustomInstruction) target.customInstruction := source.decoded.instruction
     target.pdst := source.pdst
     target.psrc1 := source.psrc1
     target.psrc2 := source.psrc2
@@ -181,7 +176,6 @@ final class IssueQueue(
     if (portHasSystem) target.system := source.system
     if (portHasMemory) target.memory := source.memory
     else target.exception := source.exception
-    if (portHasCustomInstruction) target.customInstruction := source.customInstruction
     target.pdst := source.pdst
     target.psrc1 := source.psrc1
     target.psrc2 := source.psrc2
@@ -199,8 +193,7 @@ final class IssueQueue(
       (if (portHasAlu) source.alu.pc
        else if (portHasMemory) source.memory.pc
        else U(0, config.xlen bits))
-    target.decoded.instruction :=
-      (if (portHasCustomInstruction) source.customInstruction else B(0, 32 bits))
+    target.decoded.instruction := 0
     target.decoded.fetchSlot := 0
     target.decoded.rd :=
       (if (portHasSystem) source.system.rd else U(0, config.archRegIndexWidth bits))
@@ -557,17 +550,9 @@ final class IssueQueue(
 
 final class DispatchRouter(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     extends Component {
-  private def accepts(portIndex: Int, port: ExecutionPortConfig, uop: RenamedMicroOp): Bool = {
-    val customCompute =
-      CustomInstructionDecode.compute(uop.decoded.instruction, config.customInstructionProfile)
+  private def accepts(port: ExecutionPortConfig, uop: RenamedMicroOp): Bool = {
     val acceptedKinds = port.capabilities.toVector.map {
-      case ExecutionUnitKind.Alu       =>
-        if (
-          config.customInstructionProfile.computeSpecifications.nonEmpty &&
-          portIndex != config.customComputePort
-        )
-          uop.decoded.fuType === ExecutionUnitType.alu && !customCompute
-        else uop.decoded.fuType === ExecutionUnitType.alu
+      case ExecutionUnitKind.Alu       => uop.decoded.fuType === ExecutionUnitType.alu
       case ExecutionUnitKind.Branch    => uop.decoded.fuType === ExecutionUnitType.branch
       case ExecutionUnitKind.Multiply  => uop.decoded.fuType === ExecutionUnitType.multiply
       case ExecutionUnitKind.Divide    => uop.decoded.fuType === ExecutionUnitType.divide
@@ -606,7 +591,7 @@ final class DispatchRouter(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     val capable = Bits(config.executionWidth bits)
     for (port <- 0 until config.executionWidth) {
       capable(port) := io.inputValid(lane) && io.portReady(port) &&
-        accepts(port, config.executionPorts(port), io.input(lane))
+        accepts(config.executionPorts(port), io.input(lane))
     }
     val available = capable & ~portUsed(lane)
     choices(lane) := B(0, config.executionWidth bits)
