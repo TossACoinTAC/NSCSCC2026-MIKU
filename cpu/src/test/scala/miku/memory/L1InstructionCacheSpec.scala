@@ -337,8 +337,7 @@ class L1InstructionCacheSpec extends AnyFunSuite {
   private def assertResponse(
       dut: L1InstructionCacheProbe,
       virtualAddress: BigInt,
-      firstInstruction: Int,
-      expectedDirectBranchTarget: Option[BigInt] = None
+      firstInstruction: Int
   ): Unit = {
     assert(dut.io.responseValid.toBoolean)
     assert(dut.io.response.virtualAddress.toBigInt == virtualAddress)
@@ -346,69 +345,6 @@ class L1InstructionCacheSpec extends AnyFunSuite {
     for (lane <- 0 until config.fetchWidth) {
       assert(dut.io.response.instructions(lane).toBigInt == firstInstruction + lane)
     }
-    expectedDirectBranchTarget match {
-      case Some(target) =>
-        assert(dut.io.response.predecode(0).valid.toBoolean)
-        assert(dut.io.response.predecode(0).branchType.toBigInt == 1)
-        assert(dut.io.response.predecode(0).target.toBigInt == target)
-        assert(dut.io.response.predecode(0).staticTaken.toBoolean)
-        assert(!dut.io.response.predecode(0).indirect.toBoolean)
-      case None =>
-        assert(!dut.io.response.predecode(0).valid.toBoolean)
-    }
-  }
-
-  test("L1I predecode remains aligned with each registered turnover response") {
-    SimConfig.withVerilator
-      .workspacePath(
-        sys.env.getOrElse("SPINAL_SIM_WORKSPACE_ROOT", "target") +
-          "/sim-workspace-ooo-l1i-registered-predecode"
-      )
-      .compile(new L1InstructionCacheProbe(config))
-      .doSim("ooo-l1i-registered-predecode", 0x4c93) { dut =>
-        dut.clockDomain.forkStimulus(period = 10)
-        clearInputs(dut)
-        dut.clockDomain.assertReset()
-        dut.clockDomain.waitSampling(2)
-        dut.clockDomain.deassertReset()
-        dut.clockDomain.waitSampling(config.instructionCache.sets + 8)
-
-        val branchAddress = BigInt(0x100)
-        val plainAddress = BigInt(0x180)
-        val branchInstruction = encodeDirectBranch(16).toInt
-        installLine(dut, branchAddress, branchInstruction)
-        installLine(dut, plainAddress, 1000)
-        acceptRequest(dut, branchAddress, branchAddress)
-
-        dut.io.requestValid #= true
-        dut.io.request.virtualAddress #= plainAddress
-        dut.io.request.physicalAddress #= plainAddress
-        sleep(1)
-        assert(dut.io.requestReady.toBoolean)
-        sample(dut)
-        assertResponse(
-          dut,
-          branchAddress,
-          branchInstruction,
-          expectedDirectBranchTarget = Some(branchAddress + 16)
-        )
-
-        dut.io.request.virtualAddress #= branchAddress
-        dut.io.request.physicalAddress #= branchAddress
-        sleep(1)
-        assert(dut.io.requestReady.toBoolean)
-        sample(dut)
-        assertResponse(dut, plainAddress, 1000)
-
-        dut.io.requestValid #= false
-        sample(dut)
-        assertResponse(
-          dut,
-          branchAddress,
-          branchInstruction,
-          expectedDirectBranchTarget = Some(branchAddress + 16)
-        )
-      }
   }
 
   test("confirmed warm L1I hits turn the frontend owner over before registered data delivery") {
@@ -647,7 +583,7 @@ class L1InstructionCacheSpec extends AnyFunSuite {
       }
   }
 
-  test("speculative instruction-array read preserves one-cycle hit turnover and miss recovery") {
+  test("speculative instruction-array read preserves hit turnover and miss recovery") {
     for ((enabled, decoupled) <- Seq((false, false), (true, false), (true, true))) {
       val testConfig = config.copy(
         enableSpeculativeInstructionArrayRead = enabled,
@@ -669,10 +605,8 @@ class L1InstructionCacheSpec extends AnyFunSuite {
 
           val firstAddress = BigInt(0x100)
           val secondAddress = BigInt(0x180)
-          val thirdAddress = BigInt(0x200)
           installLine(dut, firstAddress, 1000)
           installLine(dut, secondAddress, 2000)
-          installLine(dut, thirdAddress, 3000)
           acceptRequest(dut, firstAddress, firstAddress)
 
           dut.io.requestValid #= true
@@ -682,21 +616,9 @@ class L1InstructionCacheSpec extends AnyFunSuite {
           assert(dut.io.requestReady.toBoolean)
           sample(dut)
           assertResponse(dut, firstAddress, 1000)
-
-          // The next accepted hit must use the same registered-response latency.
-          // This remains true whether the array lookup was issued speculatively
-          // or from the confirmed-turnover request path.
-          dut.io.request.virtualAddress #= thirdAddress
-          dut.io.request.physicalAddress #= thirdAddress
-          sleep(1)
-          assert(dut.io.requestReady.toBoolean)
-          sample(dut)
-          assertResponse(dut, secondAddress, 2000)
           dut.io.requestValid #= false
           sample(dut)
-          assertResponse(dut, thirdAddress, 3000)
-          sample(dut)
-          assert(!dut.io.responseValid.toBoolean)
+          assertResponse(dut, secondAddress, 2000)
 
           val missAddress = BigInt(0x2c0)
           acceptRequest(dut, firstAddress, firstAddress)

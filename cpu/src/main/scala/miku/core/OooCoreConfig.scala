@@ -99,9 +99,6 @@ final case class OooCoreConfig(
     enableTokenizedOrdinaryIssueOutput: Boolean = true,
     enableBalancedIssueSelection: Boolean = true,
     enableBankedLoadForwardCompletion: Boolean = true,
-    // Mirror only scheduler ownership in a narrow local bitmap.  The complete LQ entry remains
-    // authoritative for completion, recovery, forwarding and architectural observation.
-    enableLoadPendingStateSidecar: Boolean = true,
     enableFlushDecoupledDirectWakeup: Boolean = true,
     enableHeadCompletionCommitBypass: Boolean = true,
     enableBranchHeadCompletionBypass: Boolean = true,

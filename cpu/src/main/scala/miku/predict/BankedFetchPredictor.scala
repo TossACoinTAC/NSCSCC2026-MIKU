@@ -156,45 +156,36 @@ final class BankedFetchPredictor(
       io.speculativeHistoryTaken.asBits
   }
 
-  val architecturalRasCountOneHot = Vec(Bits((rasDepth + 1) bits), config.commitWidth + 1)
-  val architecturalRasPushAccepted = Vec(Bool(), config.commitWidth)
-  architecturalRasCountOneHot(0) := UIntToOh(architecturalRasCount, rasDepth + 1)
-  for (lane <- 0 until config.commitWidth) {
-    val pushOnly = io.architecturalRasPush(lane) && !io.architecturalRasPop(lane)
-    val popOnly = io.architecturalRasPop(lane) && !io.architecturalRasPush(lane)
-    val pushAccepted = pushOnly &&
-      !architecturalRasCountOneHot(lane)(rasDepth)
-    val popAccepted = popOnly &&
-      !architecturalRasCountOneHot(lane)(0)
-    architecturalRasPushAccepted(lane) := pushAccepted
-    architecturalRasCountOneHot(lane + 1) := architecturalRasCountOneHot(lane)
-    when(pushAccepted) {
-      architecturalRasCountOneHot(lane + 1) :=
-        (architecturalRasCountOneHot(lane) |<< 1).resize(rasDepth + 1)
-    }.elsewhen(popAccepted) {
-      architecturalRasCountOneHot(lane + 1) :=
-        (architecturalRasCountOneHot(lane) |>> 1).resize(rasDepth + 1)
-    }
-  }
-  val architecturalRasNextCount = OHToUInt(architecturalRasCountOneHot(config.commitWidth))
-  val architecturalRasNext = Vec(UInt(config.xlen bits), rasDepth)
+  val architecturalRasCountStage = Vec(UInt(rasCountWidth bits), config.commitWidth + 1)
+  val architecturalRasStage = Array.fill(config.commitWidth + 1)(
+    Vec(UInt(config.xlen bits), rasDepth)
+  )
+  architecturalRasCountStage(0) := architecturalRasCount
   for (entry <- 0 until rasDepth) {
-    val writeMatch = Bits(config.commitWidth bits)
-    for (lane <- 0 until config.commitWidth) {
-      writeMatch(lane) := architecturalRasPushAccepted(lane) &&
-        architecturalRasCountOneHot(lane)(entry)
+    architecturalRasStage(0)(entry) := architecturalRas(entry)
+  }
+  for (lane <- 0 until config.commitWidth) {
+    architecturalRasCountStage(lane + 1) := architecturalRasCountStage(lane)
+    for (entry <- 0 until rasDepth) {
+      architecturalRasStage(lane + 1)(entry) := architecturalRasStage(lane)(entry)
     }
-    architecturalRasNext(entry) := architecturalRas(entry)
-    for (lane <- 0 until config.commitWidth) {
-      when(writeMatch(lane)) {
-        architecturalRasNext(entry) := io.architecturalReturnAddress(lane)
+    when(io.architecturalRasPush(lane) && !io.architecturalRasPop(lane)) {
+      when(architecturalRasCountStage(lane) =/= U(rasDepth, rasCountWidth bits)) {
+        architecturalRasStage(lane + 1)(
+          architecturalRasCountStage(lane)(rasIndexWidth - 1 downto 0)
+        ) := io.architecturalReturnAddress(lane)
+        architecturalRasCountStage(lane + 1) := architecturalRasCountStage(lane) + 1
+      }
+    }.elsewhen(io.architecturalRasPop(lane) && !io.architecturalRasPush(lane)) {
+      when(architecturalRasCountStage(lane) =/= 0) {
+        architecturalRasCountStage(lane + 1) := architecturalRasCountStage(lane) - 1
       }
     }
   }
   when(io.architecturalRasPush.orR || io.architecturalRasPop.orR) {
-    architecturalRasCount := architecturalRasNextCount
+    architecturalRasCount := architecturalRasCountStage(config.commitWidth)
     for (entry <- 0 until rasDepth) {
-      architecturalRas(entry) := architecturalRasNext(entry)
+      architecturalRas(entry) := architecturalRasStage(config.commitWidth)(entry)
     }
   }
   val effectiveSpeculativeRasPush = Bool()
@@ -234,9 +225,9 @@ final class BankedFetchPredictor(
   }
   when(io.flush) {
     speculativeGhr := architecturalGhrStage(config.commitWidth)
-    speculativeRasCount := architecturalRasNextCount
+    speculativeRasCount := architecturalRasCountStage(config.commitWidth)
     for (entry <- 0 until rasDepth) {
-      speculativeRas(entry) := architecturalRasNext(entry)
+      speculativeRas(entry) := architecturalRasStage(config.commitWidth)(entry)
     }
   }
 
@@ -317,12 +308,6 @@ final class BankedFetchPredictor(
 
   val btbRead = Vec(Bits(btbEntryWidth bits), config.fetchWidth)
   val phtRead = Vec(Bits(2 bits), config.fetchWidth)
-  val speculativeRasTop = UInt(config.xlen bits)
-  speculativeRasTop := 0
-  when(speculativeRasCount =/= 0) {
-    speculativeRasTop :=
-      speculativeRas(speculativeRasCount(rasIndexWidth - 1 downto 0) - 1)
-  }
   for (bank <- 0 until config.fetchWidth) {
     val btbWrite = io.btbUpdateValid && btbUpdateBankMask(bank) && !invalidating
     btbBanks(bank).write(
@@ -377,7 +362,8 @@ final class BankedFetchPredictor(
       io.prediction(bank).branchType === PredictedBranchType.ret &&
         speculativeRasCount =/= 0
     ) {
-      io.prediction(bank).target := speculativeRasTop
+      io.prediction(bank).target :=
+        speculativeRas(speculativeRasCount(rasIndexWidth - 1 downto 0) - 1)
     }
   }
 }

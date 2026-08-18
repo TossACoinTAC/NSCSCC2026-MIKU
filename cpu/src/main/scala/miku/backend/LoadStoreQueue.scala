@@ -231,52 +231,17 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val drainAfterFlush = RegInit(False)
 
   // Completed loads remain allocated until commit.  The allocator therefore
-  // advances the base only on commit.  Select the oldest pending entry in
-  // three local regions: the base bank suffix, the other bank, then the base
-  // bank prefix.  This is the exact circular order starting at loadBase, but
-  // avoids a full-queue variable rotate and add on the scheduling path.
-  val derivedPendingLoads = Bits(config.loadQueueEntries bits)
+  // advances the base only on commit, and a rotated priority select preserves
+  // program order across physical slot wrap-around.
+  val pendingLoads = Bits(config.loadQueueEntries bits)
   for (entry <- 0 until config.loadQueueEntries) {
-    derivedPendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
+    pendingLoads(entry) := loads(entry).valid && !loads(entry).requestSent &&
       !loads(entry).completed
   }
-  val pendingLoadState = Reg(Bits(config.loadQueueEntries bits)) init (0)
-  val pendingLoads = if (config.enableLoadPendingStateSidecar) {
-    pendingLoadState
-  } else {
-    derivedPendingLoads
-  }
-  val loadSelectBankEntries = config.loadQueueEntries / 2
-  val loadSelectLocalWidth = log2Up(loadSelectBankEntries)
-  val loadBaseBank = loadBase.msb
-  val loadBaseLocal = loadBase(loadSelectLocalWidth - 1 downto 0)
-  val loadPendingBank0 = pendingLoads(loadSelectBankEntries - 1 downto 0)
-  val loadPendingBank1 = pendingLoads(config.loadQueueEntries - 1 downto loadSelectBankEntries)
-  val loadBasePending = Mux(loadBaseBank, loadPendingBank1, loadPendingBank0)
-  val loadOtherPending = Mux(loadBaseBank, loadPendingBank0, loadPendingBank1)
-  val loadBaseSuffixPending = Bits(loadSelectBankEntries bits)
-  val loadBasePrefixPending = Bits(loadSelectBankEntries bits)
-  for (entry <- 0 until loadSelectBankEntries) {
-    val entryIndex = U(entry, loadSelectLocalWidth bits)
-    loadBaseSuffixPending(entry) := loadBasePending(entry) && entryIndex >= loadBaseLocal
-    loadBasePrefixPending(entry) := loadBasePending(entry) && entryIndex < loadBaseLocal
-  }
-  val loadBaseSuffixValid = loadBaseSuffixPending.orR
-  val loadOtherValid = loadOtherPending.orR
-  val loadBasePrefixValid = loadBasePrefixPending.orR
-  val loadBaseSuffixSelect = OHMasking.first(loadBaseSuffixPending)
-  val loadOtherSelect = OHMasking.first(loadOtherPending)
-  val loadBasePrefixSelect = OHMasking.first(loadBasePrefixPending)
-  val oldestLoadBank = Bool()
-  val oldestLoadLocalSelect = Bits(loadSelectBankEntries bits)
-  oldestLoadBank := loadBaseBank
-  oldestLoadLocalSelect := loadBasePrefixSelect
-  when(loadBaseSuffixValid) {
-    oldestLoadLocalSelect := loadBaseSuffixSelect
-  }.elsewhen(loadOtherValid) {
-    oldestLoadBank := !loadBaseBank
-    oldestLoadLocalSelect := loadOtherSelect
-  }
+  val rotatedPending = ((pendingLoads ## pendingLoads) |>> loadBase)
+    .resize(config.loadQueueEntries)
+  val loadHeadOffset = OHToUInt(OHMasking.first(rotatedPending))
+  val oldestLoadHead = (loadBase + loadHeadOffset).resized
   // Restricted younger-ready Load bypass (L02 retry-token form).  When the
   // currently scheduled oldest Load is held by a local alias/forwarding
   // condition, select the next younger pending Load whose address is already
@@ -285,20 +250,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val retryValid = RegInit(False)
   val retryLoadHead = Reg(UInt(config.loadQueueIndexWidth bits)) init (0)
   val retryCandidatePending = retryValid && pendingLoads(retryLoadHead)
-  val retryLoadLocalSelect = UIntToOh(
-    retryLoadHead(loadSelectLocalWidth - 1 downto 0),
-    loadSelectBankEntries
-  )
-  val selectedLoadBank = Mux(retryCandidatePending, retryLoadHead.msb, oldestLoadBank)
-  val selectedLoadLocalSelect = Mux(
-    retryCandidatePending,
-    retryLoadLocalSelect,
-    oldestLoadLocalSelect
-  )
-  val selectedLoadLocal = OHToUInt(selectedLoadLocalSelect)
-  val selectedLoadHead = (selectedLoadBank.asBits ## selectedLoadLocal.asBits).asUInt
-  val selectedLoadValid = retryCandidatePending || loadBaseSuffixValid || loadOtherValid ||
-    loadBasePrefixValid
+  val selectedLoadHead = Mux(retryCandidatePending, retryLoadHead, oldestLoadHead)
+  val selectedLoadValid = retryCandidatePending || pendingLoads.orR
   // Match the registered uop boundary used by the reference LoadQueue.  The
   // selected index and immutable payload are state: translation, forwarding,
   // and cache request ownership no longer re-read wide queue fields through a
@@ -313,18 +266,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   // one long combinational loop on the storage timing path.
   val scheduledLoadReselect =
     selectedLoadValid && (!scheduledLoadValid || selectedLoadHead =/= loadHead)
-  val selectedLoadByBank = Vec(LoadQueueEntry(config), 2)
-  for (bank <- 0 until 2) {
-    selectedLoadByBank(bank) := OHMux(
-      selectedLoadLocalSelect,
-      (0 until loadSelectBankEntries).map(entry => loads(bank * loadSelectBankEntries + entry))
-    )
-  }
-  val selectedLoadForAgu = Mux(
-    selectedLoadBank,
-    selectedLoadByBank(1),
-    selectedLoadByBank(0)
-  )
+  val selectedLoadForAgu = loads(selectedLoadHead)
   val scheduledLoadAguMatch =
     selectedLoadValid && aguFire && !io.agu.isWrite && !aguMisaligned &&
       io.agu.uop.loadQueueIndex === selectedLoadHead &&
@@ -336,19 +278,20 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     scheduledLoadValid := selectedLoadValid
     when(scheduledLoadReselect) {
       loadHead := selectedLoadHead
-      scheduledLoad.robPointer := selectedLoadForAgu.robPointer
-      scheduledLoad.recoveryEpoch := selectedLoadForAgu.recoveryEpoch
-      scheduledLoad.memoryEpoch := selectedLoadForAgu.memoryEpoch
-      scheduledLoad.pdst := selectedLoadForAgu.pdst
-      scheduledLoad.writesPdst := selectedLoadForAgu.writesPdst
-      scheduledLoad.virtualAddress := selectedLoadForAgu.virtualAddress
-      scheduledLoad.physicalAddress := selectedLoadForAgu.physicalAddress
-      scheduledLoad.translationDone := selectedLoadForAgu.translationDone
-      scheduledLoad.uncached := selectedLoadForAgu.uncached
-      scheduledLoad.size := selectedLoadForAgu.size
-      scheduledLoad.byteMask := selectedLoadForAgu.byteMask
-      scheduledLoad.signExtend := selectedLoadForAgu.signExtend
-      scheduledLoad.isLl := selectedLoadForAgu.isLl
+      val selectedLoad = loads(selectedLoadHead)
+      scheduledLoad.robPointer := selectedLoad.robPointer
+      scheduledLoad.recoveryEpoch := selectedLoad.recoveryEpoch
+      scheduledLoad.memoryEpoch := selectedLoad.memoryEpoch
+      scheduledLoad.pdst := selectedLoad.pdst
+      scheduledLoad.writesPdst := selectedLoad.writesPdst
+      scheduledLoad.virtualAddress := selectedLoad.virtualAddress
+      scheduledLoad.physicalAddress := selectedLoad.physicalAddress
+      scheduledLoad.translationDone := selectedLoad.translationDone
+      scheduledLoad.uncached := selectedLoad.uncached
+      scheduledLoad.size := selectedLoad.size
+      scheduledLoad.byteMask := selectedLoad.byteMask
+      scheduledLoad.signExtend := selectedLoad.signExtend
+      scheduledLoad.isLl := selectedLoad.isLl
     }
     // AGU and scheduler can target the same newly-ready entry on one edge.
     // Bypass that write into the registered payload so this timing cut does
@@ -886,16 +829,9 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val completion = Reg(Completion(config))
   val completionLoadWakeup = RegInit(False)
   val completionLoadWakeupEpochCurrent = RegInit(False)
-  // An ordinary cached Store has no SC/reservation dependency.  Express its accepted
-  // translation directly instead of reusing translationCompletionFire, whose generic
-  // translationProducesCompletion term also contains translatedScSuccess.  The explicit
-  // predicate is equivalent for this non-SC case and keeps the response physical address out
-  // of the same-cycle Store-to-ROB completion bypass.
-  val translatedFastStore = io.translationResponse.valid && translationActive &&
-    !translationCancelPending && translationOwnerStore && !translationStore.isSc &&
-    translationStore.dataReady && !io.translationResponse.cancelled &&
-    !io.translationResponse.exception.valid && !io.translationResponse.uncached &&
-    !baseCompletionBusy
+  val translatedFastStore = translationCompletionFire && translationOwnerStore &&
+    !translationStore.isSc && !io.translationResponse.cancelled &&
+    !io.translationResponse.exception.valid && !io.translationResponse.uncached
   val alreadyTranslatedFastStore = storeCompletionFire && !headStore.isSc
   val fastStoreCompletionCandidate = if (config.enableFastStoreCompletion) {
     !io.flush && (translatedFastStore || alreadyTranslatedFastStore)
@@ -1078,59 +1014,6 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   io.releaseLoadCount := loadReleaseCount
   io.releaseStoreCount := storeReleaseCount
 
-  val pendingLoadRequestClearMask = Mux(
-    requestCapture && !storeRequest,
-    UIntToOh(loadHead, config.loadQueueEntries),
-    B(0, config.loadQueueEntries bits)
-  )
-  val pendingLoadAllocationSetTerms = (0 until config.renameWidth).map { lane =>
-    val term = Bits(config.loadQueueEntries bits)
-    term := 0
-    when(io.allocateValid(lane) && io.allocate(lane).isLoad) {
-      term := UIntToOh(io.allocate(lane).loadQueueIndex, config.loadQueueEntries)
-    }
-    term
-  }
-  val pendingLoadAllocationSetMask = pendingLoadAllocationSetTerms.reduce(_ | _)
-  val pendingLoadReleaseClearTerms = (0 until config.commitWidth).map { lane =>
-    val term = Bits(config.loadQueueEntries bits)
-    term := 0
-    when(loadReleaseValid(lane)) {
-      term := UIntToOh(io.commit(lane).loadQueueIndex, config.loadQueueEntries)
-    }
-    term
-  }
-  val pendingLoadReleaseClearMask = pendingLoadReleaseClearTerms.reduce(_ | _)
-  val pendingLoadAguClearMask = Mux(
-    aguFire && !io.agu.isWrite && aguMisaligned,
-    UIntToOh(io.agu.uop.loadQueueIndex, config.loadQueueEntries),
-    B(0, config.loadQueueEntries bits)
-  )
-  val pendingLoadTranslationClearMask = Mux(
-    translationResponseFire && io.translationResponse.exception.valid,
-    residentLoadTranslationOwner,
-    B(0, config.loadQueueEntries bits)
-  )
-  val pendingLoadResponseClearMask = Mux(
-    responseLoadAccepted,
-    UIntToOh(responseLoadIndex, config.loadQueueEntries),
-    B(0, config.loadQueueEntries bits)
-  )
-  val pendingLoadForwardClearMask = Mux(
-    forwardFire,
-    UIntToOh(loadHead, config.loadQueueEntries),
-    B(0, config.loadQueueEntries bits)
-  )
-  val pendingLoadTerminalClearMask = pendingLoadReleaseClearMask |
-    pendingLoadAguClearMask | pendingLoadTranslationClearMask |
-    pendingLoadResponseClearMask | pendingLoadForwardClearMask
-  when(io.flush) {
-    pendingLoadState := 0
-  }.otherwise {
-    pendingLoadState := ((pendingLoadState & ~pendingLoadRequestClearMask) |
-      pendingLoadAllocationSetMask) & ~pendingLoadTerminalClearMask
-  }
-
   when(io.flush) {
     // Preserve a cancellation token until the translator's outstanding
     // response is consumed. A response consumed on the flush edge itself does
@@ -1259,9 +1142,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
         loads(index).uncached := io.translationResponse.uncached
         when(translationResponseFire) {
           loads(index).translationDone := True
-          when(io.translationResponse.exception.valid) {
-            loads(index).completed := True
-          }
+          when(io.translationResponse.exception.valid) { loads(index).completed := True }
         }
       }
     }
@@ -1418,36 +1299,12 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     !scheduledLoad.uncached && !scheduledLoad.isLl && !bufferedCommittedStore &&
     !unknownOlderStore.orR && !olderUncachedStore.orR && !olderLoadOrderBlock.orR &&
     (partialOverlapStore.orR || pendingDataStore.orR || forwardingCount > 1)
-  val retryBaseBank = loadHead.msb
-  val retryBaseLocal = loadHead(loadSelectLocalWidth - 1 downto 0)
-  val retryPendingBank0 = alternatePendingLoadAddressReady(loadSelectBankEntries - 1 downto 0)
-  val retryPendingBank1 =
-    alternatePendingLoadAddressReady(config.loadQueueEntries - 1 downto loadSelectBankEntries)
-  val retryBasePending = Mux(retryBaseBank, retryPendingBank1, retryPendingBank0)
-  val retryOtherPending = Mux(retryBaseBank, retryPendingBank0, retryPendingBank1)
-  val retryBaseSuffixPending = Bits(loadSelectBankEntries bits)
-  val retryBasePrefixPending = Bits(loadSelectBankEntries bits)
-  for (entry <- 0 until loadSelectBankEntries) {
-    val entryIndex = U(entry, loadSelectLocalWidth bits)
-    retryBaseSuffixPending(entry) := retryBasePending(entry) && entryIndex >= retryBaseLocal
-    retryBasePrefixPending(entry) := retryBasePending(entry) && entryIndex < retryBaseLocal
-  }
-  val retryBaseSuffixValid = retryBaseSuffixPending.orR
-  val retryOtherValid = retryOtherPending.orR
-  val retryBasePrefixValid = retryBasePrefixPending.orR
-  val retryAlternateValid = retryBaseSuffixValid || retryOtherValid || retryBasePrefixValid
-  val retryAlternateBank = Bool()
-  val retryAlternateLocal = UInt(loadSelectLocalWidth bits)
-  retryAlternateBank := retryBaseBank
-  retryAlternateLocal := OHToUInt(OHMasking.first(retryBasePrefixPending))
-  when(retryBaseSuffixValid) {
-    retryAlternateLocal := OHToUInt(OHMasking.first(retryBaseSuffixPending))
-  }.elsewhen(retryOtherValid) {
-    retryAlternateBank := !retryBaseBank
-    retryAlternateLocal := OHToUInt(OHMasking.first(retryOtherPending))
-  }
-  val retryAlternateHead = (retryAlternateBank.asBits ## retryAlternateLocal.asBits).asUInt
-  val retryTrigger = oldestLoadLocalAliasBlocked && retryAlternateValid &&
+  val retryRotated =
+    ((alternatePendingLoadAddressReady ## alternatePendingLoadAddressReady) |>> loadHead)
+      .resize(config.loadQueueEntries)
+  val retryAlternateHead =
+    (loadHead + OHToUInt(OHMasking.first(retryRotated))).resized
+  val retryTrigger = oldestLoadLocalAliasBlocked && retryRotated.orR &&
     !retryCandidatePending
   when(io.flush) {
     retryValid := False
