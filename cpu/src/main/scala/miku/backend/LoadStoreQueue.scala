@@ -886,9 +886,16 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
   val completion = Reg(Completion(config))
   val completionLoadWakeup = RegInit(False)
   val completionLoadWakeupEpochCurrent = RegInit(False)
-  val translatedFastStore = translationCompletionFire && translationOwnerStore &&
-    !translationStore.isSc && !io.translationResponse.cancelled &&
-    !io.translationResponse.exception.valid && !io.translationResponse.uncached
+  // An ordinary cached Store has no SC/reservation dependency.  Express its accepted
+  // translation directly instead of reusing translationCompletionFire, whose generic
+  // translationProducesCompletion term also contains translatedScSuccess.  The explicit
+  // predicate is equivalent for this non-SC case and keeps the response physical address out
+  // of the same-cycle Store-to-ROB completion bypass.
+  val translatedFastStore = io.translationResponse.valid && translationActive &&
+    !translationCancelPending && translationOwnerStore && !translationStore.isSc &&
+    translationStore.dataReady && !io.translationResponse.cancelled &&
+    !io.translationResponse.exception.valid && !io.translationResponse.uncached &&
+    !baseCompletionBusy
   val alreadyTranslatedFastStore = storeCompletionFire && !headStore.isSc
   val fastStoreCompletionCandidate = if (config.enableFastStoreCompletion) {
     !io.flush && (translatedFastStore || alreadyTranslatedFastStore)
