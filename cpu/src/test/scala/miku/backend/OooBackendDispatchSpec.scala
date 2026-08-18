@@ -134,8 +134,8 @@ private final class OooBackendDispatchProbe(config: OooCoreConfig) extends Compo
   completionPayload.branchTarget := 0
   completionPayload.branchMispredict := False
   backend.io.completion(io.completionLane) := completionPayload
-  backend.io.releaseLoadValid := B(0, config.commitWidth bits)
-  backend.io.releaseStoreValid := B(0, config.commitWidth bits)
+  backend.io.releaseLoadCount := 0
+  backend.io.releaseStoreCount := 0
   backend.io.debugReadAddress := 0
   backend.io.flush := io.flush
 

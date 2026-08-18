@@ -113,6 +113,15 @@ final class HierarchicalTlb(
     private def entryMatches(entry: TlbEntryState, vppn: Bits, asid: Bits): Bool =
       entry.enabled && pageMatches(entry, vppn) && (entry.global || entry.asid === asid)
 
+    private def balancedUIntOr(values: IndexedSeq[UInt]): UInt = {
+      require(values.nonEmpty, "a TLB index OR tree requires at least one input")
+      if (values.length == 1) values.head
+      else {
+        val midpoint = values.length / 2
+        balancedUIntOr(values.take(midpoint)) | balancedUIntOr(values.drop(midpoint))
+      }
+    }
+
     private def driveResult(
         result: TlbLookupResult,
         found: Bool,
@@ -223,9 +232,9 @@ final class HierarchicalTlb(
       )
     }
     io.managementFound := managementMatch.orR
-    io.managementIndex := (0 until 32)
+    val managementIndexTerms = (0 until 32)
       .map(index => Mux(managementMatch(index), U(index, 5 bits), U(0, 5 bits)))
-      .reduce(_ | _)
+    io.managementIndex := balancedUIntOr(managementIndexTerms)
 
     val instructionMicro = Vec.fill(microEntries)(Reg(TlbEntryState()))
     val instructionMicroValid = RegInit(B(0, microEntries bits))

@@ -7,7 +7,16 @@ import spinal.core._
 /** Pure LA32R decoder for the OoO frontend. It contains no GPR, forwarding, or occupancy state. */
 final class La32rDecoder(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommit)
     extends Component {
-  private def any(values: Bool*): Bool = values.reduce(_ || _)
+  private def balancedOr(values: IndexedSeq[Bool]): Bool = {
+    require(values.nonEmpty, "a decode OR tree requires at least one input")
+    if (values.length == 1) values.head
+    else {
+      val midpoint = values.length / 2
+      balancedOr(values.take(midpoint)) || balancedOr(values.drop(midpoint))
+    }
+  }
+
+  private def any(values: Bool*): Bool = balancedOr(values.toIndexedSeq)
   private def eq(value: UInt, literal: Int): Bool = value === U(literal, value.getWidth bits)
 
   val io = new Bundle {

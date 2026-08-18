@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "scripts/vivado"))
 from archive import (
     ArchiveError,
     expand_evidence_files,
+    collect_implementation_sources,
     implementation_passes,
     load_experiment_evidence,
     parse_drc,
@@ -23,6 +24,27 @@ from archive import (
 
 
 class CandidateManifestTest(unittest.TestCase):
+    def test_analysis_reports_are_optional_archive_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            impl_dir = Path(directory)
+            from archive import REQUIRED_IMPL_ARTIFACTS, OPTIONAL_ANALYSIS_ARTIFACTS
+
+            for filename in REQUIRED_IMPL_ARTIFACTS.values():
+                (impl_dir / filename).write_text("core\n", encoding="utf-8")
+            sources, missing = collect_implementation_sources(impl_dir)
+
+            self.assertEqual(set(sources), set(REQUIRED_IMPL_ARTIFACTS))
+            self.assertEqual(set(missing), set(OPTIONAL_ANALYSIS_ARTIFACTS))
+
+            for filename in OPTIONAL_ANALYSIS_ARTIFACTS.values():
+                (impl_dir / filename).write_text("analysis\n", encoding="utf-8")
+            sources, missing = collect_implementation_sources(impl_dir)
+            self.assertFalse(missing)
+            self.assertEqual(
+                set(sources),
+                set(REQUIRED_IMPL_ARTIFACTS) | set(OPTIONAL_ANALYSIS_ARTIFACTS),
+            )
+
     def test_archive_expands_explicit_perf20_matrix_for_reuse(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

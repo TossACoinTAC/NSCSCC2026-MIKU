@@ -174,6 +174,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     val currentRecoveryEpoch = in UInt (config.recoveryEpochWidth bits)
     val releaseLoadValid = out Bits (config.commitWidth bits)
     val releaseStoreValid = out Bits (config.commitWidth bits)
+    val releaseLoadCount = out UInt (log2Up(config.commitWidth + 1) bits)
+    val releaseStoreCount = out UInt (log2Up(config.commitWidth + 1) bits)
     val commitObservation = out Vec (MemoryCommitObservation(config), config.commitWidth)
     val storeDrainBusy = out Bool ()
     val committedMemoryEpoch = in UInt (config.memoryEpochWidth bits)
@@ -185,6 +187,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
 
   val loadReleaseValid = Bits(config.commitWidth bits)
   val storeReleaseValid = Bits(config.commitWidth bits)
+  val loadReleaseCount = CountOne(loadReleaseValid).resize(log2Up(config.commitWidth + 1))
+  val storeReleaseCount = CountOne(storeReleaseValid).resize(log2Up(config.commitWidth + 1))
   val aguMisaligned = (io.agu.size === B(2, 3 bits) && io.agu.virtualAddress(1 downto 0) =/= 0) ||
     (io.agu.size === B(1, 3 bits) && io.agu.virtualAddress(0))
   io.translationBypassAddress := io.agu.virtualAddress
@@ -346,7 +350,7 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     when(!liveLoads && allocationLoads.orR) {
       loadBase := io.allocate(initialLoadIndex).loadQueueIndex
     }.elsewhen(loadReleaseValid.orR) {
-      loadBase := (loadBase + CountOne(loadReleaseValid)).resized
+      loadBase := (loadBase + loadReleaseCount).resized
     }
   }
 
@@ -1007,6 +1011,8 @@ final class LoadStoreQueue(config: OooCoreConfig = OooCoreConfig.FourIssueThreeC
     (earlyCachedStoreRelease || failedScReleaseFire || uncachedStoreRelease)
   io.releaseLoadValid := loadReleaseValid
   io.releaseStoreValid := storeReleaseValid
+  io.releaseLoadCount := loadReleaseCount
+  io.releaseStoreCount := storeReleaseCount
 
   when(io.flush) {
     // Preserve a cancellation token until the translator's outstanding
