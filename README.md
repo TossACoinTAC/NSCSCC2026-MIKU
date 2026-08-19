@@ -20,3 +20,8 @@ make cpu-check
 与并行调度见 [`docs/verification-workflow.md`](docs/verification-workflow.md)，当前动态轮次见
 [`docs/current-optimization-plan.md`](docs/current-optimization-plan.md)，本次目录和
 工具链迁移的验证结果见 [`docs/migration-validation.md`](docs/migration-validation.md)。
+
+Linux 外设平台使用 `make soc-linux` 构建，包含 NT35510 LCD、PS/2 和 USB host。
+该入口复用锁定的 Chiplab c398、当前 SpinalHDL CPU RTL 以及
+`nscscc-linux-kernel` 的 `104de262` device-tree contract；构建结果必须通过
+Vivado 2023.2 的实现和源文件合同检查后，才可以进行板卡验证。

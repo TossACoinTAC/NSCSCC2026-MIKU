@@ -37,6 +37,10 @@ SIM_REBUILD ?= 0
 SIM_BRANCH_TRACE ?= 0
 CPU_BRANCH_TRACE ?= $(SIM_BRANCH_TRACE)
 PERF_CPU_MHZ ?= 100
+LINUX_SOC_CPU_MHZ ?= 100
+LINUX_SOC_UNCORE_MHZ ?= 100
+LINUX_SOC_BUILD_DIR ?= $(BUILD_ROOT)/vivado/soc-linux
+LINUX_SOC_GENERATION_MANIFEST ?= $(BUILD_ROOT)/rtl/generation-manifest.json
 SOC_ARCHIVE_CLASS ?= auto
 SOC_BUILD_KIND ?= perf
 SOC_BUILD_DIR ?= $(BUILD_ROOT)/chiplab-$(SOC_BUILD_KIND)
@@ -71,7 +75,7 @@ CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-l
 
 .PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-contract-test cpu-generate cpu-check cpu-locked-gates \
-  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim branch-trace-summary wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
+  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim branch-trace-summary wave soc-impl soc-func soc-linux soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
@@ -103,6 +107,7 @@ help:
 		'  make board-status BOARD_JOB=<id>  查询板测状态' \
 		'  make board-result BOARD_JOB=<id>  查询板测终态证据' \
 		'  make soc-impl           Vivado 宿主机完整 SoC 实现' \
+		'  make soc-linux          Linux LCD、PS/2 和 USB 外设 overlay 的 Vivado 实现' \
 		'  make soc-postroute-opt  复用 routed DCP 做时序探索（非竞赛产物）' \
 		'  make soc-archive        校验并归档当前完整 SoC 实现' \
 		'  make wave WAVE=...      用宿主机 Surfer 查看波形' \
@@ -284,6 +289,14 @@ soc-func: cpu-generate
 	@VIVADO="$(VIVADO)" PERF_CPU_MHZ=32.726797 \
 		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-func"
 	@$(MAKE) soc-archive SOC_BUILD_KIND=func PERF_CPU_MHZ=32.726797 SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
+
+soc-linux: cpu-generate
+	@VIVADO="$(VIVADO)" scripts/vivado/build_soc_linux.sh \
+		--chiplab "$(CHIPLAB_HOME)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
+		--rtl "$(BUILD_ROOT)/rtl/mycpu_top.v" \
+		--generation-manifest "$(LINUX_SOC_GENERATION_MANIFEST)" \
+		--out "$(LINUX_SOC_BUILD_DIR)" --vivado "$(VIVADO)" \
+		--cpu-mhz "$(LINUX_SOC_CPU_MHZ)" --uncore-mhz "$(LINUX_SOC_UNCORE_MHZ)"
 
 soc-postroute-opt:
 	@VIVADO="$(VIVADO)" scripts/vivado/post_route_opt.sh \

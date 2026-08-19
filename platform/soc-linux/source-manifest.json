@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "profile": "soc-linux-legacy",
+  "base_chiplab_commit": "c398d274812f164d387146fa7d8f612a4a1296d9",
+  "overlay_history": {
+    "linux_peripheral_commit": "5bfb5cfc5300cac43a37485a1f2ec4149cb30d1e",
+    "usb_worktree_commit": "d7a45ff25e2ac5b8063bf14e1be1945e304d5da9",
+    "dts_snapshot_commit": "104de262720d594b9651faf05c0fbabdb59fba68"
+  },
+  "references": {
+    "usb_upstream": "https://github.com/ultraembedded/core_usb_host/commit/81eb9f131dbb434a9047ae074fea5c31ef46ce5d",
+    "usb_register_integration": "https://github.com/nscscc24-jit-thu/Chiplab-SoC/commit/f33d195d9e7330ae6e19c13f91888b537800358c",
+    "usb_axi_cdc_reference": "https://github.com/trivialmips/nontrivial-mips/commit/8e83643c22a3ba7612a9bb9cec93292dad618ab5",
+    "ps2_reference": "https://github.com/evansm7/mic-hw/commit/32a35d67193aaba1dd53549162d7ef6b719e6f8b"
+  },
+  "files": [
+    {"path": "overlay/dts/loongson32_ls.dts", "sha256": "2bee285a3b3b7cc837e7cf975622acbe62fd873e533f94b91d14b0321697df0e", "source": "nscscc-linux-kernel commit 104de262, selected DTS snapshot"},
+    {"path": "overlay/chip/soc_demo/loongson/config.h", "sha256": "8430ab01f4ddcca8ed89147dc3fb0521c0b387302f5985db5cefb3790d22bc65", "source": "Chiplab 5bfb5cf with Linux 100 MHz APB/UART contract"},
+    {"path": "overlay/chip/soc_demo/loongson/soc_top.v", "sha256": "04076e17fe36e809d23dcc5e866033f1e8b6af5df486bd911dff2f29875c449d", "source": "Chiplab 5bfb5cf plus USB WIP integration and explicit CPU AXI length adapter"},
+    {"path": "overlay/fpga/loongson/soc_up.xdc", "sha256": "a2a1c11925bc53edaf29dc224152b7eb7e8d78200901f4f3fad6b615b660d11b", "source": "Chiplab 5bfb5cf plus verified LCD CS pin correction"},
+    {"path": "overlay/IP/APB_DEV/apb_dev_top_with_nand.v", "sha256": "df2550fad4fc11dacf2a5ba6bd453ead0980c7ee3d667bc45974df637adfe142", "source": "Chiplab USB WIP integration"},
+    {"path": "overlay/IP/APB_DEV/apb_mux2.v", "sha256": "c8474731ac60e2ccb711884d3df3eba5e1edf8cb1bc0c7f6dcb3384cc6916d07", "source": "Chiplab USB WIP integration"},
+    {"path": "overlay/IP/APB_DEV/chiplab_ps2_rx.v", "sha256": "cb6fe5d99a5588563c3a3df35c8a34501c6616520a9d9f3b233213e6cae7bd74", "source": "Project PS/2 APB adapter"},
+    {"path": "overlay/IP/APB_DEV/nt35510_apb_adapter.v", "sha256": "0811b9b16201708ee20b879fb116265c6790fbcde8549b15bc7eeb407ef9a692", "source": "Chiplab 5bfb5cf; adapter derived from NonTrivial-MIPS"},
+    {"path": "overlay/IP/APB_DEV/USB/README.md", "sha256": "5320a3b609ac54259feeb97c4f75778fa7f693ee24ba3d872b7d5c1d98b3206f", "source": "Project USB integration notes"},
+    {"path": "overlay/IP/APB_DEV/USB/apb_usbh_bridge.v", "sha256": "1cdd09f97c69c524a73e093fb2270155b77df7508bad0a697649a8ecf6b8daad", "source": "Project APB to USB AXI-Lite bridge"},
+    {"path": "overlay/IP/APB_DEV/USB/usb3500_phy_startup.v", "sha256": "f022805d5d7a88470ee0479f70afa4b3035fc5d9a39e3b5477086013492015a7", "source": "Project USB3500 startup sequencer"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_top.v", "sha256": "b7ce701879e6da5765a57e5501c96b76474442f1b5293e2f4c57172a4e57188f", "source": "UltraEmbedded/JIT-THU USB host integration"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_host.v", "sha256": "f7f346a2bcba19db1a53efed7b842d3d204a275c34e722d42c6f28f62e5b337c", "source": "UltraEmbedded core_usb_host with JIT-THU register extension"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_host_defs.v", "sha256": "2609d28078143b422004c4d3d59db19f5679badbf325c4effb09c195bec56517", "source": "UltraEmbedded/JIT-THU USB host integration"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_sie.v", "sha256": "6802fb2e742e49651dd6c2cd9f54a857ef2516f0b87cde0d2f86c53615f5cbf1", "source": "UltraEmbedded core_usb_host"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_fifo.v", "sha256": "7c76383f042c0da0392fcd4527b9c241049b190d2f51056b3a321baa209a9b8f", "source": "UltraEmbedded core_usb_host"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_crc16.v", "sha256": "ee4d851615949c66025fd06429ad5093decf36f0fa374be08154046e6b2ee4b0", "source": "UltraEmbedded core_usb_host"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_crc5.v", "sha256": "8a51e47cca8b9f5492f2462201e123780c98ec7a294c6920319ece0322bede09", "source": "UltraEmbedded core_usb_host"},
+    {"path": "overlay/IP/xilinx_ip/2023.2/usb_clock_converter/usb_clock_converter.xcix", "sha256": "b332eb3843c6adc1e47d59adb06ce2f686bafdc82db99ef5a80897569952088c", "source": "Vivado 2023.2 generated AXI clock converter artifact"}
+  ],
+  "claims": {
+    "source_only": true,
+    "current_combined_implementation": false,
+    "current_board_validation": false,
+    "touch_controller": false
+  }
+}
