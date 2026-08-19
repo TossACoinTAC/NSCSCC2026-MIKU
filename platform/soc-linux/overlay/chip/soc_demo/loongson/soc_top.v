@@ -589,11 +589,11 @@ wire [7:0] utmi_data_i;
 wire [7:0] utmi_data_o;
 wire       utmi_data_t;
 wire       usb_int;
-(* KEEP = "TRUE", MARK_DEBUG = "TRUE" *) wire utmi_controller_reset;
-(* KEEP = "TRUE", MARK_DEBUG = "TRUE" *) wire utmi_controller_suspend_n;
-(* KEEP = "TRUE", MARK_DEBUG = "TRUE" *) wire utmi_clock_present;
-(* KEEP = "TRUE", MARK_DEBUG = "TRUE" *) wire utmi_clock_missing;
-(* KEEP = "TRUE", MARK_DEBUG = "TRUE" *) wire utmi_phy_ready;
+(* KEEP = "TRUE" *) wire utmi_controller_reset;
+(* KEEP = "TRUE" *) wire utmi_controller_suspend_n;
+(* KEEP = "TRUE" *) wire utmi_clock_present;
+(* KEEP = "TRUE" *) wire utmi_clock_missing;
+(* KEEP = "TRUE" *) wire utmi_phy_ready;
 wire [9:0] utmi_phy_static_async = {
     UTMI_vbusvalid,
     UTMI_sessend,
@@ -606,7 +606,7 @@ wire [9:0] utmi_phy_static_async = {
     UTMI_hostdisc
 };
 (* ASYNC_REG = "TRUE" *) reg [9:0] utmi_phy_static_sync1;
-(* ASYNC_REG = "TRUE", KEEP = "TRUE", MARK_DEBUG = "TRUE" *)
+(* ASYNC_REG = "TRUE", KEEP = "TRUE" *)
 reg [9:0] utmi_phy_static_status;
 wire       utmi_sequenced_reset;
 wire       utmi_sequenced_suspend_n;
@@ -1624,8 +1624,10 @@ reg         interconnect_aresetn;
 clk_pll_33  clk_pll_33
  (
   // Clock out ports
-  .clk_out1(cpu_clk),  //50MHz
-  .clk_out2(uncore_clk), //33MHz
+  // build_soc_linux.tcl sets both requested outputs to the selected 100 MHz
+  // CPU and uncore contract before the implementation run.
+  .clk_out1(cpu_clk),
+  .clk_out2(uncore_clk),
  // Clock in ports
   .clk_in1(clk)        //100MHz
  );

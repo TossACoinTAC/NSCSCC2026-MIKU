@@ -16,7 +16,7 @@
   "files": [
     {"path": "overlay/dts/loongson32_ls.dts", "sha256": "2bee285a3b3b7cc837e7cf975622acbe62fd873e533f94b91d14b0321697df0e", "source": "nscscc-linux-kernel commit 104de262, selected DTS snapshot"},
     {"path": "overlay/chip/soc_demo/loongson/config.h", "sha256": "8430ab01f4ddcca8ed89147dc3fb0521c0b387302f5985db5cefb3790d22bc65", "source": "Chiplab 5bfb5cf with Linux 100 MHz APB/UART contract"},
-    {"path": "overlay/chip/soc_demo/loongson/soc_top.v", "sha256": "04076e17fe36e809d23dcc5e866033f1e8b6af5df486bd911dff2f29875c449d", "source": "Chiplab 5bfb5cf plus USB WIP integration and explicit CPU AXI length adapter"},
+    {"path": "overlay/chip/soc_demo/loongson/soc_top.v", "sha256": "f34404c2ec4d19309d7b068f346d048507a3dbe498f12c53bec59603d7808fa6", "source": "Chiplab 5bfb5cf plus USB WIP integration and explicit CPU AXI length adapter"},
     {"path": "overlay/fpga/loongson/soc_up.xdc", "sha256": "a2a1c11925bc53edaf29dc224152b7eb7e8d78200901f4f3fad6b615b660d11b", "source": "Chiplab 5bfb5cf plus verified LCD CS pin correction"},
     {"path": "overlay/IP/APB_DEV/apb_dev_top_with_nand.v", "sha256": "df2550fad4fc11dacf2a5ba6bd453ead0980c7ee3d667bc45974df637adfe142", "source": "Chiplab USB WIP integration"},
     {"path": "overlay/IP/APB_DEV/apb_mux2.v", "sha256": "c8474731ac60e2ccb711884d3df3eba5e1edf8cb1bc0c7f6dcb3384cc6916d07", "source": "Chiplab USB WIP integration"},
@@ -26,11 +26,11 @@
     {"path": "overlay/IP/APB_DEV/USB/apb_usbh_bridge.v", "sha256": "1cdd09f97c69c524a73e093fb2270155b77df7508bad0a697649a8ecf6b8daad", "source": "Project APB to USB AXI-Lite bridge"},
     {"path": "overlay/IP/APB_DEV/USB/usb3500_phy_startup.v", "sha256": "f022805d5d7a88470ee0479f70afa4b3035fc5d9a39e3b5477086013492015a7", "source": "Project USB3500 startup sequencer"},
     {"path": "overlay/IP/APB_DEV/USB/usbh_top.v", "sha256": "b7ce701879e6da5765a57e5501c96b76474442f1b5293e2f4c57172a4e57188f", "source": "UltraEmbedded/JIT-THU USB host integration"},
-    {"path": "overlay/IP/APB_DEV/USB/usbh_host.v", "sha256": "f7f346a2bcba19db1a53efed7b842d3d204a275c34e722d42c6f28f62e5b337c", "source": "UltraEmbedded core_usb_host with JIT-THU register extension"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_host.v", "sha256": "ad069650b0c8ca41b857ec24299179469b1dcdff4647028a8a449ea80c376481", "source": "UltraEmbedded core_usb_host with JIT-THU register extension"},
     {"path": "overlay/IP/APB_DEV/USB/usbh_host_defs.v", "sha256": "2609d28078143b422004c4d3d59db19f5679badbf325c4effb09c195bec56517", "source": "UltraEmbedded/JIT-THU USB host integration"},
-    {"path": "overlay/IP/APB_DEV/USB/usbh_sie.v", "sha256": "6802fb2e742e49651dd6c2cd9f54a857ef2516f0b87cde0d2f86c53615f5cbf1", "source": "UltraEmbedded core_usb_host"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_sie.v", "sha256": "3ab821b0c360a202a13b1942c574828958e213a7ff4319541ba75cc7906877fd", "source": "UltraEmbedded core_usb_host"},
     {"path": "overlay/IP/APB_DEV/USB/usbh_fifo.v", "sha256": "7c76383f042c0da0392fcd4527b9c241049b190d2f51056b3a321baa209a9b8f", "source": "UltraEmbedded core_usb_host"},
-    {"path": "overlay/IP/APB_DEV/USB/usbh_crc16.v", "sha256": "ee4d851615949c66025fd06429ad5093decf36f0fa374be08154046e6b2ee4b0", "source": "UltraEmbedded core_usb_host"},
+    {"path": "overlay/IP/APB_DEV/USB/usbh_crc16.v", "sha256": "3653d6e4c08302dcdd8d7efa5cc0264336453088ed147147d7de01a10b128ea6", "source": "UltraEmbedded core_usb_host"},
     {"path": "overlay/IP/APB_DEV/USB/usbh_crc5.v", "sha256": "8a51e47cca8b9f5492f2462201e123780c98ec7a294c6920319ece0322bede09", "source": "UltraEmbedded core_usb_host"},
     {"path": "overlay/IP/xilinx_ip/2023.2/usb_clock_converter/usb_clock_converter.xcix", "sha256": "b332eb3843c6adc1e47d59adb06ce2f686bafdc82db99ef5a80897569952088c", "source": "Vivado 2023.2 generated AXI clock converter artifact"}
   ],

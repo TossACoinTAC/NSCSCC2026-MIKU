@@ -81,8 +81,8 @@ module usbh_host
 //-----------------------------------------------------------------
 // Retime write data
 //-----------------------------------------------------------------
-(* MARK_DEBUG="true" *) reg [31:0] wr_data_q;
-(* MARK_DEBUG="true" *) reg wr_data_valid_q;
+reg [31:0] wr_data_q;
+reg wr_data_valid_q;
 
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i | write_en_w) begin
@@ -93,8 +93,8 @@ end else if (cfg_wready_o & cfg_wvalid_i) begin
     wr_data_valid_q <= 1'b1;
 end
 
-(* MARK_DEBUG="true" *) reg [31:0] wr_addr_q;
-(* MARK_DEBUG="true" *) reg wr_addr_valid_q;
+reg [31:0] wr_addr_q;
+reg wr_addr_valid_q;
 
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i | write_en_w) begin
@@ -353,7 +353,7 @@ if (rst_i)
 else if (write_en_w && (wr_addr_q[7:0] == `USB_IRQ_MASK))
     usb_irq_mask_device_detect_q <= wr_data_q[`USB_IRQ_MASK_DEVICE_DETECT_R];
 
-(* MARK_DEBUG = "TRUE" *)wire        usb_irq_mask_device_detect_out_w = usb_irq_mask_device_detect_q;
+wire        usb_irq_mask_device_detect_out_w = usb_irq_mask_device_detect_q;
 
 
 // usb_irq_mask_err [internal]
@@ -365,7 +365,7 @@ if (rst_i)
 else if (write_en_w && (wr_addr_q[7:0] == `USB_IRQ_MASK))
     usb_irq_mask_err_q <= wr_data_q[`USB_IRQ_MASK_ERR_R];
 
-(* MARK_DEBUG = "TRUE" *)wire        usb_irq_mask_err_out_w = usb_irq_mask_err_q;
+wire        usb_irq_mask_err_out_w = usb_irq_mask_err_q;
 
 
 // usb_irq_mask_done [internal]
@@ -377,7 +377,7 @@ if (rst_i)
 else if (write_en_w && (wr_addr_q[7:0] == `USB_IRQ_MASK))
     usb_irq_mask_done_q <= wr_data_q[`USB_IRQ_MASK_DONE_R];
 
-(* MARK_DEBUG = "TRUE" *)wire        usb_irq_mask_done_out_w = usb_irq_mask_done_q;
+wire        usb_irq_mask_done_out_w = usb_irq_mask_done_q;
 
 
 // usb_irq_mask_sof [internal]
@@ -389,7 +389,7 @@ if (rst_i)
 else if (write_en_w && (wr_addr_q[7:0] == `USB_IRQ_MASK))
     usb_irq_mask_sof_q <= wr_data_q[`USB_IRQ_MASK_SOF_R];
 
-(* MARK_DEBUG = "TRUE" *)wire        usb_irq_mask_sof_out_w = usb_irq_mask_sof_q;
+wire        usb_irq_mask_sof_out_w = usb_irq_mask_sof_q;
 
 
 //-----------------------------------------------------------------
@@ -725,8 +725,8 @@ reg         sof_transfer_q;
 reg         resp_expected_q;
 wire        transfer_ack_w;
 
-(* MARK_DEBUG = "TRUE" *)wire        status_crc_err_w;
-(* MARK_DEBUG = "TRUE" *)wire        status_timeout_w;
+wire        status_crc_err_w;
+wire        status_timeout_w;
 wire [7:0]  status_response_w;
 wire [15:0] status_rx_count_w;
 wire        status_sie_idle_w;
@@ -739,9 +739,9 @@ wire        clear_to_send_w;
 
 reg         usb_err_q;
 
-(* MARK_DEBUG = "TRUE" *)reg         intr_done_q;
-(* MARK_DEBUG = "TRUE" *)reg         intr_sof_q;
-(* MARK_DEBUG = "TRUE" *)reg         intr_err_q;
+reg         intr_done_q;
+reg         intr_sof_q;
+reg         intr_err_q;
 
 //-----------------------------------------------------------------
 // Definitions
@@ -1014,9 +1014,9 @@ else if (utmi_rxerror_i)
 //-----------------------------------------------------------------
 // Interrupts
 //-----------------------------------------------------------------
-(* MARK_DEBUG = "TRUE" *)reg err_cond_q;
-(* MARK_DEBUG = "TRUE" *)reg intr_q;
-(* MARK_DEBUG = "TRUE" *)reg device_det_q;
+reg err_cond_q;
+reg intr_q;
+reg device_det_q;
 
 always @ (posedge clk_i or posedge rst_i)
 if (rst_i)

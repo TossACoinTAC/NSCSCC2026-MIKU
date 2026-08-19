@@ -48,7 +48,7 @@ module usbh_sie
     ,input  [ 15:0]  data_len_i
     ,input           data_idx_i
     ,input  [  7:0]  tx_data_i
-    ,(* MARK_DEBUG="true" *)input           utmi_txready_i
+    ,input           utmi_txready_i
     ,input  [  7:0]  utmi_data_i
     ,input           utmi_rxvalid_i
     ,input           utmi_rxactive_i
@@ -67,7 +67,7 @@ module usbh_sie
     ,output [ 15:0]  rx_count_o
     ,output          idle_o
     ,output [  7:0]  utmi_data_o
-    ,(* MARK_DEBUG="true" *)output          utmi_txvalid_o
+    ,output          utmi_txvalid_o
 );
 
 
@@ -108,7 +108,7 @@ reg [15:0]          token_q;
 
 reg                 wait_resp_q;
 
-(* MARK_DEBUG="true" *)reg [3:0]           state_q;
+reg [3:0]           state_q;
 
 //-----------------------------------------------------------------
 // Definitions

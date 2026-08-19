@@ -45,9 +45,9 @@ module usbh_crc16
 // Implementation
 //-----------------------------------------------------------------
 
-	(* MARK_DEBUG="true" *) wire [7:0] d = {data_i[0], data_i[1], data_i[2], data_i[3],
+wire [7:0] d = {data_i[0], data_i[1], data_i[2], data_i[3],
 						data_i[4], data_i[5], data_i[6], data_i[7]};
-	(* MARK_DEBUG="true" *) wire [15:0] c = crc_i;
+wire [15:0] c = crc_i;
 	assign crc_o = {
 		^d[7:0] ^ ^c[15:7],
 		c[6],
