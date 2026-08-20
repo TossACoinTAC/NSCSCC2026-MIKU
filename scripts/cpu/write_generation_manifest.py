@@ -23,6 +23,27 @@ def probe(command: list[str]) -> str:
         return "unavailable"
 
 
+def source_tree_dirty(root: Path) -> bool:
+    result = subprocess.run(
+        [
+            "git",
+            "status",
+            "--porcelain",
+            "--untracked-files=all",
+            "--",
+            "cpu/build.sbt",
+            "cpu/project",
+            "cpu/src/main",
+        ],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    return result.returncode != 0 or bool(result.stdout.strip())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
@@ -32,15 +53,26 @@ def main() -> int:
     args = parser.parse_args()
     root = args.root.resolve()
     cpu = root / "cpu"
-    try:
-        source_commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, text=True, stdout=subprocess.PIPE, check=True).stdout.strip()
-    except (OSError, subprocess.CalledProcessError):
-        source_commit = "workspace-uncommitted"
+    source_dirty = source_tree_dirty(root)
+    source_commit = "workspace-uncommitted"
+    if not source_dirty:
+        try:
+            source_commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                check=True,
+            ).stdout.strip()
+        except (OSError, subprocess.CalledProcessError):
+            source_dirty = True
     document = {
         "schema_version": 1,
         "source_tree": "cpu/src/main + cpu/build.sbt + cpu/project",
         "source_tree_sha256": cpu_source_hash(cpu),
         "source_commit": source_commit,
+        "source_dirty": source_dirty,
         "raw_rtl": str(args.raw.resolve()),
         "raw_rtl_sha256": file_hash(args.raw),
         "published_rtl": str(args.published.resolve()),
