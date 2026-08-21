@@ -54,4 +54,65 @@ object CustomExecution {
       defaultTaken
     }
   }
+
+  def branchTarget(
+      config: OooCoreConfig,
+      decoded: DecodedMicroOp,
+      source1: Bits,
+      source2: Bits,
+      defaultTarget: UInt
+  ): UInt = {
+    val evaluators = config.customInstructionProfile.branchSpecifications.flatMap {
+      specification => specification.branchTargetEvaluator.map(specification -> _)
+    }
+    if (evaluators.nonEmpty) {
+      val selectedTarget = UInt(config.xlen bits)
+      selectedTarget := defaultTarget
+      for ((specification, evaluator) <- evaluators) {
+        val matched = CustomInstructionDecode.matches(decoded.instruction, specification)
+        when(decoded.isBranch && matched) {
+          selectedTarget := evaluator(
+            decoded.pc,
+            source1,
+            source2,
+            decoded.immediate,
+            decoded.instruction
+          ).resize(config.xlen)
+        }
+      }
+      selectedTarget
+    } else {
+      defaultTarget
+    }
+  }
+
+  def memoryAddress(
+      config: OooCoreConfig,
+      decoded: DecodedMicroOp,
+      source1: Bits,
+      source2: Bits,
+      defaultAddress: UInt
+  ): UInt = {
+    val evaluators = config.customInstructionProfile.memorySpecifications.flatMap {
+      specification => specification.memoryAddressEvaluator.map(specification -> _)
+    }
+    if (evaluators.nonEmpty) {
+      val selectedAddress = UInt(config.xlen bits)
+      selectedAddress := defaultAddress
+      for ((specification, evaluator) <- evaluators) {
+        val matched = CustomInstructionDecode.matches(decoded.instruction, specification)
+        when((decoded.isLoad || decoded.isStore) && matched) {
+          selectedAddress := evaluator(
+            source1,
+            source2,
+            decoded.immediate,
+            decoded.instruction
+          ).resize(config.xlen)
+        }
+      }
+      selectedAddress
+    } else {
+      defaultAddress
+    }
+  }
 }

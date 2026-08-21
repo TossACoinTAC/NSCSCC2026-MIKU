@@ -13,4 +13,10 @@ object CustomInstructionDecode {
 
   def compute(instruction: Bits, profile: CustomInstructionProfile): Bool =
     any(instruction, profile.computeSpecifications)
+
+  def customMemoryAddress(instruction: Bits, profile: CustomInstructionProfile): Bool =
+    any(
+      instruction,
+      profile.memorySpecifications.filter(_.memoryAddressEvaluator.nonEmpty)
+    )
 }

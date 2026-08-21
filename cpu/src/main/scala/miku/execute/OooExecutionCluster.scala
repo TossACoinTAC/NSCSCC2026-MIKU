@@ -610,7 +610,14 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
   barrierCompletion.branchMispredict := False
 
   val lsuDecoded = io.issue(loadStorePort).decoded
-  val lsuAddress = io.source1(loadStorePort).asUInt + lsuDecoded.immediate.asUInt
+  val defaultLsuAddress = io.source1(loadStorePort).asUInt + lsuDecoded.immediate.asUInt
+  val lsuAddress = CustomExecution.memoryAddress(
+    config,
+    lsuDecoded,
+    io.source1(loadStorePort),
+    io.source2(loadStorePort),
+    defaultLsuAddress
+  )
 
   val directCompletionValid = Bits(config.executionWidth bits)
   val directCompletion = Vec(Completion(config), config.executionWidth)
@@ -732,10 +739,17 @@ final class OooExecutionCluster(config: OooCoreConfig = OooCoreConfig.FourIssueT
       io.source2(port),
       standardBranchTaken
     )
-    val takenTarget = Mux(
+    val defaultTakenTarget = Mux(
       decoded.branchKind === 7,
       io.source1(port).asUInt + decoded.immediate.asUInt,
       decoded.pc + decoded.immediate.asUInt
+    )
+    val takenTarget = CustomExecution.branchTarget(
+      config,
+      decoded,
+      io.source1(port),
+      io.source2(port),
+      defaultTakenTarget
     )
     val resolvedTarget = Mux(branchTaken, takenTarget, decoded.pc + 4)
     val targetMismatch = branchTaken && decoded.predictedTarget =/= takenTarget

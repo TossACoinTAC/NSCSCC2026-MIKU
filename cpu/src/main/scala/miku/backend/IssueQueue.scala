@@ -370,9 +370,25 @@ final class IssueQueue(
         selectWakeupSlot2(slot) := True
       }
     }
+    val hasCustomStoreAddress =
+      portHasMemory &&
+        config.customInstructionProfile.memorySpecifications.exists(_.memoryAddressEvaluator.nonEmpty)
+    val customStoreAddress =
+      if (hasCustomStoreAddress) {
+        payloadSlots(slot).memory.isStore && CustomInstructionDecode.customMemoryAddress(
+          payloadSlots(slot).customInstruction,
+          config.customInstructionProfile
+        )
+      } else {
+        False
+      }
     val storeDataIsDecoupled =
       if (config.executionPorts(portIndex).capabilities.contains(ExecutionUnitKind.LoadStore)) {
-        payloadSlots(slot).memory.isStore
+        if (hasCustomStoreAddress) {
+          payloadSlots(slot).memory.isStore && !customStoreAddress
+        } else {
+          payloadSlots(slot).memory.isStore
+        }
       } else {
         False
       }

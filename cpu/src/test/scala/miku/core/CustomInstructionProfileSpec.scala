@@ -204,6 +204,34 @@ class CustomInstructionProfileSpec extends AnyFunSuite {
     }
   }
 
+  test("custom target and address evaluators stay within their instruction kinds") {
+    val branchTarget = CustomBranchTargetEvaluator.from {
+      (pc, source1, _, immediate, _) => (pc + source1.asUInt + immediate.asUInt).resize(32)
+    }
+    val memoryAddress = CustomMemoryAddressEvaluator.from {
+      (source1, source2, immediate, _) =>
+        (source1.asUInt + source2.asUInt + immediate.asUInt).resize(32)
+    }
+
+    intercept[IllegalArgumentException] {
+      template.copy(branchTargetEvaluator = Some(branchTarget))
+    }
+    intercept[IllegalArgumentException] {
+      template.copy(memoryAddressEvaluator = Some(memoryAddress))
+    }
+
+    val indexedLoad = CustomInstructionSpec.load(
+      name = "indexed-load",
+      matchValue = BigInt("f4800000", 16),
+      matchMask = BigInt("ffc00000", 16),
+      immediate = CustomImmediate.None,
+      addressSource2 = CustomRegister.Rk,
+      addressEvaluator = Some(memoryAddress)
+    )
+    assert(indexedLoad.source2 == CustomRegister.Rk)
+    assert(indexedLoad.memoryAddressEvaluator.nonEmpty)
+  }
+
   test("fixed registers and memory-size encodings are bounded") {
     assert(CustomRegister.Fixed(0).fieldMask == 0)
     assert(CustomRegister.Fixed(31).fieldMask == 0)

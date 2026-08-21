@@ -390,6 +390,45 @@ object CustomBranchEvaluator {
     }
 }
 
+trait CustomBranchTargetEvaluator {
+  def apply(
+      pc: UInt,
+      source1: Bits,
+      source2: Bits,
+      immediate: Bits,
+      instruction: Bits
+  ): UInt
+}
+
+object CustomBranchTargetEvaluator {
+  def from(function: (UInt, Bits, Bits, Bits, Bits) => UInt): CustomBranchTargetEvaluator =
+    new CustomBranchTargetEvaluator {
+      override def apply(
+          pc: UInt,
+          source1: Bits,
+          source2: Bits,
+          immediate: Bits,
+          instruction: Bits
+      ): UInt = function(pc, source1, source2, immediate, instruction)
+    }
+}
+
+trait CustomMemoryAddressEvaluator {
+  def apply(source1: Bits, source2: Bits, immediate: Bits, instruction: Bits): UInt
+}
+
+object CustomMemoryAddressEvaluator {
+  def from(function: (Bits, Bits, Bits, Bits) => UInt): CustomMemoryAddressEvaluator =
+    new CustomMemoryAddressEvaluator {
+      override def apply(
+          source1: Bits,
+          source2: Bits,
+          immediate: Bits,
+          instruction: Bits
+      ): UInt = function(source1, source2, immediate, instruction)
+    }
+}
+
 object CustomBitFieldHelpers {
   private def controlWidth(dataWidth: Int): Int = {
     require(dataWidth > 0, s"bit-field data width must be positive: $dataWidth")
@@ -612,7 +651,9 @@ final case class CustomInstructionSpec(
     source2IsFour: Boolean = false,
     allowStandardOpcode: Boolean = false,
     computeEvaluator: Option[CustomComputeEvaluator] = None,
-    branchEvaluator: Option[CustomBranchEvaluator] = None
+    branchEvaluator: Option[CustomBranchEvaluator] = None,
+    branchTargetEvaluator: Option[CustomBranchTargetEvaluator] = None,
+    memoryAddressEvaluator: Option[CustomMemoryAddressEvaluator] = None
 ) {
   require(name.nonEmpty, "a custom instruction needs a name")
   require(matchValue >= 0 && matchValue <= 0xffffffffL, s"invalid match value for $name")
@@ -667,6 +708,15 @@ final case class CustomInstructionSpec(
     s"only branch instruction $name may define a branch evaluator"
   )
   require(
+    kind == CustomInstructionKind.Branch || branchTargetEvaluator.isEmpty,
+    s"only branch instruction $name may define a branch target evaluator"
+  )
+  require(
+    kind == CustomInstructionKind.Load || kind == CustomInstructionKind.Store ||
+      memoryAddressEvaluator.isEmpty,
+    s"only memory instruction $name may define a memory address evaluator"
+  )
+  require(
     branchEvaluator.isEmpty ||
       branchKind == CustomBranchKind.Always ||
       branchKind == CustomBranchKind.RegisterIndirect,
@@ -688,6 +738,11 @@ final case class CustomInstructionSpec(
   require(
     kind != CustomInstructionKind.Store || source2 != CustomRegister.Unused,
     s"store instruction $name needs a data-register source"
+  )
+  require(
+    kind != CustomInstructionKind.Load || source2 == CustomRegister.Unused ||
+      memoryAddressEvaluator.nonEmpty,
+    s"load instruction $name needs an address evaluator to use a second register source"
   )
   require(
     kind != CustomInstructionKind.Branch ||
@@ -778,7 +833,8 @@ object CustomInstructionSpec {
       destination: CustomRegister = CustomRegister.Unused,
       branchKind: Int = CustomBranchKind.Always,
       evaluator: Option[CustomBranchEvaluator] = None,
-      allowStandardOpcode: Boolean = false
+      allowStandardOpcode: Boolean = false,
+      targetEvaluator: Option[CustomBranchTargetEvaluator] = None
   ): CustomInstructionSpec =
     CustomInstructionSpec(
       name = name,
@@ -791,7 +847,8 @@ object CustomInstructionSpec {
       immediate = immediate,
       branchKind = branchKind,
       allowStandardOpcode = allowStandardOpcode,
-      branchEvaluator = evaluator
+      branchEvaluator = evaluator,
+      branchTargetEvaluator = targetEvaluator
     )
 
   def load(
@@ -803,7 +860,9 @@ object CustomInstructionSpec {
       destination: CustomRegister = CustomRegister.Rd,
       memorySize: Int = CustomMemorySize.Word,
       signExtend: Boolean = false,
-      allowStandardOpcode: Boolean = false
+      allowStandardOpcode: Boolean = false,
+      addressSource2: CustomRegister = CustomRegister.Unused,
+      addressEvaluator: Option[CustomMemoryAddressEvaluator] = None
   ): CustomInstructionSpec =
     CustomInstructionSpec(
       name = name,
@@ -811,10 +870,12 @@ object CustomInstructionSpec {
       matchMask = matchMask,
       kind = CustomInstructionKind.Load,
       source1 = base,
+      source2 = addressSource2,
       destination = destination,
       immediate = immediate,
       memorySize = memorySize,
       memorySignExtend = signExtend,
+      memoryAddressEvaluator = addressEvaluator,
       allowStandardOpcode = allowStandardOpcode
     )
 
@@ -826,7 +887,8 @@ object CustomInstructionSpec {
       base: CustomRegister = CustomRegister.Rj,
       data: CustomRegister = CustomRegister.Rd,
       memorySize: Int = CustomMemorySize.Word,
-      allowStandardOpcode: Boolean = false
+      allowStandardOpcode: Boolean = false,
+      addressEvaluator: Option[CustomMemoryAddressEvaluator] = None
   ): CustomInstructionSpec =
     CustomInstructionSpec(
       name = name,
@@ -837,6 +899,7 @@ object CustomInstructionSpec {
       source2 = data,
       immediate = immediate,
       memorySize = memorySize,
+      memoryAddressEvaluator = addressEvaluator,
       allowStandardOpcode = allowStandardOpcode
     )
 }
@@ -877,6 +940,11 @@ final case class CustomInstructionProfile(
     specifications.filter(_.kind == CustomInstructionKind.Compute)
   val branchSpecifications: Vector[CustomInstructionSpec] =
     specifications.filter(_.kind == CustomInstructionKind.Branch)
+  val memorySpecifications: Vector[CustomInstructionSpec] =
+    specifications.filter(specification =>
+      specification.kind == CustomInstructionKind.Load ||
+        specification.kind == CustomInstructionKind.Store
+    )
 }
 
 object CustomInstructionRouting {
@@ -884,8 +952,11 @@ object CustomInstructionRouting {
     val capabilities = config.executionPorts(portIndex).capabilities
     (config.customInstructionProfile.computeSpecifications.nonEmpty &&
       portIndex == config.customComputePort) ||
-    (config.customInstructionProfile.branchSpecifications.exists(_.branchEvaluator.nonEmpty) &&
-      capabilities.contains(ExecutionUnitKind.Branch))
+    (config.customInstructionProfile.branchSpecifications.exists(specification =>
+      specification.branchEvaluator.nonEmpty || specification.branchTargetEvaluator.nonEmpty
+    ) && capabilities.contains(ExecutionUnitKind.Branch)) ||
+    (config.customInstructionProfile.memorySpecifications.exists(_.memoryAddressEvaluator.nonEmpty) &&
+      capabilities.contains(ExecutionUnitKind.LoadStore))
   }
 }
 

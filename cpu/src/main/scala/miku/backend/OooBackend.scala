@@ -449,9 +449,31 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
         issueQueues(port).io.issue.psrc2
       )
 
-      val lsuNeedsSource2 = issueQueues(port).io.issueValid &&
-        !issueQueues(port).io.issue.decoded.isStore &&
-        issueQueues(port).io.issue.psrc2 =/= 0
+      val hasCustomMemoryAddress =
+        config.customInstructionProfile.memorySpecifications.exists(
+          _.memoryAddressEvaluator.nonEmpty
+        )
+      val customMemoryAddress =
+        if (hasCustomMemoryAddress) {
+          CustomInstructionDecode.customMemoryAddress(
+            issueQueues(port).io.issue.decoded.instruction,
+            config.customInstructionProfile
+          )
+        } else {
+          False
+        }
+      val storeAddressNeedsSource2 =
+        issueQueues(port).io.issue.decoded.isStore && customMemoryAddress
+      val lsuNeedsSource2 =
+        if (hasCustomMemoryAddress) {
+          issueQueues(port).io.issueValid &&
+            (!issueQueues(port).io.issue.decoded.isStore || storeAddressNeedsSource2) &&
+            issueQueues(port).io.issue.psrc2 =/= 0
+        } else {
+          issueQueues(port).io.issueValid &&
+            !issueQueues(port).io.issue.decoded.isStore &&
+            issueQueues(port).io.issue.psrc2 =/= 0
+        }
       val sharedReadConflict = storeDataQueue.io.readValid && lsuNeedsSource2
       val operandConsumed = issueOperandValid(port) && io.issueReady(port)
       val operandSlotAvailable = !issueOperandValid(port) || operandConsumed
@@ -471,12 +493,21 @@ final class OooBackend(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCommi
           issueOperandValid(port) := True
           issueOperandUop(port) := issueQueues(port).io.issue
           issueOperandSource1(port) := operandReadData(port * 2)
-          issueOperandSource2(port) := Mux(
-            issueQueues(port).io.issue.decoded.isStore ||
-              issueQueues(port).io.issue.psrc2 === 0,
-            B(0, config.xlen bits),
-            operandReadData(port * 2 + 1)
-          )
+          if (hasCustomMemoryAddress) {
+            issueOperandSource2(port) := Mux(
+              (issueQueues(port).io.issue.decoded.isStore && !storeAddressNeedsSource2) ||
+                issueQueues(port).io.issue.psrc2 === 0,
+              B(0, config.xlen bits),
+              operandReadData(port * 2 + 1)
+            )
+          } else {
+            issueOperandSource2(port) := Mux(
+              issueQueues(port).io.issue.decoded.isStore ||
+                issueQueues(port).io.issue.psrc2 === 0,
+              B(0, config.xlen bits),
+              operandReadData(port * 2 + 1)
+            )
+          }
         }
       }
     } else {

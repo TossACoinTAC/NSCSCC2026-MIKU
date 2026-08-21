@@ -203,6 +203,49 @@ private object CustomInstructionTestCatalog {
     branchKind = CustomBranchKind.RegisterIndirect,
     evaluator = Some(CustomBranchEvaluators.source1NonZero)
   )
+  val CustomLoadAddress: CustomInstructionSpec = CustomInstructionSpec.load(
+    name = "custom-load-address",
+    matchValue = BigInt("f4800000", 16),
+    matchMask = BigInt("ffc00000", 16),
+    base = CustomRegister.Rj,
+    addressSource2 = CustomRegister.Rk,
+    destination = CustomRegister.Rd,
+    immediate = CustomImmediate.None,
+    addressEvaluator = Some(
+      CustomMemoryAddressEvaluator.from { (source1, source2, _, instruction) =>
+        ((source1 ^ source2).asUInt + instruction(21 downto 15).asUInt).resize(32)
+      }
+    )
+  )
+  val CustomStoreAddress: CustomInstructionSpec = CustomInstructionSpec.store(
+    name = "custom-store-address",
+    matchValue = BigInt("f4c00000", 16),
+    matchMask = BigInt("ffc00000", 16),
+    base = CustomRegister.Rj,
+    data = CustomRegister.Rd,
+    immediate = CustomImmediate.SignedI12,
+    addressEvaluator = Some(
+      CustomMemoryAddressEvaluator.from { (source1, source2, immediate, _) =>
+        (source1.asUInt + source2(7 downto 0).asUInt + immediate.asUInt).resize(32)
+      }
+    )
+  )
+  val CustomBranchTarget: CustomInstructionSpec = CustomInstructionSpec.branch(
+    name = "custom-branch-target",
+    matchValue = BigInt("f8000000", 16),
+    matchMask = BigInt("fc000000", 16),
+    source1 = CustomRegister.Rj,
+    source2 = CustomRegister.Rd,
+    immediate = CustomImmediate.SignedI16Shift2,
+    evaluator = Some(
+      CustomBranchEvaluator.from { (source1, source2, _) => (source1 & source2).orR }
+    ),
+    targetEvaluator = Some(
+      CustomBranchTargetEvaluator.from { (pc, source1, source2, immediate, _) =>
+        (pc + source1.asUInt + source2(7 downto 0).asUInt + immediate.asUInt).resize(32)
+      }
+    )
+  )
 
   val Profile: CustomInstructionProfile = CustomInstructionProfile(
     "test-all",
@@ -227,7 +270,10 @@ private object CustomInstructionTestCatalog {
       ByteSwap,
       BitReverse,
       BranchLink,
-      PredicateIndirect
+      PredicateIndirect,
+      CustomLoadAddress,
+      CustomStoreAddress,
+      CustomBranchTarget
     )
   )
 
@@ -517,15 +563,21 @@ private final class CustomBackendPathProbe(config: OooCoreConfig) extends Compon
   io.exceptionValid := decoder.io.decoded.exception.valid
 }
 
-private final class CustomIssueQueueInstructionProbe(config: OooCoreConfig) extends Component {
-  private val branchPort =
-    config.executionPorts.indexWhere(_.capabilities.contains(ExecutionUnitKind.Branch))
-  require(branchPort >= 0)
+private final class CustomIssueQueueInstructionProbe(
+    config: OooCoreConfig,
+    memoryPort: Boolean = false
+) extends Component {
+  private val port = config.executionPorts.indexWhere(_.capabilities.contains(
+    if (memoryPort) ExecutionUnitKind.LoadStore else ExecutionUnitKind.Branch
+  ))
+  require(port >= 0)
 
   val io = new Bundle {
     val instruction = in Bits (32 bits)
     val enqueueValid = in Bool ()
     val enqueueReady = out Bool ()
+    val source2Ready = in Bool ()
+    val wakeSource2 = in Bool ()
     val issueReady = in Bool ()
     val issueValid = out Bool ()
     val issueInstruction = out Bits (32 bits)
@@ -543,7 +595,7 @@ private final class CustomIssueQueueInstructionProbe(config: OooCoreConfig) exte
   decoder.io.privilege := 0
   decoder.io.interruptPending := False
 
-  val queue = new IssueQueue(config, branchPort)
+  val queue = new IssueQueue(config, port)
   queue.io.enqueueValid := io.enqueueValid
   queue.io.enqueue.decoded := decoder.io.decoded
   queue.io.enqueue.pdst := 0
@@ -551,15 +603,16 @@ private final class CustomIssueQueueInstructionProbe(config: OooCoreConfig) exte
   queue.io.enqueue.psrc1 := 1
   queue.io.enqueue.psrc2 := 2
   queue.io.enqueue.source1Ready := True
-  queue.io.enqueue.source2Ready := True
+  queue.io.enqueue.source2Ready := io.source2Ready
   queue.io.enqueue.robPointer := 0
   queue.io.enqueue.recoveryEpoch := 0
   queue.io.enqueue.loadQueueIndex := 0
   queue.io.enqueue.storeQueueIndex := 0
   queue.io.wakeupValid := 0
+  queue.io.wakeupValid(0) := io.wakeSource2
   queue.io.selectWakeupValid := 0
   for (lane <- 0 until config.writebackWidth) {
-    queue.io.wakeupPdst(lane) := 0
+    queue.io.wakeupPdst(lane) := (if (lane == 0) U(2) else U(0))
     queue.io.selectWakeupPdst(lane) := 0
   }
   queue.io.issueReady := io.issueReady
@@ -1011,7 +1064,17 @@ class CustomExecutionSpec extends AnyFunSuite {
         sleep(1)
         assert(dut.io.isBranch.toBoolean)
         assert(dut.io.predecodeValid.toBoolean)
-        assert(dut.io.predecodeType.toBigInt == 2)
+        assert(dut.io.predecodeType.toBigInt == 0)
+        assert(dut.io.predecodeIndirect.toBoolean)
+        assert(!dut.io.predecodeStaticTaken.toBoolean)
+
+        dut.io.instruction #= CustomInstructionTestCatalog.CustomBranchTarget.matchValue |
+          (BigInt(2) << 10) | (5 << 5) | 4
+        sleep(1)
+        assert(dut.io.isBranch.toBoolean)
+        assert(dut.io.predecodeValid.toBoolean)
+        assert(dut.io.predecodeType.toBigInt == 0)
+        assert(dut.io.predecodeTarget.toBigInt == config.resetVector + 4)
         assert(dut.io.predecodeIndirect.toBoolean)
         assert(!dut.io.predecodeStaticTaken.toBoolean)
 
@@ -1198,6 +1261,32 @@ class CustomExecutionSpec extends AnyFunSuite {
         assert(dut.io.aguSize.toBigInt == 1)
         assert(dut.io.aguByteMask.toBigInt == 0xc)
         assert(dut.io.aguWriteData.toBigInt == BigInt("aabb0000", 16))
+
+        dut.io.instruction #= CustomInstructionTestCatalog.CustomLoadAddress.matchValue |
+          (BigInt(7) << 15) | (BigInt(6) << 10) | (5 << 5) | 4
+        dut.io.source1 #= 0x1000
+        dut.io.source2 #= 0x00ff
+        sleep(1)
+        assert(dut.io.aguValid.toBoolean && !dut.io.aguIsWrite.toBoolean)
+        assert(dut.io.aguVirtualAddress.toBigInt == 0x1106)
+
+        dut.io.instruction #= CustomInstructionTestCatalog.CustomStoreAddress.matchValue |
+          (BigInt(0xffc) << 10) | (5 << 5) | 4
+        dut.io.source1 #= 0x2000
+        dut.io.source2 #= BigInt("12345620", 16)
+        sleep(1)
+        assert(dut.io.aguValid.toBoolean && dut.io.aguIsWrite.toBoolean)
+        assert(dut.io.aguVirtualAddress.toBigInt == 0x201c)
+        assert(dut.io.aguWriteData.toBigInt == BigInt("12345620", 16))
+
+        dut.io.instruction #= CustomInstructionTestCatalog.CustomBranchTarget.matchValue |
+          (BigInt(2) << 10) | (5 << 5) | 4
+        dut.io.source1 #= 0x24
+        dut.io.source2 #= 4
+        sleep(1)
+        assert(dut.io.branchCompletionValid.toBoolean)
+        assert(dut.io.branchTaken.toBoolean)
+        assert(dut.io.branchTarget.toBigInt == config.resetVector + 0x30)
       }
   }
 
@@ -1211,6 +1300,8 @@ class CustomExecutionSpec extends AnyFunSuite {
         dut.clockDomain.forkStimulus(period = 10)
         dut.io.instruction #= instruction
         dut.io.enqueueValid #= false
+        dut.io.source2Ready #= true
+        dut.io.wakeSource2 #= false
         dut.io.issueReady #= false
 
         dut.clockDomain.assertReset()
@@ -1223,6 +1314,7 @@ class CustomExecutionSpec extends AnyFunSuite {
         assert(dut.io.enqueueReady.toBoolean)
         dut.clockDomain.waitSampling()
         dut.io.enqueueValid #= false
+        dut.clockDomain.waitSampling()
         sleep(1)
         assert(dut.io.issueValid.toBoolean)
         assert(dut.io.issueInstruction.toBigInt == instruction)
@@ -1232,6 +1324,59 @@ class CustomExecutionSpec extends AnyFunSuite {
         dut.io.issueReady #= false
         sleep(1)
         assert(!dut.io.issueValid.toBoolean)
+      }
+  }
+
+  test("custom Store addresses retain instructions and wait for their second source") {
+    val ordinaryStore = CustomInstructionTestCatalog.StoreHalf.matchValue |
+      (BigInt(2) << 10) | (8 << 5) | 7
+    val customStore = CustomInstructionTestCatalog.CustomStoreAddress.matchValue |
+      (BigInt(0xffc) << 10) | (5 << 5) | 4
+    SimConfig.withVerilator
+      .workspacePath("target/sim-workspace-custom-memory-issue-instruction")
+      .compile(new CustomIssueQueueInstructionProbe(config, memoryPort = true))
+      .doSim("custom-memory-issue-instruction", 0x4c89) { dut =>
+        dut.clockDomain.forkStimulus(period = 10)
+        dut.io.instruction #= ordinaryStore
+        dut.io.enqueueValid #= false
+        dut.io.source2Ready #= false
+        dut.io.wakeSource2 #= false
+        dut.io.issueReady #= false
+
+        dut.clockDomain.assertReset()
+        dut.clockDomain.waitSampling(2)
+        dut.clockDomain.deassertReset()
+        dut.clockDomain.waitSampling()
+
+        dut.io.enqueueValid #= true
+        sleep(1)
+        assert(dut.io.enqueueReady.toBoolean)
+        dut.clockDomain.waitSampling()
+        dut.io.enqueueValid #= false
+        dut.clockDomain.waitSampling()
+        sleep(1)
+        assert(dut.io.issueValid.toBoolean)
+        dut.io.issueReady #= true
+        dut.clockDomain.waitSampling()
+        dut.io.issueReady #= false
+
+        dut.io.instruction #= customStore
+        dut.io.enqueueValid #= true
+        sleep(1)
+        assert(dut.io.enqueueReady.toBoolean)
+        dut.clockDomain.waitSampling()
+        dut.io.enqueueValid #= false
+        sleep(1)
+        assert(!dut.io.issueValid.toBoolean)
+
+        dut.io.wakeSource2 #= true
+        sleep(1)
+        dut.clockDomain.waitSampling()
+        dut.io.wakeSource2 #= false
+        dut.clockDomain.waitSampling()
+        sleep(1)
+        assert(dut.io.issueValid.toBoolean)
+        assert(dut.io.issueInstruction.toBigInt == customStore)
       }
   }
 
@@ -1334,13 +1479,14 @@ class CustomExecutionSpec extends AnyFunSuite {
       }
   }
 
-  test("ROB records custom indirect branch predictor metadata") {
+  test("ROB records custom conditional dynamic-target predictor metadata") {
     SimConfig.withVerilator
       .workspacePath("target/sim-workspace-custom-rob-predictor")
       .compile(new CustomRobPredictorProbe(config))
       .doSim("custom-rob-predictor", 0x4c86) { dut =>
         dut.clockDomain.forkStimulus(period = 10)
-        dut.io.instruction #= CustomInstructionTestCatalog.PredicateIndirect.matchValue | (4 << 5)
+        dut.io.instruction #= CustomInstructionTestCatalog.CustomBranchTarget.matchValue |
+          (BigInt(2) << 10) | (5 << 5) | 4
         dut.io.allocateValid #= false
         dut.io.completionValid #= false
 
@@ -1357,7 +1503,7 @@ class CustomExecutionSpec extends AnyFunSuite {
         dut.clockDomain.waitSampling()
         sleep(1)
         assert(!dut.io.commitValid.toBoolean)
-        assert(dut.io.commitPredictorType.toBigInt == 2)
+        assert(dut.io.commitPredictorType.toBigInt == 0)
       }
   }
 }

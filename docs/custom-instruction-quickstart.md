@@ -267,7 +267,22 @@ evaluator = Some(
 )
 ```
 
-直接分支目标是 `PC + immediate`，寄存器间接分支目标是 `source1 + immediate`。
+直接分支目标默认是 `PC + immediate`，寄存器间接分支目标默认是
+`source1 + immediate`。需要其他单周期目标计算时使用：
+
+```scala
+targetEvaluator = Some(
+  CustomBranchTargetEvaluator.from { (pc, source1, source2, immediate, instruction) =>
+    (pc + (source1.asUInt ^ source2.asUInt) + immediate.asUInt).resize(32)
+  }
+)
+```
+
+返回值必须是 32 位 `UInt`。目标 evaluator 可以读取 PC、两个已声明的 GPR 源、解码后的
+立即数和完整指令，但不能读取第三个 GPR。使用目标 evaluator 的分支按动态目标处理；有自定义
+predicate 时仍按条件分支训练方向，目标由 BTB 学习。第一次执行可能预测失败，但执行结果和
+恢复流程不受影响。
+
 测试中的 PC 固定为 `0x1c000000`。设置 `destination` 后，该分支会向目标寄存器写入
 `PC + 4`，用于 branch link。
 
@@ -319,8 +334,25 @@ private val FinalStore = CustomInstructionSpec.store(
 )
 ```
 
-Load 的 `signExtend = true` 表示 Byte 或 Half Load 执行符号扩展。地址始终是
-`base + immediate`。Store 的写数据和 byte mask 会按照地址低两位排列。
+Load 的 `signExtend = true` 表示 Byte 或 Half Load 执行符号扩展。默认地址是
+`base + immediate`。需要其他单周期地址计算时使用：
+
+```scala
+addressSource2 = CustomRegister.Rk,
+addressEvaluator = Some(
+  CustomMemoryAddressEvaluator.from { (source1, source2, immediate, instruction) =>
+    (source1.asUInt + (source2.asUInt << 2) + immediate.asUInt).resize(32)
+  }
+)
+```
+
+返回值必须是 32 位 `UInt`。Load 可通过 `addressSource2` 声明第二个地址 GPR。Store 的
+`source2` 已经是 `data`，地址 evaluator 可以读取该值，但不能再增加独立的 index GPR；如果
+地址同时需要 base、index 和 Store data 三个不同 GPR，就超出了框架范围。依赖 Store data 的
+自定义地址会等待第二源就绪，普通 Store 仍保留地址和数据解耦。
+
+Store 的写数据和 byte mask 会按照 evaluator 返回地址的低两位排列。地址仍进入现有 LSU、
+地址翻译、Cache、未对齐异常和精确异常流程；一条指令仍然只访问一个地址。
 
 Memory 验证用例写法：
 
@@ -402,8 +434,8 @@ git diff --check
 
 - 最多两个 GPR 输入和一个 GPR 输出的单周期整数计算。
 - 读取旧 `rd` 后再写回 `rd`。
-- 直接或间接分支、单周期自定义条件和 branch link。
-- 一次 Byte、Half 或 Word Load／Store。
+- 直接或动态目标分支、单周期自定义条件、单周期自定义目标和 branch link。
+- 单周期自定义地址的一次 Byte、Half 或 Word Load／Store。
 
 出现以下要求时立即交给熟悉 CPU 主体的队员，不要继续尝试只修改本文件：
 

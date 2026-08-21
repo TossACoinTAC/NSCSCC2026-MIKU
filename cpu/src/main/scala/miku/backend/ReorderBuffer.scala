@@ -173,13 +173,20 @@ final class ReorderBuffer(config: OooCoreConfig = OooCoreConfig.FourIssueThreeCo
       val customPredicate = customBranches.zip(customMatches).map { case (specification, matched) =>
         matched && (if (specification.branchEvaluator.nonEmpty) True else False)
       }.reduce(_ || _)
+      val customDynamicTarget = customBranches.zip(customMatches).map {
+        case (specification, matched) =>
+          matched && (if (
+                        specification.branchKind == CustomBranchKind.RegisterIndirect ||
+                        specification.branchTargetEvaluator.nonEmpty
+                      ) True
+                      else False)
+      }.reduce(_ || _)
       when(
-        customBranch &&
-          io.allocate(lane).uop.decoded.branchKind === CustomBranchKind.RegisterIndirect
+        customBranch && (conditionalBranch || customPredicate)
       ) {
-        allocationPredictorType := PredictedBranchType.indirect
-      }.elsewhen(customBranch && (conditionalBranch || customPredicate)) {
         allocationPredictorType := PredictedBranchType.conditional
+      }.elsewhen(customBranch && customDynamicTarget) {
+        allocationPredictorType := PredictedBranchType.indirect
       }.elsewhen(customBranch) {
         allocationPredictorType := PredictedBranchType.direct
       }.elsewhen(conditionalBranch) {

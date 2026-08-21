@@ -178,11 +178,16 @@ min/max。题面需要其他单周期逻辑时，可以在 catalog 中内联 eva
 宽度取模。传入的 base、width 和 rotate amount 对于 32 位数据最多使用 6 位。
 
 Branch 可以使用 `CustomBranchKind` 中的恒跳、相等、不等、有符号比较、无符号比较和寄存器
-间接跳转。特殊条件使用 `CustomBranchEvaluator`。框架会同时更新 fetch predecode 和 ROB 中的
-预测器 metadata，错误预测仍使用现有恢复流程。
+间接跳转。特殊条件使用 `CustomBranchEvaluator`；特殊单周期目标使用
+`CustomBranchTargetEvaluator`，参数依次为 PC、两个源、解码立即数和完整指令，返回 32 位
+`UInt`。寄存器相关目标会标记为动态目标，有条件时仍使用 PHT 训练方向，并由 BTB 学习目标。
+框架会同时更新 fetch predecode 和 ROB 中的预测器 metadata，错误预测仍使用现有恢复流程。
 
 Load 和 Store 使用现有 LSU、cache、地址翻译及精确异常流程。支持 Byte、Half、Word，Load
-还可以选择符号扩展。当前模型是一条指令计算一个地址并完成一次访存。
+还可以选择符号扩展。默认地址是 `source1 + immediate`；`CustomMemoryAddressEvaluator` 可根据
+两个源、解码立即数和完整指令返回一个单周期 32 位虚拟地址。Load 使用 `addressSource2` 声明
+第二地址源；Store 的第二源同时是写数据，不能再声明第三个 index GPR。当前模型仍是一条指令
+计算一个地址并完成一次访存。
 
 ## 5. 当前能力边界
 
@@ -190,9 +195,9 @@ Load 和 Store 使用现有 LSU、cache、地址翻译及精确异常流程。�
 
 - 最多读取两个 GPR、写入一个 GPR 的单周期整数计算；
 - 读取旧 `rd` 后再写回 `rd` 的 read-modify-write；
-- 标准比较条件或一个自定义 predicate 的直接分支；
+- 标准比较条件或一个自定义 predicate，以及单周期直接或动态目标；
 - 写入 `PC + 4` 的 branch link；
-- 一个基址、一个立即数和一次 Byte/Half/Word 访问的 Load 或 Store。
+- 最多两个现有源、一个单周期自定义地址和一次 Byte/Half/Word 访问的 Load 或 Store。
 
 以下情况需要独立开发分支，不能只扩展 catalog：
 
@@ -234,7 +239,7 @@ git diff --check
 ```
 
 `custom-test` 验证 profile 约束、解码、重命名与旧目的寄存器依赖、执行结果、分支 predicate、
-branch link、动态位域边界、Load/Store、predecode、ROB predictor metadata、实际 profile 的
+自定义分支目标、branch link、动态位域边界、自定义访存地址、Load/Store、predecode、ROB predictor metadata、实际 profile 的
 `VerificationCases` 和 `.word` 工具。`custom-check` 还会为指定 profile 生成完整
 `CoreTopCompat` RTL，并运行端口、Verilator lint 和 Yosys 结构检查。
 生成的 `build/rtl/generation-manifest.json` 必须记录规范化后的 `custom_profile`，用于确认 RTL
@@ -247,8 +252,8 @@ branch link、动态位域边界、Load/Store、predecode、ROB predictor metada
 ## 8. 性能与提交要求
 
 `disabled` profile 应与没有自定义指令框架时生成相同功能的 RTL。正式 profile 会增加实际逻辑，
-但不会进入比赛性能测试。仍需检查生成后的资源和时序，防止新增组合计算影响共享 ALU port 的
-频率。
+但不会进入比赛性能测试。仍需检查生成后的资源和时序；Compute evaluator 影响共享 ALU port，
+目标 evaluator 影响分支解析路径，地址 evaluator 影响 AGU 路径。
 
 往届具体指令只允许在临时测试中验证框架能力。正式 profile catalog、提交历史中的最终源码和
 发布 RTL 不应包含往届 mnemonic、编码或完整语义实现。

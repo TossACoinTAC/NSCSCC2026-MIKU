@@ -94,10 +94,12 @@ object FetchPredecoder {
       val customBranchKind = UInt(3 bits)
       val customImmediate = Bits(config.xlen bits)
       val customPredicate = Bool()
+      val customTargetEvaluator = Bool()
       customBranch := False
       customBranchKind := CustomBranchKind.Always
       customImmediate := 0
       customPredicate := False
+      customTargetEvaluator := False
 
       for ((specification, matched) <- specifications.zip(matches)) {
         when(matched) {
@@ -105,20 +107,24 @@ object FetchPredecoder {
           customBranchKind := U(specification.branchKind, 3 bits)
           customImmediate := specification.immediate.decode(instruction, config.xlen)
           customPredicate := constantBool(specification.branchEvaluator.nonEmpty)
+          customTargetEvaluator := constantBool(specification.branchTargetEvaluator.nonEmpty)
         }
       }
 
-      val customIndirect = customBranchKind === CustomBranchKind.RegisterIndirect
-      val customConditional = customPredicate ||
-        (customBranchKind =/= CustomBranchKind.Always && !customIndirect)
-      val customDirect = customBranchKind === CustomBranchKind.Always && !customPredicate
+      val customIndirect =
+        customBranchKind === CustomBranchKind.RegisterIndirect || customTargetEvaluator
+      val customComparison = customBranchKind >= CustomBranchKind.Equal &&
+        customBranchKind <= CustomBranchKind.UnsignedGreaterOrEqual
+      val customConditional = customPredicate || customComparison
+      val customDirect =
+        customBranchKind === CustomBranchKind.Always && !customPredicate && !customIndirect
       when(customValid) {
         output.valid := customBranch
         output.branchType := PredictedBranchType.direct
-        when(customIndirect) {
-          output.branchType := PredictedBranchType.indirect
-        }.elsewhen(customConditional) {
+        when(customConditional) {
           output.branchType := PredictedBranchType.conditional
+        }.elsewhen(customIndirect) {
+          output.branchType := PredictedBranchType.indirect
         }
         output.target := pc + 4
         when(customBranch && !customIndirect) {
