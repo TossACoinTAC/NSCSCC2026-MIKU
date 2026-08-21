@@ -157,6 +157,14 @@ private object CustomInstructionTestCatalog {
     immediate = CustomImmediate.SignedI16Shift2,
     evaluator = Some(CustomBranchEvaluators.source1Zero)
   )
+  val BranchSourceZeroI21: CustomInstructionSpec = CustomInstructionSpec.branch(
+    name = "branch-source-zero-i21",
+    matchValue = BigInt("b0000000", 16),
+    matchMask = BigInt("fc000000", 16),
+    source1 = CustomRegister.Rj,
+    immediate = CustomImmediate.SignedI21Shift2,
+    evaluator = Some(CustomBranchEvaluators.source1Zero)
+  )
   val IndirectBranch: CustomInstructionSpec = CustomInstructionSpec.branch(
     name = "indirect-branch",
     matchValue = BigInt("f0000000", 16),
@@ -214,6 +222,7 @@ private object CustomInstructionTestCatalog {
       LoadByte,
       StoreHalf,
       BranchSourceZero,
+      BranchSourceZeroI21,
       IndirectBranch,
       ByteSwap,
       BitReverse,
@@ -231,6 +240,12 @@ private object CustomInstructionTestCatalog {
 
   def encodeReadModifyWrite(rd: Int, rj: Int): BigInt =
     ReadModifyWrite.matchValue | (BigInt(rj) << 5) | rd
+
+  def encodeBranchSourceZeroI21(rj: Int, offsetWords: Int): BigInt = {
+    val encoded = BigInt(offsetWords) & ((BigInt(1) << 21) - 1)
+    BranchSourceZeroI21.matchValue | ((encoded & 0xffff) << 10) |
+      (BigInt(rj) << 5) | (encoded >> 16)
+  }
 
   def encodeRriwinz(
       rd: Int,
@@ -950,6 +965,25 @@ class CustomExecutionSpec extends AnyFunSuite {
           assert(dut.io.result.toBigInt == expected)
         }
 
+        for (offsetWords <- Seq(7, -7)) {
+          dut.io.instruction #=
+            CustomInstructionTestCatalog.encodeBranchSourceZeroI21(
+              rj = 6,
+              offsetWords = offsetWords
+            )
+          sleep(1)
+          assert(dut.io.isBranch.toBoolean)
+          assert(dut.io.decodedRs1.toBigInt == 6)
+          assert(dut.io.decodedImmediate.toBigInt == ((offsetWords * 4) & wordMask))
+          assert(dut.io.predecodeValid.toBoolean)
+          assert(dut.io.predecodeType.toBigInt == 0)
+          assert(
+            dut.io.predecodeTarget.toBigInt ==
+              ((config.resetVector + offsetWords * 4) & wordMask)
+          )
+          assert(dut.io.predecodeStaticTaken.toBoolean == (offsetWords < 0))
+        }
+
         val branchImmediate = (-7) & 0xffff
         dut.io.instruction #= CustomInstructionTestCatalog.BranchEqual.matchValue |
           (BigInt(branchImmediate) << 10) | (6 << 5) | 5
@@ -1114,6 +1148,21 @@ class CustomExecutionSpec extends AnyFunSuite {
         sleep(1)
         assert(dut.io.branchTaken.toBoolean)
         assert(dut.io.branchTarget.toBigInt == config.resetVector + 12)
+
+        for (offsetWords <- Seq(7, -7)) {
+          dut.io.instruction #=
+            CustomInstructionTestCatalog.encodeBranchSourceZeroI21(
+              rj = 6,
+              offsetWords = offsetWords
+            )
+          dut.io.source1 #= 0
+          sleep(1)
+          assert(dut.io.branchTaken.toBoolean)
+          assert(
+            dut.io.branchTarget.toBigInt ==
+              ((config.resetVector + offsetWords * 4) & wordMask)
+          )
+        }
 
         dut.io.instruction #= CustomInstructionTestCatalog.BranchLink.matchValue |
           (BigInt(3) << 10)

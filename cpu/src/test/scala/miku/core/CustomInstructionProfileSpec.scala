@@ -208,6 +208,7 @@ class CustomInstructionProfileSpec extends AnyFunSuite {
     assert(CustomRegister.Fixed(0).fieldMask == 0)
     assert(CustomRegister.Fixed(31).fieldMask == 0)
     intercept[IllegalArgumentException] { CustomRegister.Fixed(32) }
+    assert(CustomImmediate.SignedI21Shift2.fieldMask == BigInt("03fffc1f", 16))
     assert(CustomMemorySize.Word == 0)
     assert(CustomMemorySize.Byte == 1)
     assert(CustomMemorySize.Half == 2)

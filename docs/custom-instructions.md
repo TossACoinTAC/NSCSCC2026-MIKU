@@ -158,9 +158,11 @@ destination = CustomRegister.Rd
 设置 `destination` 时才写 GPR。Branch 的 `destination` 一旦存在，框架会把它作为 link
 寄存器并写入 `PC + 4`。
 
-现成立即数包括原始 I16、I5、带符号或无符号 I12、左移两位的带符号 I14/I16/I26。其他连续
-字段可以使用 `CustomImmediate.Slice(lsb, width, signed, leftShift)`。若题面立即数由不连续
-字段组成，需要在 `CustomImmediate` 中增加一个明确的 decode 实现，并增加定向测试。
+现成立即数包括原始 I16、I5、带符号或无符号 I12、左移两位的带符号 I14/I16，以及 LA32R
+分段编码的 I21/I26。`SignedI21Shift2` 按 `instruction[4:0] ## instruction[25:10]` 拼接，
+`SignedI26Shift2` 按 `instruction[9:0] ## instruction[25:10]` 拼接。其他连续字段可以使用
+`CustomImmediate.Slice(lsb, width, signed, leftShift)`。若题面使用其他不连续立即数字段，需要在
+`CustomImmediate` 中增加一个明确的 decode 实现，并增加定向测试。
 
 ## 4. 三类指令的实现方式
 

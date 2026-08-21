@@ -222,6 +222,7 @@ evaluator = CustomComputeEvaluators.add
 | `CustomImmediate.UnsignedI12` | `[21:10]` | 零扩展 |
 | `CustomImmediate.SignedI14Shift2` | `[23:10]` | 符号扩展后左移 2 |
 | `CustomImmediate.SignedI16Shift2` | `[25:10]` | 符号扩展后左移 2 |
+| `CustomImmediate.SignedI21Shift2` | 高 5 位来自 `[4:0]`，低 16 位来自 `[25:10]` | 按 `instruction[4:0] ## instruction[25:10]` 拼接、符号扩展后左移 2 |
 | `CustomImmediate.SignedI26Shift2` | 高 10 位来自 `[9:0]`，低 16 位来自 `[25:10]` | 按 `instruction[9:0] ## instruction[25:10]` 拼接、符号扩展后左移 2 |
 
 其他连续字段使用：
@@ -229,6 +230,9 @@ evaluator = CustomComputeEvaluators.add
 ```scala
 CustomImmediate.Slice(lsb = 15, width = 5, signed = false, leftShift = 0)
 ```
+
+LA32R `1RI21` 分支直接使用 `CustomImmediate.SignedI21Shift2`。此格式的 `[4:0]` 是立即数高位，
+不是目的寄存器；需要 branch link 时只能使用不占编码位的 `CustomRegister.Fixed(n)`。
 
 不连续的自定义立即数字段不能仅修改比赛文件完成，应由熟悉 CPU 框架的队员扩展
 `CustomImmediate` 并增加专门测试。

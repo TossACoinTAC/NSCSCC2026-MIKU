@@ -75,6 +75,15 @@ object CustomImmediate {
   val SignedI16Shift2: CustomImmediate =
     Slice(lsb = 10, width = 16, signed = true, leftShift = 2)
 
+  case object SignedI21Shift2 extends CustomImmediate {
+    override val fieldMask: BigInt = BigInt("03fffc1f", 16)
+
+    override def decode(instruction: Bits, xlen: Int): Bits = {
+      val raw = instruction(4 downto 0) ## instruction(25 downto 10)
+      (raw ## B(0, 2 bits)).asSInt.resize(xlen).asBits
+    }
+  }
+
   case object SignedI26Shift2 extends CustomImmediate {
     override val fieldMask: BigInt = BigInt("03ffffff", 16)
 
