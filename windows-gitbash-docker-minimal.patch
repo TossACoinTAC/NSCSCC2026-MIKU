@@ -1,0 +1,321 @@
+diff --git a/Makefile b/Makefile
+index bc06af4..4417661 100644
+--- a/Makefile
++++ b/Makefile
+@@ -3,6 +3,7 @@ SHELL := /bin/bash
+ 
+ ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
+ -include $(ROOT_DIR)/config/local.env
++HOST_PYTHON ?= python3
+ 
+ WORKSPACE_ROOT ?= $(ROOT_DIR)
+ CPU_DIR ?= $(ROOT_DIR)/cpu
+@@ -137,8 +138,8 @@ board-result:
+ 	@LABAGENT_HOST="$(LABAGENT_HOST)" LABAGENT_SSH_KEY="$(LABAGENT_SSH_KEY)" $(BOARDCTL) result "$(BOARD_JOB)"
+ 
+ doctor:
+-	@WORKSPACE_ROOT=$(ROOT_DIR) VIVADO=$(VIVADO) SURFER=$(SURFER) DOCKER_IMAGE=$(DOCKER_IMAGE) \
+-		python3 scripts/env/doctor.py
++	@WORKSPACE_ROOT="$(ROOT_DIR)" VIVADO="$(VIVADO)" SURFER="$(SURFER)" DOCKER_IMAGE="$(DOCKER_IMAGE)" \
++		$(HOST_PYTHON) scripts/env/doctor.py
+ 
+ status:
+ 	@printf '%s\n' '== 根仓库 ==' && git status --short --branch
+@@ -151,7 +152,7 @@ status:
+ 	done
+ 
+ ide-setup:
+-	@python3 scripts/env/ide_setup.py
++	@$(HOST_PYTHON) scripts/env/ide_setup.py
+ 
+ env-build:
+ 	docker build --pull=false -f "$(DOCKERFILE)" -t "$(DOCKER_IMAGE)" "$(ROOT_DIR)"
+@@ -160,10 +161,10 @@ toolchain-check: env-build
+ 	@$(CONTAINER_RUN) sh -ec 'java -version; sbt --version; verilator --version; yosys -V; loongarch32r-linux-gnusf-gcc --version | head -n 1'
+ 
+ docs-check:
+-	@python3 scripts/common/check_docs.py
++	@$(HOST_PYTHON) scripts/common/check_docs.py
+ 
+ experiment-freeze: cpu-generate
+-	@python3 scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
++	@$(HOST_PYTHON) scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
+ 		--experiment-id "$(EXPERIMENT_ID)" --chiplab-dir "$(CHIPLAB_HOME)" \
+ 		--chiplab-version "$(CHIPLAB_VERSION)" --docker-image "$(DOCKER_IMAGE)" \
+ 		--generation-manifest "$(BUILD_ROOT)/rtl/generation-manifest.json" \
+@@ -172,20 +173,20 @@ experiment-freeze: cpu-generate
+ experiment-compare:
+ 	@test -n "$(strip $(BASE_MATRIX))" || { printf 'BASE_MATRIX 不能为空\n' >&2; exit 2; }
+ 	@test -n "$(strip $(CANDIDATE_MATRIX))" || { printf 'CANDIDATE_MATRIX 不能为空\n' >&2; exit 2; }
+-	@python3 scripts/experiment/compare.py --baseline "$(BASE_MATRIX)" \
++	@$(HOST_PYTHON) scripts/experiment/compare.py --baseline "$(BASE_MATRIX)" \
+ 		--candidate "$(CANDIDATE_MATRIX)" --out "$(COMPARE_OUT)"
+ 
+ timing-analyze:
+ 	@test -n "$(strip $(TIMING_REPORT))" || { printf 'TIMING_REPORT 不能为空\n' >&2; exit 2; }
+-	@python3 scripts/experiment/timing_analyze.py --report "$(TIMING_REPORT)" --out "$(TIMING_OUT)"
++	@$(HOST_PYTHON) scripts/experiment/timing_analyze.py --report "$(TIMING_REPORT)" --out "$(TIMING_OUT)"
+ 
+ perf-observation-summary:
+ 	@test -n "$(strip $(PERF_OBSERVATION_MATRIX))" || { printf 'PERF_OBSERVATION_MATRIX 不能为空\n' >&2; exit 2; }
+-	@python3 scripts/experiment/perf_observation_summary.py \
++	@$(HOST_PYTHON) scripts/experiment/perf_observation_summary.py \
+ 		--matrix "$(PERF_OBSERVATION_MATRIX)" --out "$(PERF_OBSERVATION_OUT)"
+ 
+ test-impact:
+-	@python3 scripts/experiment/test_impact.py --root "$(ROOT_DIR)" \
++	@$(HOST_PYTHON) scripts/experiment/test_impact.py --root "$(ROOT_DIR)" \
+ 		--manifest "$(CPU_DIR)/tests/manifest.yml" --base "$(TEST_BASE)" --out "$(TEST_IMPACT_OUT)"
+ 
+ cpu-test:
+@@ -278,7 +279,7 @@ func58-sim:
+ 		--sim-path "$(CONTAINER_SIM_PATH)" --allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
+ 
+ func-release: cpu-generate
+-	@python3 scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
++	@$(HOST_PYTHON) scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
+ 		--experiment-id "$(EXPERIMENT_ID)" --chiplab-dir "$(CHIPLAB_HOME)" \
+ 		--chiplab-version "$(CHIPLAB_VERSION)" --docker-image "$(DOCKER_IMAGE)" \
+ 		--generation-manifest "$(BUILD_ROOT)/rtl/generation-manifest.json" \
+@@ -303,7 +304,7 @@ linux-sim:
+ 
+ branch-trace-summary:
+ 	@test -n "$(BRANCH_TRACE)" || { printf 'BRANCH_TRACE is required\n' >&2; exit 2; }
+-	@python3 -I "$(ROOT_DIR)/scripts/experiment/branch_trace_summary.py" "$(BRANCH_TRACE)"
++	@$(HOST_PYTHON) -I "$(ROOT_DIR)/scripts/experiment/branch_trace_summary.py" "$(BRANCH_TRACE)"
+ 
+ wave:
+ 	@test -f "$(SURFER)" || { printf 'Surfer 不存在: %s\n' "$(SURFER)" >&2; exit 1; }
+@@ -338,7 +339,7 @@ soc-archive:
+ 	@test -f "$(SOC_EXPERIMENT_MANIFEST)" || { printf '实验清单不存在: %s\n' "$(SOC_EXPERIMENT_MANIFEST)" >&2; exit 2; }
+ 	@case "$(SOC_BUILD_KIND)" in perf|func) ;; *) \
+ 		printf 'SOC_BUILD_KIND 必须是 perf 或 func\n' >&2; exit 2 ;; esac
+-	@python3 scripts/vivado/archive.py --root "$(ROOT_DIR)" \
++	@$(HOST_PYTHON) scripts/vivado/archive.py --root "$(ROOT_DIR)" \
+ 		--build-dir "$(SOC_BUILD_DIR)" \
+ 		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-version "$(CHIPLAB_VERSION)" \
+ 		--kind "$(SOC_BUILD_KIND)" --requested-mhz "$(PERF_CPU_MHZ)" \
+@@ -350,19 +351,19 @@ soc-timing:
+ 	@find "$(BUILD_ROOT)" -name timing_summary.rpt -print | sort | tail -1 | xargs -r rg -n "WNS|TNS|Slack|Timing"
+ 
+ clean-build:
+-	@python3 scripts/common/clean.py build
++	@$(HOST_PYTHON) scripts/common/clean.py build
+ 
+ clean-cpu:
+-	@python3 scripts/common/clean.py cpu
++	@$(HOST_PYTHON) scripts/common/clean.py cpu
+ 
+ clean-sim:
+-	@python3 scripts/common/clean.py sim
++	@$(HOST_PYTHON) scripts/common/clean.py sim
+ 
+ clean-vivado:
+-	@python3 scripts/common/clean.py vivado
++	@$(HOST_PYTHON) scripts/common/clean.py vivado
+ 
+ clean-ide-state:
+-	@python3 scripts/common/clean.py ide
++	@$(HOST_PYTHON) scripts/common/clean.py ide
+ 
+ clean: clean-build clean-cpu
+ 
+diff --git a/scripts/env/doctor.py b/scripts/env/doctor.py
+index d2a3404..57dddeb 100755
+--- a/scripts/env/doctor.py
++++ b/scripts/env/doctor.py
+@@ -33,6 +33,14 @@ def root_gitlink(root: Path, path: str) -> str | None:
+     return fields[1]
+ 
+ 
++def executable_file(path: Path) -> bool:
++    if not path.is_file():
++        return False
++    if path.suffix.lower() in {".bat", ".cmd", ".exe"}:
++        return True
++    return os.access(path, os.X_OK)
++
++
+ def main() -> int:
+     parser = argparse.ArgumentParser(description="只读检查本机环境和嵌套仓库")
+     parser.add_argument("--require", action="append", default=[], choices=("sim", "vivado", "linux", "board"))
+@@ -96,7 +104,7 @@ def main() -> int:
+     print(f"[{'通过' if code == 0 else '警告'}] Docker 镜像: {image}")
+ 
+     vivado = Path(os.environ.get("VIVADO", "/opt/Xilinx/Vivado/2023.2/bin/vivado"))
+-    vivado_ok = vivado.is_file() and os.access(vivado, os.X_OK)
++    vivado_ok = executable_file(vivado)
+     print(f"[{'通过' if vivado_ok else ('失败' if 'vivado' in required else '警告')}] Vivado: {vivado}")
+     failures += int("vivado" in required and not vivado_ok)
+ 
+diff --git a/scripts/env/run-in-container b/scripts/env/run-in-container
+index c1c74d9..694a6f3 100755
+--- a/scripts/env/run-in-container
++++ b/scripts/env/run-in-container
+@@ -1,4 +1,4 @@
+-#!/usr/bin/env sh
++#!/usr/bin/env bash
+ set -eu
+ 
+ script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+@@ -12,23 +12,69 @@ workdir=${CONTAINER_WORKDIR:-$workspace_root}
+   exit 2
+ }
+ 
+-host_uid=$(id -u)
+-host_gid=$(id -g)
+-docker run --rm --user 0 -v "$cache_volume:/cache" "$image" sh -ec \
+-  'mkdir -p /cache/sbt /cache/ivy; chown "$1:$2" /cache /cache/sbt /cache/ivy' sh \
+-  "$host_uid" "$host_gid"
++host_windows=0
++case "$(uname -s 2>/dev/null || true)" in
++  MINGW*|MSYS*|CYGWIN*) host_windows=1 ;;
++esac
+ 
+-exec docker run --rm -i \
+-  --user "$host_uid:$host_gid" \
++container_root=$workspace_root
++container_workdir=$workdir
++spinal_workspace_root=${SPINAL_SIM_WORKSPACE_ROOT:-$workspace_root/cpu/target/spinal-sim/workspaces}
++spinal_workspace=${SPINAL_SIM_WORKSPACE:-$workspace_root/cpu/target/spinal-sim/contracts}
++docker_workspace_mount="$workspace_root:$workspace_root"
++mapped_args=("$@")
++
++map_to_container() {
++  case "$1" in
++    "$workspace_root") printf '%s\n' "$container_root" ;;
++    "$workspace_root"/*) printf '%s/%s\n' "$container_root" "${1#"$workspace_root"/}" ;;
++    *) printf '%s\n' "$1" ;;
++  esac
++}
++
++if [ "$host_windows" -eq 1 ]; then
++  command -v cygpath >/dev/null 2>&1 || {
++    printf 'Windows Git Bash 需要 cygpath\n' >&2
++    exit 127
++  }
++  export MSYS_NO_PATHCONV=1
++  container_root=/workspace
++  container_workdir=$(map_to_container "$workdir")
++  spinal_workspace_root=$(map_to_container "$spinal_workspace_root")
++  spinal_workspace=$(map_to_container "$spinal_workspace")
++  docker_workspace_mount="$(cygpath -m "$workspace_root"):$container_root"
++  mapped_args=()
++  for argument in "$@"; do
++    mapped_args+=("$(map_to_container "$argument")")
++  done
++fi
++
++if [ "$host_windows" -eq 0 ]; then
++  host_uid=$(id -u)
++  host_gid=$(id -g)
++  docker run --rm --user 0 -v "$cache_volume:/cache" "$image" sh -ec \
++    'mkdir -p /cache/sbt /cache/ivy; chown "$1:$2" /cache /cache/sbt /cache/ivy' sh \
++    "$host_uid" "$host_gid"
++else
++  docker run --rm --user 0 -v "$cache_volume:/cache" "$image" sh -ec \
++    'mkdir -p /cache/sbt /cache/ivy'
++fi
++
++docker_args=(docker run --rm -i)
++if [ "$host_windows" -eq 0 ]; then
++  docker_args+=(--user "$host_uid:$host_gid")
++fi
++
++exec "${docker_args[@]}" \
+   -e HOME=/tmp \
+   -e LANG=C.UTF-8 \
+   -e LC_ALL=C.UTF-8 \
+   -e FORCE_COLOR="${FORCE_COLOR:-0}" \
+   -e NO_COLOR="${NO_COLOR:-}" \
+   -e COURSIER_CACHE=/cache/coursier \
+-  -e SPINAL_SIM_WORKSPACE_ROOT="${SPINAL_SIM_WORKSPACE_ROOT:-$workspace_root/cpu/target/spinal-sim/workspaces}" \
+-  -e SPINAL_SIM_WORKSPACE="${SPINAL_SIM_WORKSPACE:-$workspace_root/cpu/target/spinal-sim/contracts}" \
+-  -v "$workspace_root:$workspace_root" \
++  -e SPINAL_SIM_WORKSPACE_ROOT="$spinal_workspace_root" \
++  -e SPINAL_SIM_WORKSPACE="$spinal_workspace" \
++  -v "$docker_workspace_mount" \
+   -v "$cache_volume:/cache" \
+-  -w "$workdir" \
+-  "$image" "$@"
++  -w "$container_workdir" \
++  "$image" "${mapped_args[@]}"
+diff --git a/scripts/vivado/implement.sh b/scripts/vivado/implement.sh
+index c29fb0c..338137b 100755
+--- a/scripts/vivado/implement.sh
++++ b/scripts/vivado/implement.sh
+@@ -11,16 +11,49 @@ version=$3
+ build_dir=$(realpath -m "$4")
+ vivado=${VIVADO:-/opt/Xilinx/Vivado/2023.2/bin/vivado}
+ mhz=${PERF_CPU_MHZ:-100}
++vivado_windows=0
++case "${vivado,,}" in
++  *.bat|*.cmd|*.exe) vivado_windows=1 ;;
++esac
+ 
+ case "$build_dir" in
+   "$workspace"/build/*) ;;
+   *) printf 'Vivado 输出必须位于 %s/build: %s\n' "$workspace" "$build_dir" >&2; exit 2 ;;
+ esac
+-[[ -x $vivado ]] || { printf 'Vivado 不可执行: %s\n' "$vivado" >&2; exit 127; }
++if (( vivado_windows )); then
++  [[ -f $vivado ]] || { printf 'Vivado 不存在: %s\n' "$vivado" >&2; exit 127; }
++else
++  [[ -x $vivado ]] || { printf 'Vivado 不可执行: %s\n' "$vivado" >&2; exit 127; }
++fi
+ [[ -f $workspace/build/rtl/mycpu_top.v ]] || {
+   printf '缺少发布 RTL，请先运行 make cpu-generate\n' >&2; exit 1;
+ }
+ 
++run_vivado() {
++  local argument
++  local -a native_args=()
++  if (( vivado_windows )); then
++    command -v cygpath >/dev/null 2>&1 || {
++      printf 'Windows Vivado 需要 Git Bash 的 cygpath\n' >&2
++      exit 127
++    }
++    for argument in "$@"; do
++      if [[ $argument == /* ]]; then
++        native_args+=("$(cygpath -w "$argument")")
++      else
++        native_args+=("$argument")
++      fi
++    done
++  else
++    native_args=("$@")
++  fi
++  if [[ ${vivado,,} == *.bat || ${vivado,,} == *.cmd ]]; then
++    cmd.exe /d /c "$(cygpath -w "$vivado")" "${native_args[@]}"
++  else
++    "$vivado" "${native_args[@]}"
++  fi
++}
++
+ rm -rf -- "$build_dir"
+ mkdir -p "$build_dir"
+ (cd "$chiplab" && tar --exclude='.git' --exclude='*/.git' -cf - .) |
+@@ -40,19 +73,19 @@ if [[ $build_dir == *func* ]]; then
+ else
+   sed -i '2s|.*|// `define RUN_FUNC_TEST|' "$config"
+   sed -i '3s|.*|`define RUN_PERF_TEST|' "$config"
+-  "$vivado" -mode batch -source "$run_dir/generate_perf_pll.tcl" \
++  run_vivado -mode batch -source "$run_dir/generate_perf_pll.tcl" \
+     -tclargs "$mhz" "$build_dir/chip/soc_demo/nscscc-team/xilinx_ip/clk_pll/clk_pll.xci" \
+     "$run_dir/perf_clock_generated.txt"
+ fi
+ 
+ (
+   cd "$run_dir"
+-  "$vivado" -mode batch -source create_project.tcl
+-  "$vivado" -mode batch -source bit.tcl -tclargs "$mode" "$mhz"
++  run_vivado -mode batch -source create_project.tcl
++  run_vivado -mode batch -source bit.tcl -tclargs "$mode" "$mhz"
+ )
+ 
+ impl_dir="$run_dir/project/loongson.runs/impl_1"
+-"$vivado" -mode batch -source "$workspace/scripts/vivado/report_impl.tcl" \
++run_vivado -mode batch -source "$workspace/scripts/vivado/report_impl.tcl" \
+   -tclargs "$impl_dir/soc_top_routed.dcp" "$impl_dir"
+ 
+ printf 'Vivado 完成: mode=%s requested_mhz=%s build=%s\n' "$mode" "$mhz" "$build_dir"
