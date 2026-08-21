@@ -28,7 +28,7 @@ class ToolchainContractTest(unittest.TestCase):
         makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
         self.assertRegex(
             makefile,
-            re.compile(r"^CUSTOM_PROFILE := disabled$", re.MULTILINE),
+            re.compile(r"^CUSTOM_PROFILE := example-complex-branch$", re.MULTILINE),
         )
 
 
