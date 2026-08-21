@@ -6,7 +6,7 @@
 ## 一、阶段顺序
 
 1. **冻结基线**：先生成 matching RTL，再用 `make experiment-freeze` 记录根仓库 HEAD、
-   `cpu/` 内容 hash、Chiplab HEAD、dirty patch hash、Docker image/tool hash，以及显式列出的
+   `cpu/` 内容 hash、Chiplab 静态版本标签、dirty patch hash、Docker image/tool hash，以及显式列出的
    软件仿真、比较和功能证据。冻结清单是归档输入，不靠目录名或短 hash 猜测证据。
 2. **变更分类与候选设计**：标为性能参数、内部结构、公开接口、RTL 生成文本、仿真
    harness 或工具环境变化。每一类声明预期不变量和观测指标。性能候选在设计和实现时
@@ -86,7 +86,11 @@ make experiment-freeze EXPERIMENT_ID=<round-id> \
   EXPERIMENT_EVIDENCE="<perf20.csv> <comparison.json> <func58.csv>"
 make timing-analyze TIMING_REPORT=<cpu_setup_top50.rpt>
 make soc-impl SOC_EXPERIMENT_MANIFEST=<experiment-manifest.json>
+
 ```
+
+自定义指令新增后的最简 Make 流程见
+[`custom-instruction-make-flow.md`](custom-instruction-make-flow.md)。
 
 `test-impact` 由 `cpu/tests/manifest.yml` 路由到版本化 path-to-suite 映射；它给出最低定向
 集合，不替代完整 `cpu-check`。比较器要求两组矩阵均为完整 20/20 pass，且 Chiplab、profile、
@@ -97,7 +101,7 @@ suite、memory mode、software key 与 workload/seed 集合一致。模型和 CP
 
 `build/sim/cache/` 下的三层缓存分别承担不同身份：
 
-- `platforms/` 是按 Chiplab 锁定提交导出的持久只读平台树，本地 Chiplab dirty patch
+- `platforms/` 是按 Chiplab 静态版本标签导出的持久只读平台树，本地 Chiplab dirty patch
   不进入模型输入，也不再为每次仿真创建临时快照；
 - `models/` 由平台 key、生成 RTL hash、harness patch、配置参数和 Verilator 工具身份
   共同寻址，只在这些编译输入变化时重新翻译 Verilog、编译 C++ 并链接模型；
@@ -140,8 +144,8 @@ harness 可构建，不能替代运行验证；超时首先与软件启动成本
 model hash。每个候选 manifest 至少包含 CPU source、RTL、software、clock、功能结果、
 实现报告和对应 hash。旧实现或旧 Chiplab 的 WNS 只能作为历史参考。
 
-完整 SoC 实现成功返回后由 `make soc-archive` 校验并归档。调用方必须传入
-`SOC_EXPERIMENT_MANIFEST`；归档器只复制该清单逐项列出且 hash 仍匹配的证据，不再扫描
+完整 SoC 实现成功返回后由 `make soc-archive` 校验并归档。`SOC_EXPERIMENT_MANIFEST` 默认复用
+`EXPERIMENT_MANIFEST`，也可以由调用方显式覆盖；归档器只复制该清单逐项列出且 hash 仍匹配的证据，不再扫描
 同一短 hash 目录并模糊收集矩阵。显式证据若是 perf20 矩阵，矩阵每行的安全相对
 `result_path` 视为该矩阵的结构化组成，只补录后续 A/B 所需的 `run-manifest.txt` 和
 `perf20-result.json`；归档后的 CSV 因此仍可直接交给 `experiment-compare`，不会连带复制

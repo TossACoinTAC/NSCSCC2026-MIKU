@@ -3,7 +3,7 @@
 ## 验证基线
 
 - CPU 导入快照：`70e009e6b79386916e72680e29485e175bf9bbd2`
-- Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`
+- Chiplab：`Finals` 静态版本标签
 - Docker 镜像：`nscscc-dev:ubuntu24.04-v1`
 - Java 17.0.19、SBT 1.10.11、SpinalHDL 1.14.2
 - Verilator 5.020、Yosys 0.33、Python 3.12.3

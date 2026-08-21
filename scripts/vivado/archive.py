@@ -205,7 +205,7 @@ def load_experiment_evidence(
     root: Path,
     manifest_path: Path,
     generation: dict[str, Any],
-    chiplab_commit: str,
+    chiplab_version: str,
 ) -> tuple[dict[str, Any], list[Path]]:
     manifest_path = manifest_path.resolve()
     try:
@@ -225,7 +225,7 @@ def load_experiment_evidence(
     actual = {key: cpu.get(key) for key in expected}
     if actual != expected:
         raise ArchiveError(f"实验清单与当前生成 RTL 身份不一致: {actual} != {expected}")
-    if experiment["platform"].get("chiplab_commit") != chiplab_commit:
+    if experiment["platform"].get("chiplab_version") != chiplab_version:
         raise ArchiveError("实验清单与当前 Chiplab 身份不一致")
     evidence = [(root / item["path"]).resolve() for item in experiment["evidence"]]
     return experiment, evidence
@@ -263,7 +263,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--build-dir", type=Path, required=True)
     parser.add_argument("--chiplab-dir", type=Path, required=True)
-    parser.add_argument("--chiplab-commit", required=True)
+    parser.add_argument("--chiplab-version", required=True)
     parser.add_argument("--kind", choices=("perf", "func"), required=True)
     parser.add_argument("--requested-mhz", required=True)
     parser.add_argument("--experiment-manifest", type=Path, required=True)
@@ -300,12 +300,6 @@ def main() -> int:
     if sha256(published_rtl) != expected_rtl or sha256(staged_rtl) != expected_rtl:
         raise ArchiveError("根 RTL、生成清单与 Vivado staging RTL 身份不一致")
 
-    actual_chiplab = git_value(chiplab, "rev-parse", "HEAD")
-    if actual_chiplab != args.chiplab_commit:
-        raise ArchiveError(
-            f"Chiplab HEAD 与锁定提交不一致: {actual_chiplab} != {args.chiplab_commit}"
-        )
-
     sources, missing_analysis = collect_implementation_sources(impl_dir)
     sources["mycpu_top.v"] = staged_rtl
     generated_clock = build_dir / "fpga/nscscc-team/run_vivado/perf_clock_generated.txt"
@@ -328,14 +322,14 @@ def main() -> int:
     ).strftime("%Y%m%d-%H%M%S")
     source_commit = str(generation["source_commit"])
     name = (
-        f"cpu_{source_commit[:12]}_chiplab_{args.chiplab_commit[:12]}_"
+        f"cpu_{source_commit[:12]}_chiplab_{args.chiplab_version}_"
         f"{args.kind}{'_postroute' if args.stage == 'postroute' else ''}_"
         f"{frequency}mhz_{build_time}"
     )
     destination = archive_root / name
 
     experiment, evidence = load_experiment_evidence(
-        root, args.experiment_manifest, generation, args.chiplab_commit
+        root, args.experiment_manifest, generation, args.chiplab_version
     )
     evidence = expand_evidence_files(root, evidence)
     manifest: dict[str, Any] = {
@@ -357,7 +351,7 @@ def main() -> int:
             "workspace_commit_at_archive": git_value(root, "rev-parse", "HEAD"),
         },
         "platform": {
-            "chiplab_commit": args.chiplab_commit,
+            "chiplab_version": args.chiplab_version,
             "device": "xc7a200tfbg676-2",
             "vivado": "2023.2",
         },
@@ -449,7 +443,7 @@ def main() -> int:
             f"cpu_source_commit={source_commit}",
             f"custom_profile={generation['custom_profile']}",
             f"cpu_source_tree_sha256={generation['source_tree_sha256']}",
-            f"chiplab_commit={args.chiplab_commit}",
+            f"chiplab_version={args.chiplab_version}",
             f"requested_cpu_mhz={frequency}",
             f"setup_wns_ns={clock['setup_wns_ns']}",
             f"hold_wns_ns={clock['hold_wns_ns']}",

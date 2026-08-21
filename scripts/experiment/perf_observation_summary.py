@@ -198,7 +198,7 @@ def summarize_matrix(matrix_path: Path) -> dict[str, Any]:
 
     identity_keys = (
         "cpu_commit",
-        "chiplab_commit",
+        "chiplab_version",
         "profile",
         "suite",
         "memory_mode",

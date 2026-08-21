@@ -18,6 +18,9 @@ Makefile 会忽略 shell 中遗留的同名环境变量，只接受命令行显�
 `CUSTOM_PROFILE=<name>`。生成后的 `build/rtl/generation-manifest.json` 会记录所选 profile，
 并在 experiment freeze 和 Vivado 归档时继续校验该身份。
 
+完成 profile 注册后的最简 Make 流程见
+[`custom-instruction-make-flow.md`](custom-instruction-make-flow.md)。
+
 ## 2. 比赛当天只修改的文件
 
 通常只修改：

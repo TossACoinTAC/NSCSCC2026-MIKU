@@ -81,9 +81,9 @@ def validate_experiment_manifest(document: dict[str, Any], root: Path | None = N
     for key in ("source_tree_sha256", "raw_rtl_sha256", "published_rtl_sha256", "generation_manifest_sha256"):
         if re.fullmatch(r"[0-9a-f]{64}", str(cpu.get(key, ""))) is None:
             raise ExperimentError(f"实验清单 CPU 哈希非法: {key}")
-    chiplab = str(document["platform"].get("chiplab_commit", ""))
-    if re.fullmatch(r"[0-9a-f]{40}", chiplab) is None:
-        raise ExperimentError("实验清单 Chiplab commit 非法")
+    chiplab_version = str(document["platform"].get("chiplab_version", ""))
+    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", chiplab_version) is None:
+        raise ExperimentError("实验清单 Chiplab version 非法")
     evidence = document["evidence"]
     if not isinstance(evidence, list):
         raise ExperimentError("实验清单 evidence 必须是数组")
@@ -92,7 +92,7 @@ def validate_experiment_manifest(document: dict[str, Any], root: Path | None = N
         raise ExperimentError("实验清单 simulations 必须是数组")
     for index, item in enumerate(simulations):
         required_sim = {
-            "matrix_path", "matrix_sha256", "cpu_commit", "chiplab_commit", "profile",
+            "matrix_path", "matrix_sha256", "cpu_commit", "chiplab_version", "profile",
             "suite", "memory_mode", "model_sha256", "model_key", "software_key",
         }
         if not isinstance(item, dict) or set(item) != required_sim:
@@ -147,7 +147,7 @@ def matrix_simulation_identity(root: Path, matrix: Path) -> dict[str, str]:
     if not manifests:
         raise ExperimentError(f"矩阵缺少 run manifest: {matrix}")
     keys = (
-        "cpu_commit", "chiplab_commit", "profile", "suite", "memory_mode",
+        "cpu_commit", "chiplab_version", "profile", "suite", "memory_mode",
         "model_sha256", "model_key", "software_key",
     )
     identities = [{key: parse_key_values(path).get(key, "") for key in keys} for path in manifests]
@@ -219,7 +219,7 @@ def load_perf_matrix(path: Path) -> dict[str, Any]:
             identities.append(identity)
     if not rows:
         raise ExperimentError(f"perf20 矩阵为空: {path}")
-    stable_keys = ("chiplab_commit", "profile", "suite", "memory_mode", "model_key", "software_key")
+    stable_keys = ("chiplab_version", "profile", "suite", "memory_mode", "model_key", "software_key")
     reference = {key: identities[0].get(key, "") for key in stable_keys}
     for identity in identities:
         current = {key: identity.get(key, "") for key in stable_keys}
@@ -235,7 +235,7 @@ def compare_perf_matrices(baseline_path: Path, candidate_path: Path) -> dict[str
     candidate = load_perf_matrix(candidate_path)
     if set(baseline["rows"]) != set(candidate["rows"]):
         raise ExperimentError("baseline 与 candidate 的 benchmark/memory/seed 集合不同")
-    comparable_identity = ("chiplab_commit", "profile", "suite", "memory_mode", "software_key")
+    comparable_identity = ("chiplab_version", "profile", "suite", "memory_mode", "software_key")
     identity_mismatch = {
         key: {"baseline": baseline["identity"][key], "candidate": candidate["identity"][key]}
         for key in comparable_identity

@@ -3,7 +3,7 @@
 
 
 MIKU（MIKU IS KINDA UNORDERED）是面向龙芯杯决赛 Linux 目标的 LA32R 乱序 SoC CPU。
-源码使用 SpinalHDL，平台来自锁定的 Chiplab c398 快照。
+源码使用 SpinalHDL，平台使用 `CHIPLAB_VERSION` 标记的静态 Chiplab 包。
 
 先运行：
 
@@ -21,4 +21,5 @@ make cpu-check
 [`docs/current-optimization-plan.md`](docs/current-optimization-plan.md)，本次目录和
 工具链迁移的验证结果见 [`docs/migration-validation.md`](docs/migration-validation.md)。
 决赛自定义指令的 profile API、编码工具、能力边界和验证顺序见
-[`docs/custom-instructions.md`](docs/custom-instructions.md)。
+[`docs/custom-instructions.md`](docs/custom-instructions.md)；新增指令后的最简 Make 流程见
+[`docs/custom-instruction-make-flow.md`](docs/custom-instruction-make-flow.md)。

@@ -1,0 +1,15 @@
+diff --git a/sims/verilator/run_prog/Makefile b/sims/verilator/run_prog/Makefile
+--- a/sims/verilator/run_prog/Makefile
++++ b/sims/verilator/run_prog/Makefile
+@@ -192,7 +192,10 @@ ifeq ('$(AXI128)', 'y')
+ VFLAGS += -DAXI128
+ endif
+ 
+-VFLAGS += -DDIFFTEST_EN
++DIFFTEST_EN ?= y
++ifeq ('${DIFFTEST_EN}', 'y')
++VFLAGS += -DDIFFTEST_EN
++endif
+ 
+ VERILATOR_INCLUDE += -y ${SIMU_TOP} 
+ ALL_VERILATOR_SRC += ${SIMU_TOP}/*.v

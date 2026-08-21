@@ -23,6 +23,8 @@ exec docker run --rm -i \
   -e HOME=/tmp \
   -e LANG=C.UTF-8 \
   -e LC_ALL=C.UTF-8 \
+  -e FORCE_COLOR="${FORCE_COLOR:-0}" \
+  -e NO_COLOR="${NO_COLOR:-}" \
   -e COURSIER_CACHE=/cache/coursier \
   -e SPINAL_SIM_WORKSPACE_ROOT="${SPINAL_SIM_WORKSPACE_ROOT:-$workspace_root/cpu/target/spinal-sim/workspaces}" \
   -e SPINAL_SIM_WORKSPACE="${SPINAL_SIM_WORKSPACE:-$workspace_root/cpu/target/spinal-sim/contracts}" \

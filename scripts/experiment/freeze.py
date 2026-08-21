@@ -35,6 +35,13 @@ def git_output(root: Path, *arguments: str, binary: bool = False) -> str | bytes
     return result if binary else result.decode().strip()
 
 
+def optional_git_bytes(root: Path, *arguments: str) -> bytes:
+    try:
+        return bytes(git_output(root, *arguments, binary=True))
+    except ExperimentError:
+        return b""
+
+
 def hash_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -44,7 +51,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--experiment-id", required=True)
     parser.add_argument("--chiplab-dir", type=Path, required=True)
-    parser.add_argument("--chiplab-commit", required=True)
+    parser.add_argument("--chiplab-version", required=True)
     parser.add_argument("--docker-image", required=True)
     parser.add_argument("--generation-manifest", type=Path, required=True)
     parser.add_argument("--evidence", action="append", default=[])
@@ -65,14 +72,10 @@ def main() -> int:
         raise ExperimentError("发布 RTL 与 generation manifest 不一致")
     if generation.get("raw_rtl_sha256") != sha256_file(raw):
         raise ExperimentError("原始 RTL 与 generation manifest 不一致")
-    actual_chiplab = str(git_output(chiplab, "rev-parse", "HEAD"))
-    if actual_chiplab != args.chiplab_commit:
-        raise ExperimentError(f"Chiplab HEAD 不匹配: {actual_chiplab} != {args.chiplab_commit}")
-
     status = git_output(root, "status", "--porcelain=v1", "-z", "--untracked-files=all", binary=True)
     diff = git_output(root, "diff", "--binary", "HEAD", binary=True)
-    chiplab_status = git_output(chiplab, "status", "--porcelain=v1", "-z", "--untracked-files=all", binary=True)
-    chiplab_diff = git_output(chiplab, "diff", "--binary", "HEAD", binary=True)
+    chiplab_status = optional_git_bytes(chiplab, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+    chiplab_diff = optional_git_bytes(chiplab, "diff", "--binary", "HEAD")
     evidence = [artifact_record(root, Path(value)) for value in args.evidence]
     if len({item["path"] for item in evidence}) != len(evidence):
         raise ExperimentError("--evidence 不得重复")
@@ -108,7 +111,7 @@ def main() -> int:
             "generation_manifest_sha256": sha256_file(generation_path),
         },
         "platform": {
-            "chiplab_commit": actual_chiplab,
+            "chiplab_version": args.chiplab_version,
             "dirty": bool(chiplab_status),
             "status_sha256": hash_bytes(chiplab_status),
             "diff_sha256": hash_bytes(chiplab_diff),

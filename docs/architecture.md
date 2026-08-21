@@ -52,7 +52,7 @@ T = cycle_count / f_cpu
 | --- | --- |
 | CPU checkout | `dev/ECHO @ ecd4786fcc87...` 的 WT01；matching evidence 冻结于 workspace `445b777d84dd...` |
 | 当前 RTL 身份 | CPU source tree SHA-256 `232a0291e523...`；raw RTL `71cab587cb07...`；published RTL `f8aeca2dcfc5...` |
-| 固定 Chiplab | `c398d274812f164d387146fa7d8f612a4a1296d9`（官方 `nscscc2026`） |
+| Chiplab 版本 | `Finals`（源码目录由 `CHIPLAB_HOME` 提供） |
 | 最新本地 perf 实现 | WT01 matching 100 MHz full implementation：setup `-0.824 ns`、hold `+0.056 ns`、DRC 0 error/critical warning、fully routed、bitstream 成功；setup 未闭合，因此不是里程碑 |
 | 历史物理优化参考 | `627aca6... + c398d274...` 的同网表 post-route 曾得到 setup `+0.009 ns`、hold `+0.012 ns`、DRC 0 和探索用 bitstream；按当前合同只作路径参考，不是正式竞赛产物 |
 | 更早参考实现 | `60fba481... + c398d274...` 的 setup `+0.044 ns` 及 `d9bab16... + 68c20a5...` 均为历史网表证据 |
@@ -3554,7 +3554,7 @@ unused_commit_slots = 3*cycles - instructions
 ROI（Region of Interest）决定哪些周期进入分母。每个结果至少记录：
 
 ```text
-cpu_source_commit / cpu_repository_head / generated_rtl_sha256 / chiplab_commit
+cpu_source_commit / cpu_repository_head / generated_rtl_sha256 / chiplab_version
 simulation_build_kind / software_image_sha256 / benchmark_name
 ROI start/end marker、起止 PC/commit sequence、总周期与总指令
 Verilator/Java/SBT 版本、memory-delay 配置、random seed

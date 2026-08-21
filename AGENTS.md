@@ -17,13 +17,14 @@ LabAgent 并保存可追溯结果。
 - `cpu/` 是唯一的 SpinalHDL CPU 源码边界，入口是 `cpu/build.sbt`。
 - `scripts/` 只做跨仓库编排，按环境、CPU、仿真、Chiplab、Vivado 和板卡
   分组；不放 RTL。
-- `config/` 保存仓库锁和本机路径示例；真实 `local.env` 不入库。
+- `config/` 保存静态仓库版本标签和本机路径示例；真实 `local.env` 不入库。
 - `cpu/target/` 保存标准 SBT 编译、测试和 SpinalSim 输出；`build/` 只保存
   跨模块可再生输出，分为 `rtl/`、`gates/`、`sim/`、`chiplab/`、
   `vivado/`、`reports/`、`tmp/`。
 - `Post_Impl_Bundles/` 与 `Stable_Backup/` 是受保护的历史证据，默认清理不碰。
 - `chiplab/`、`nscscc-linux-kernel/`、`fpga-lab-agent/` 是 Git submodule；
-  根仓库只锁定 gitlink，不接管其分支、dirty patch、清理或源码历史。
+  根流程只把它们作为源码目录使用。Chiplab 版本由静态标签配置，不能用
+  commit SHA 做流程门禁；不接管子仓库分支、dirty patch、清理或源码历史。
 - 初赛提交仓库及 team-ci 不再是决赛开发依赖。若目录仍存在，只作为用户
   自行管理的独立克隆，根 Makefile 不引用它们，也不注册为 submodule。
 

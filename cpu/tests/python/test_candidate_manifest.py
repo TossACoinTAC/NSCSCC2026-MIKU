@@ -63,7 +63,7 @@ class CandidateManifestTest(unittest.TestCase):
                 manifest.write_text(
                     "\n".join((
                         f"cpu_commit={'a' * 40}",
-                        f"chiplab_commit={'b' * 40}",
+                        "chiplab_version=Finals",
                         "profile=clean",
                         "suite=perf20",
                         "memory_mode=ideal",
@@ -207,7 +207,7 @@ class CandidateManifestTest(unittest.TestCase):
                         generation_path.read_bytes()
                     ).hexdigest(),
                 },
-                "platform": {"chiplab_commit": "d" * 40},
+                "platform": {"chiplab_version": "Finals"},
                 "toolchain": {},
                 "simulations": [],
                 "evidence": [{
@@ -219,13 +219,13 @@ class CandidateManifestTest(unittest.TestCase):
             experiment_path = root / "experiment.json"
             experiment_path.write_text(json.dumps(experiment))
             loaded, paths = load_experiment_evidence(
-                root, experiment_path, generation, "d" * 40
+                root, experiment_path, generation, "Finals"
             )
             self.assertEqual(loaded["experiment_id"], "archive-contract")
             self.assertEqual(paths, [evidence])
             evidence.write_text("tampered\n")
             with self.assertRaises(ValueError):
-                load_experiment_evidence(root, experiment_path, generation, "d" * 40)
+                load_experiment_evidence(root, experiment_path, generation, "Finals")
 
 
 if __name__ == "__main__":

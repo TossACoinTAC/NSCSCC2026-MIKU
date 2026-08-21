@@ -2,12 +2,12 @@
 set -euo pipefail
 
 if (($# != 4)); then
-  printf 'usage: %s WORKSPACE CHIPLAB COMMIT BUILD_DIR\n' "$0" >&2
+  printf 'usage: %s WORKSPACE CHIPLAB VERSION BUILD_DIR\n' "$0" >&2
   exit 2
 fi
 workspace=$(realpath "$1")
 chiplab=$(realpath "$2")
-commit=$3
+version=$3
 build_dir=$(realpath -m "$4")
 vivado=${VIVADO:-/opt/Xilinx/Vivado/2023.2/bin/vivado}
 mhz=${PERF_CPU_MHZ:-100}
@@ -17,16 +17,15 @@ case "$build_dir" in
   *) printf 'Vivado 输出必须位于 %s/build: %s\n' "$workspace" "$build_dir" >&2; exit 2 ;;
 esac
 [[ -x $vivado ]] || { printf 'Vivado 不可执行: %s\n' "$vivado" >&2; exit 127; }
-[[ $(git -C "$chiplab" rev-parse HEAD) == "$commit" ]] || {
-  printf 'Chiplab HEAD 与锁定提交不一致\n' >&2; exit 1;
-}
 [[ -f $workspace/build/rtl/mycpu_top.v ]] || {
   printf '缺少发布 RTL，请先运行 make cpu-generate\n' >&2; exit 1;
 }
 
 rm -rf -- "$build_dir"
 mkdir -p "$build_dir"
-git -C "$chiplab" archive "$commit" | tar -xf - -C "$build_dir"
+(cd "$chiplab" && tar --exclude='.git' --exclude='*/.git' -cf - .) |
+  tar -xf - -C "$build_dir"
+printf '%s\n' "$version" > "$build_dir/chiplab-version.txt"
 rm -rf -- "$build_dir/IP/myCPU"
 mkdir -p "$build_dir/IP/myCPU"
 install -m 0644 "$workspace/build/rtl/mycpu_top.v" "$build_dir/IP/myCPU/mycpu_top.v"

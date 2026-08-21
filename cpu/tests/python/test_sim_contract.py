@@ -57,6 +57,36 @@ class SimulationContractTest(unittest.TestCase):
         self.assertIn("verdict=linux-time-window-complete", matrix)
         self.assertIn("verdict=linux-window-did-not-reach-time-limit", matrix)
 
+    def test_func_entry_disables_difftest_and_prints_result_summary(self) -> None:
+        makefile = (ROOT / "Makefile").read_text(encoding="utf-8")
+        matrix = (ROOT / "scripts/sim/matrix").read_text(encoding="utf-8")
+        prepare = (ROOT / "scripts/sim/prepare").read_text(encoding="utf-8")
+        self.assertIn("SIM_DIFFTEST=0", makefile)
+        self.assertIn("--difftest 0", makefile)
+        self.assertIn("SIM_FORCE_COLOR", makefile)
+        self.assertIn("FUNC58 SIMULATION: PASS", matrix)
+        self.assertIn("FORCE_COLOR", matrix)
+        self.assertIn("NO_COLOR", matrix)
+        self.assertIn("color_pass=$'\\033[1;32m'", matrix)
+        self.assertIn("color_fail=$'\\033[1;31m'", matrix)
+        self.assertIn("DIFFTEST_EN=\"$difftest_en\"", prepare)
+        self.assertIn("disable-difftest.patch", prepare)
+
+    def test_func_release_freezes_and_archives_with_default_manifest(self) -> None:
+        result = subprocess.run(
+            ["make", "-n", "func-release", "EXPERIMENT_ID=finals-func"],
+            cwd=ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
+        manifest = ROOT / "build/reports/experiments/finals-func/experiment-manifest.json"
+        self.assertIn(f'--out "{manifest}"', result.stdout)
+        self.assertIn(f'--experiment-manifest "{manifest}"', result.stdout)
+        self.assertNotIn("--evidence", result.stdout)
+
     def test_commit_endpoint_observer_accepts_every_lane_and_rejects_false_hits(self) -> None:
         source = r'''
 #include <cassert>

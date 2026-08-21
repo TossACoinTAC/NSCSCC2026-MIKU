@@ -29,6 +29,8 @@ def main() -> int:
     require("docs/current-optimization-plan.md" in readme, "README must link the current optimization plan")
     require("docs/custom-instructions.md" in readme,
             "README must link the custom-instruction guide")
+    require("docs/custom-instruction-make-flow.md" in readme,
+            "README must link the custom-instruction Make flow")
     require("[optimization-candidates.md](optimization-candidates.md)" in architecture,
             "architecture must link the candidate ledger")
     require("[optimization-candidates.md](optimization-candidates.md)" in workflow,
@@ -55,6 +57,8 @@ def main() -> int:
             "custom-instruction guide must document the focused test target")
     require("make custom-check CUSTOM_PROFILE=" in custom_instructions,
             "custom-instruction guide must document profile RTL checks")
+    require("custom-instruction-make-flow.md" in custom_instructions,
+            "custom-instruction guide must link the minimal Make flow")
 
     print(f"documentation contract: {len(ids)} unique candidate IDs")
     return 0

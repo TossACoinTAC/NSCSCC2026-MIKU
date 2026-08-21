@@ -60,11 +60,11 @@ def main() -> int:
         path = root / item["path"]
         needed = bool(required.intersection(item.get("required_for", [])))
         gitlink = root_gitlink(root, item["path"])
-        if item.get("management") != "git-submodule" or gitlink != item["commit"]:
+        if item.get("management") != "git-submodule" or gitlink is None:
             level = "失败" if needed else "警告"
             print(
                 f"[{level}] {item['name']}: submodule gitlink="
-                f"{gitlink[:12] if gitlink else 'missing'} lock={item['commit'][:12]}"
+                f"{gitlink[:12] if gitlink else 'missing'}"
             )
             failures += int(needed)
             continue
@@ -76,13 +76,20 @@ def main() -> int:
         _, head = run("git", "rev-parse", "HEAD", cwd=path)
         _, branch = run("git", "branch", "--show-current", cwd=path)
         _, status = run("git", "status", "--porcelain=v1", "--untracked-files=all", cwd=path)
-        match = head == item["commit"]
-        level = "通过" if match else ("失败" if needed else "警告")
-        print(
-            f"[{level}] {item['name']}: branch={branch or 'detached'} head={head[:12]} "
-            f"dirty={'yes' if status else 'no'} patch={patch_hash(path)[:12]}"
-        )
-        failures += int(needed and not match)
+        if "version" in item:
+            print(
+                f"[通过] {item['name']}: version={item['version']} "
+                f"branch={branch or 'detached'} head={head[:12]} "
+                f"dirty={'yes' if status else 'no'} patch={patch_hash(path)[:12]}"
+            )
+        else:
+            match = head == item["commit"]
+            level = "通过" if match else ("失败" if needed else "警告")
+            print(
+                f"[{level}] {item['name']}: branch={branch or 'detached'} head={head[:12]} "
+                f"dirty={'yes' if status else 'no'} patch={patch_hash(path)[:12]}"
+            )
+            failures += int(needed and not match)
 
     image = os.environ.get("DOCKER_IMAGE", "nscscc-dev:ubuntu24.04-v1")
     code, _ = run("docker", "image", "inspect", image)

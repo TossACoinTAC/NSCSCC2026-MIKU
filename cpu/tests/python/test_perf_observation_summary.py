@@ -94,7 +94,7 @@ def write_observation_matrix(root: Path) -> Path:
                 "\n".join((
                     "format=nscscc-sim-run-v3",
                     f"cpu_commit={'a' * 40}",
-                    f"chiplab_commit={'b' * 40}",
+                    "chiplab_version=Finals",
                     "profile=instrumented",
                     "suite=perf20",
                     "memory_mode=ideal",

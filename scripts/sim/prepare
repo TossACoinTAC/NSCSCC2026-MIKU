@@ -4,7 +4,8 @@ set -euo pipefail
 usage() {
   printf '%s\n' \
     'usage: sim-prepare --workspace DIR [--artifact-root DIR] --cpu-dir DIR --chiplab-dir DIR' \
-    '                   --chiplab-commit HASH --profile clean|instrumented' \
+    '                   --chiplab-version VERSION --difftest 0|1' \
+    '                   --profile clean|instrumented' \
     '                   --suite standard|func58|perf20 --workloads CSV' \
     '                   --branch-trace 0|1' \
     '                   --config-args STRING --jobs N --sim-path PATH' \
@@ -15,7 +16,8 @@ workspace=
 artifact_root=
 cpu_dir=
 chiplab_dir=
-chiplab_commit=
+chiplab_version=
+difftest=
 profile=
 suite=
 workloads=
@@ -33,7 +35,8 @@ while (($#)); do
     --artifact-root) artifact_root=$2; shift 2 ;;
     --cpu-dir) cpu_dir=$2; shift 2 ;;
     --chiplab-dir) chiplab_dir=$2; shift 2 ;;
-    --chiplab-commit) chiplab_commit=$2; shift 2 ;;
+    --chiplab-version) chiplab_version=$2; shift 2 ;;
+    --difftest) difftest=$2; shift 2 ;;
     --profile) profile=$2; shift 2 ;;
     --suite) suite=$2; shift 2 ;;
     --workloads) workloads=$2; shift 2 ;;
@@ -52,7 +55,7 @@ done
 if [[ -z $artifact_root ]]; then
   artifact_root="$workspace/build/sim"
 fi
-for value in workspace cpu_dir chiplab_dir chiplab_commit profile suite workloads config_args jobs sim_path verilator_home; do
+for value in workspace cpu_dir chiplab_dir chiplab_version difftest profile suite workloads config_args jobs sim_path verilator_home; do
   if [[ -z ${!value} ]]; then
     printf 'missing required value: %s\n' "$value" >&2
     exit 2
@@ -64,6 +67,14 @@ if [[ $profile != clean && $profile != instrumented ]]; then
 fi
 if [[ $suite != standard && $suite != func58 && $suite != perf20 ]]; then
   printf 'SIM_SUITE must be standard, func58, or perf20, got %s\n' "$suite" >&2
+  exit 2
+fi
+if [[ ! $chiplab_version =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  printf 'CHIPLAB_VERSION must be a safe static identifier, got %s\n' "$chiplab_version" >&2
+  exit 2
+fi
+if [[ $difftest != 0 && $difftest != 1 ]]; then
+  printf 'DIFFTEST must be 0 or 1, got %s\n' "$difftest" >&2
   exit 2
 fi
 if [[ $branch_trace != 0 && $branch_trace != 1 ]]; then
@@ -120,11 +131,6 @@ record_hash() {
 root_commit=$(git -C "$workspace" rev-parse HEAD)
 cpu_source_sha=$(python3 "$workspace/scripts/common/content_hash.py" --profile cpu-source "$cpu_dir")
 cpu_short=${cpu_source_sha:0:12}
-chiplab_head=$(git -C "$chiplab_dir" rev-parse HEAD)
-if [[ $chiplab_head != "$chiplab_commit" ]]; then
-  printf 'Chiplab HEAD %s does not match locked commit %s\n' "$chiplab_head" "$chiplab_commit" >&2
-  exit 1
-fi
 rtl="$workspace/build/rtl/mycpu_top.v"
 if [[ ! -f $rtl ]]; then
   printf 'generated RTL is missing: %s\n' "$rtl" >&2
@@ -153,31 +159,32 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# The platform cache contains only the clean, locked Chiplab tree.  It is never
-# configured or built in place, so local harness edits remain evidence rather
-# than an accidental model input.
-platform_key=$(printf 'format=nscscc-sim-platform-v1\nchiplab_commit=%s\n' "$chiplab_commit" | hash_stream)
+# The platform cache is a copy of the selected static Chiplab package.  The
+# version is a human-controlled label; no Git revision or HEAD check is used.
+platform_key=$(printf 'format=nscscc-sim-platform-v2\nchiplab_version=%s\n' "$chiplab_version" | hash_stream)
 platform_dir="$cache_root/platforms/$platform_key"
 platform_manifest="$platform_dir/platform-manifest.txt"
 exec {platform_lock_fd}>"$cache_root/locks/platform-$platform_key.lock"
 flock "$platform_lock_fd"
 platform_valid=0
 if [[ -f $platform_manifest && -f $platform_dir/.complete ]] &&
-   [[ $(manifest_value format "$platform_manifest") == nscscc-sim-platform-v1 ]] &&
+   [[ $(manifest_value format "$platform_manifest") == nscscc-sim-platform-v2 ]] &&
    [[ $(manifest_value platform_key "$platform_manifest") == "$platform_key" ]] &&
-   [[ $(manifest_value chiplab_commit "$platform_manifest") == "$chiplab_commit" ]]; then
+   [[ $(manifest_value chiplab_version "$platform_manifest") == "$chiplab_version" ]]; then
   platform_valid=1
 fi
 if [[ $rebuild == 1 || $platform_valid == 0 ]]; then
   platform_staging=$(mktemp -d "$cache_root/platforms/.${platform_key}.XXXXXX")
   tmp_dirs+=("$platform_staging")
   mkdir -p "$platform_staging/source"
-  git -C "$chiplab_dir" archive "$chiplab_commit" | tar -xf - -C "$platform_staging/source"
+  (cd "$chiplab_dir" && tar --exclude='.git' --exclude='*/.git' -cf - .) |
+    tar -xf - -C "$platform_staging/source"
+  rm -rf -- "$platform_staging/source/toolchains"
   ln -s /opt/nscscc/toolchains "$platform_staging/source/toolchains"
   cat > "$platform_staging/platform-manifest.txt" <<EOF
-format=nscscc-sim-platform-v1
+format=nscscc-sim-platform-v2
 platform_key=$platform_key
-chiplab_commit=$chiplab_commit
+chiplab_version=$chiplab_version
 EOF
   touch "$platform_staging/.complete"
   find -P "$platform_staging" ! -type l -exec chmod a-w {} +
@@ -202,6 +209,8 @@ branch_trace_header="$workspace/scripts/sim/branch_trace_observer.h"
 branch_trace_source="$workspace/scripts/sim/branch_trace_observer.cpp"
 simulation_patch_file="$workspace/scripts/sim/confreg-simulation-mode.patch"
 simulation_patch_lock="$simulation_patch_file.sha256"
+difftest_patch_file="$workspace/scripts/sim/disable-difftest.patch"
+difftest_patch_lock="$difftest_patch_file.sha256"
 
 (cd "$workspace" && sha256sum -c "$simulation_patch_lock")
 simulation_patch_sha=$(sha256sum "$simulation_patch_file" | awk '{print $1}')
@@ -212,6 +221,7 @@ official_patch_sha=none
 commit_endpoint_sha=none
 branch_trace_header_sha=none
 branch_trace_source_sha=none
+difftest_patch_sha=none
 if [[ $suite != standard ]]; then
   (cd "$workspace" && sha256sum -c "$official_patch_lock")
   (cd "$workspace" && sha256sum -c "$commit_endpoint_lock")
@@ -230,6 +240,10 @@ if [[ $profile == instrumented ]]; then
     branch_trace_source_sha=$(sha256sum "$branch_trace_source" | awk '{print $1}')
   fi
 fi
+if [[ $difftest == 0 ]]; then
+  (cd "$workspace" && sha256sum -c "$difftest_patch_lock")
+  difftest_patch_sha=$(sha256sum "$difftest_patch_file" | awk '{print $1}')
+fi
 
 verilator_bin=$(env PATH="$sim_path:$PATH" sh -c 'command -v verilator')
 verilator_version=$(PATH="$sim_path:$PATH" verilator --version | head -n 1)
@@ -240,9 +254,9 @@ cxx_sha=$(sha256sum "$cxx_bin" | awk '{print $1}')
 config_args_sha=$(printf '%s' "$config_args" | hash_stream)
 extra_libs_sha=$(printf '%s' "$extra_libs" | hash_stream)
 model_key=$({
-  printf 'format=nscscc-sim-model-v1\n'
-  printf 'platform_key=%s\nrtl_sha256=%s\nprofile=%s\nsuite=%s\n' \
-    "$platform_key" "$rtl_sha" "$profile" "$suite"
+  printf 'format=nscscc-sim-model-v2\n'
+  printf 'platform_key=%s\nrtl_sha256=%s\nprofile=%s\nsuite=%s\ndifftest=%s\n' \
+    "$platform_key" "$rtl_sha" "$profile" "$suite" "$difftest"
   printf 'config_args_sha256=%s\nextra_libs_sha256=%s\n' "$config_args_sha" "$extra_libs_sha"
   printf 'simulation_patch_sha256=%s\nofficial_patch_sha256=%s\n' \
     "$simulation_patch_sha" "$official_patch_sha"
@@ -251,6 +265,7 @@ model_key=$({
     "$branch_trace" "$branch_trace_header_sha" "$branch_trace_source_sha"
   printf 'instrumentation_patch_sha256=%s\nm01_patch_sha256=%s\nm01_source_sha256=%s\n' \
     "$patch_sha" "$m01_patch_sha" "$m01_source_sha"
+  printf 'difftest_patch_sha256=%s\n' "$difftest_patch_sha"
   printf 'verilator_sha256=%s\nverilator_version=%s\nverilator_home=%s\n' \
     "$verilator_sha" "$verilator_version" "$verilator_home"
   printf 'cxx_sha256=%s\ncxx_version=%s\n' "$cxx_sha" "$cxx_version"
@@ -262,7 +277,7 @@ exec {model_lock_fd}>"$cache_root/locks/model-$model_key.lock"
 flock "$model_lock_fd"
 model_valid=0
 if [[ -f $model_manifest && -x $model ]] &&
-   [[ $(manifest_value format "$model_manifest") == nscscc-sim-model-v1 ]] &&
+   [[ $(manifest_value format "$model_manifest") == nscscc-sim-model-v2 ]] &&
    [[ $(manifest_value model_key "$model_manifest") == "$model_key" ]] &&
    [[ $(manifest_value model_sha256 "$model_manifest") == "$(sha256sum "$model" | awk '{print $1}')" ]]; then
   model_valid=1
@@ -282,6 +297,9 @@ if [[ $rebuild == 1 || $model_valid == 0 ]]; then
     TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$official_patch_file"
     install -m 0444 "$commit_endpoint_file" \
       "$model_staging/sims/verilator/testbench/include/commit_endpoint_observer.h"
+  fi
+  if [[ $difftest == 0 ]]; then
+    TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$difftest_patch_file"
   fi
   if [[ $profile == instrumented ]]; then
     TMPDIR=/tmp patch --no-backup-if-mismatch -d "$model_staging" -p1 --forward --batch < "$patch_file"
@@ -312,20 +330,27 @@ if [[ $rebuild == 1 || $model_valid == 0 ]]; then
   read -r -a config_words <<< "$config_args"
   (cd "$run_dir" && ./configure.sh "${config_words[@]}")
   (cd "$run_dir" && make clean)
+  difftest_en=n
+  if [[ $difftest == 1 ]]; then
+    difftest_en=y
+  fi
   PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" verilator \
-    MYCPU_SRC="$model_staging/IP/myCPU" VERILATOR_HOME="$verilator_home"
+    MYCPU_SRC="$model_staging/IP/myCPU" VERILATOR_HOME="$verilator_home" \
+    DIFFTEST_EN="$difftest_en"
   PATH="$sim_path:$PATH" make -C "$run_dir" -j"$jobs" testbench \
     MYCPU_SRC="$model_staging/IP/myCPU" VERILATOR_HOME="$verilator_home" \
-    ALL_LIB="./obj_dir/*__ALL.a $extra_libs"
+    ALL_LIB="./obj_dir/*__ALL.a $extra_libs" \
+    DIFFTEST_EN="$difftest_en"
   model_sha=$(sha256sum "$run_dir/output" | awk '{print $1}')
   difftest_sha=$(sha256sum "$model_staging/sims/verilator/testbench/difftest.cpp" | awk '{print $1}')
   cat > "$model_staging/model-manifest.txt" <<EOF
-format=nscscc-sim-model-v1
+format=nscscc-sim-model-v2
 model_key=$model_key
 platform_key=$platform_key
-chiplab_commit=$chiplab_commit
+chiplab_version=$chiplab_version
 profile=$profile
 suite=$suite
+difftest=$difftest
 rtl_sha256=$rtl_sha
 config_args=$config_args
 config_args_sha256=$config_args_sha
@@ -341,6 +366,7 @@ m01_source_manifest_sha256=$m01_source_sha
 branch_trace=$branch_trace
 branch_trace_header_sha256=$branch_trace_header_sha
 branch_trace_source_sha256=$branch_trace_source_sha
+difftest_patch_sha256=$difftest_patch_sha
 verilator_sha256=$verilator_sha
 verilator=$verilator_version
 verilator_home=$verilator_home
@@ -363,7 +389,7 @@ flock -u "$model_lock_fd"
 software_inputs=$(mktemp "$cache_root/.software-inputs.XXXXXX")
 tmp_dirs+=("$software_inputs")
 {
-  printf 'format=nscscc-sim-software-v1\nplatform_key=%s\nsuite=%s\nworkloads=%s\nconfig_args_sha256=%s\n' \
+  printf 'format=nscscc-sim-software-v2\nplatform_key=%s\nsuite=%s\nworkloads=%s\nconfig_args_sha256=%s\n' \
     "$platform_key" "$suite" "$workloads" "$config_args_sha"
   case "$suite" in
     perf20)
@@ -383,7 +409,7 @@ tmp_dirs+=("$software_inputs")
       done
       ;;
     standard)
-      printf 'standard_sources=%s\n' "$chiplab_commit"
+      printf 'standard_sources=%s\n' "$chiplab_version"
       software_cc_bin=$(env PATH="$sim_path:$PATH" sh -c 'command -v loongarch32r-linux-gnusf-gcc')
       printf 'software_cc_sha256=%s\n' "$(sha256sum "$software_cc_bin" | awk '{print $1}')"
       printf 'software_cc=%s\n' "$(PATH="$sim_path:$PATH" loongarch32r-linux-gnusf-gcc --version | head -n 1)"
@@ -400,7 +426,7 @@ exec {software_lock_fd}>"$cache_root/locks/software-$software_key.lock"
 flock "$software_lock_fd"
 software_valid=0
 if [[ -f $software_manifest && -f $software_checksums ]] &&
-   [[ $(manifest_value format "$software_manifest") == nscscc-sim-software-v1 ]] &&
+   [[ $(manifest_value format "$software_manifest") == nscscc-sim-software-v2 ]] &&
    [[ $(manifest_value software_key "$software_manifest") == "$software_key" ]] &&
    (cd "$software_dir" && sha256sum -c software-files.sha256 >/dev/null 2>&1); then
   software_valid=1
@@ -455,10 +481,10 @@ if [[ $rebuild == 1 || $software_valid == 0 ]]; then
     fi
   done
   cat > "$software_staging/software-manifest.txt" <<EOF
-format=nscscc-sim-software-v1
+format=nscscc-sim-software-v2
 software_key=$software_key
 platform_key=$platform_key
-chiplab_commit=$chiplab_commit
+chiplab_version=$chiplab_version
 suite=$suite
 workloads=$workloads
 config_args_sha256=$config_args_sha
@@ -481,7 +507,7 @@ if [[ $suite != standard ]]; then
   variant="$profile-$suite"
 fi
 workload_key=$(printf 'suite=%s\nworkloads=%s\n' "$suite" "$workloads" | hash_stream)
-prepared_root="$artifact_root/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}"
+prepared_root="$artifact_root/prepared/cpu_${cpu_short}_chiplab_${chiplab_version}"
 target="$prepared_root/${variant}_workloads_${workload_key:0:12}"
 mkdir -p "$prepared_root"
 prepared_staging=$(mktemp -d "$prepared_root/.${variant}.XXXXXX")
@@ -490,16 +516,22 @@ ln -s "$model_dir" "$prepared_staging/model"
 ln -s "$software_dir" "$prepared_staging/software"
 git -C "$workspace" status --short -- cpu > "$prepared_staging/cpu-status.txt"
 git -C "$workspace" diff --binary -- cpu > "$prepared_staging/cpu-dirty.patch"
-git -C "$chiplab_dir" status --short > "$prepared_staging/chiplab-status.txt"
-git -C "$chiplab_dir" diff --binary > "$prepared_staging/chiplab-dirty.patch"
+if git -C "$chiplab_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git -C "$chiplab_dir" status --short > "$prepared_staging/chiplab-status.txt"
+  git -C "$chiplab_dir" diff --binary > "$prepared_staging/chiplab-dirty.patch"
+else
+  printf 'source=static-package\nversion=%s\n' "$chiplab_version" > "$prepared_staging/chiplab-status.txt"
+  : > "$prepared_staging/chiplab-dirty.patch"
+fi
 cat > "$prepared_staging/sim-prepared-manifest.txt" <<EOF
-format=nscscc-sim-prepared-v3
+format=nscscc-sim-prepared-v4
 profile=$profile
 suite=$suite
 root_commit=$root_commit
 cpu_commit=$root_commit
 cpu_source_sha256=$cpu_source_sha
-chiplab_commit=$chiplab_commit
+chiplab_version=$chiplab_version
+difftest=$difftest
 workloads=$workloads
 workload_key=$workload_key
 config_args=$config_args
@@ -511,6 +543,7 @@ chiplab_dirty_patch_sha256=$(sha256sum "$prepared_staging/chiplab-dirty.patch" |
 rtl_sha256=$rtl_sha
 model_sha256=$model_sha
 difftest_sha256=$difftest_sha
+difftest_patch_sha256=$difftest_patch_sha
 instrumentation_patch_sha256=$patch_sha
 official_software_patch_sha256=$official_patch_sha
 commit_endpoint_observer_sha256=$commit_endpoint_sha

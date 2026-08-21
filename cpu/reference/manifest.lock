@@ -7,7 +7,7 @@ migration_published_rtl_sha256=4968c5131a7fdf937286b0d7eacfe41a9d9d42e25bed89b89
 
 chiplab_repo=https://gitee.com/loongson-edu/chiplab.git
 chiplab_branch=nscscc2026
-chiplab_commit=c398d274812f164d387146fa7d8f612a4a1296d9
+chiplab_version=Finals
 chiplab_mycpu_gitlink=aa3bde1f3e720e71c2c78d6b81930d797b810149
 
 vivado=2023.2

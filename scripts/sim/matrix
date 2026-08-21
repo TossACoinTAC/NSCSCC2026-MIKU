@@ -1,9 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+color_pass=
+color_fail=
+color_reset=
+if [[ ${FORCE_COLOR:-0} == 1 || ( -z ${NO_COLOR:-} && -t 1 && ${TERM:-dumb} != dumb ) ]]; then
+  color_pass=$'\033[1;32m'
+  color_fail=$'\033[1;31m'
+  color_reset=$'\033[0m'
+fi
+
 usage() {
   printf '%s\n' \
-    'usage: sim-matrix --workspace DIR [--artifact-root DIR] --cpu-dir DIR --chiplab-commit HASH' \
+    'usage: sim-matrix --workspace DIR [--artifact-root DIR] --cpu-dir DIR' \
+    '                  --chiplab-version VERSION --difftest 0|1' \
     '                  --profile clean|instrumented --suite standard|func58|perf20' \
     '                  --memory-mode random|ideal --workloads CSV --seeds CSV' \
     '                  --lanes N --time-limit N --sim-path PATH [lane-3 evidence]'
@@ -12,7 +22,8 @@ usage() {
 workspace=
 artifact_root=
 cpu_dir=
-chiplab_commit=
+chiplab_version=
+difftest=
 profile=
 suite=
 memory_mode=
@@ -29,7 +40,8 @@ while (($#)); do
     --workspace) workspace=$2; shift 2 ;;
     --artifact-root) artifact_root=$2; shift 2 ;;
     --cpu-dir) cpu_dir=$2; shift 2 ;;
-    --chiplab-commit) chiplab_commit=$2; shift 2 ;;
+    --chiplab-version) chiplab_version=$2; shift 2 ;;
+    --difftest) difftest=$2; shift 2 ;;
     --profile) profile=$2; shift 2 ;;
     --suite) suite=$2; shift 2 ;;
     --memory-mode) memory_mode=$2; shift 2 ;;
@@ -49,7 +61,7 @@ if [[ -z $artifact_root ]]; then
   artifact_root="$workspace/build/sim"
 fi
 
-for value in workspace cpu_dir chiplab_commit profile suite memory_mode workloads seeds lanes time_limit sim_path; do
+for value in workspace cpu_dir chiplab_version difftest profile suite memory_mode workloads seeds lanes time_limit sim_path; do
   if [[ -z ${!value} ]]; then
     printf 'missing required value: %s\n' "$value" >&2
     exit 2
@@ -61,6 +73,14 @@ if [[ $profile != clean && $profile != instrumented ]]; then
 fi
 if [[ $suite != standard && $suite != func58 && $suite != perf20 ]]; then
   printf 'SIM_SUITE must be standard, func58, or perf20, got %s\n' "$suite" >&2
+  exit 2
+fi
+if [[ ! $chiplab_version =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+  printf 'CHIPLAB_VERSION must be a safe static identifier, got %s\n' "$chiplab_version" >&2
+  exit 2
+fi
+if [[ $difftest != 0 && $difftest != 1 ]]; then
+  printf 'DIFFTEST must be 0 or 1, got %s\n' "$difftest" >&2
   exit 2
 fi
 if [[ $memory_mode != random && $memory_mode != ideal ]]; then
@@ -96,7 +116,7 @@ if [[ $suite != standard ]]; then
   variant="$profile-$suite"
 fi
 workload_key=$(printf 'suite=%s\nworkloads=%s\n' "$suite" "$workloads" | sha256sum | awk '{print $1}')
-prepared="$artifact_root/prepared/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/${variant}_workloads_${workload_key:0:12}"
+prepared="$artifact_root/prepared/cpu_${cpu_short}_chiplab_${chiplab_version}/${variant}_workloads_${workload_key:0:12}"
 manifest="$prepared/sim-prepared-manifest.txt"
 if [[ ! -f $manifest || ! -L $prepared/model || ! -L $prepared/software ]]; then
   printf 'prepared simulation request not found: %s\n' "$prepared" >&2
@@ -121,9 +141,10 @@ if [[ ! -x $model || ! -f $model_manifest || ! -f $software_manifest || ! -f $so
   printf 'prepared cache entry is incomplete; run make sim-prepare again\n' >&2
   exit 1
 fi
-grep -Fxq 'format=nscscc-sim-prepared-v3' "$manifest"
+grep -Fxq 'format=nscscc-sim-prepared-v4' "$manifest"
 grep -Fxq "cpu_source_sha256=$cpu_source_sha" "$manifest"
-grep -Fxq "chiplab_commit=$chiplab_commit" "$manifest"
+grep -Fxq "chiplab_version=$chiplab_version" "$manifest"
+grep -Fxq "difftest=$difftest" "$manifest"
 grep -Fxq "profile=$profile" "$manifest"
 grep -Fxq "suite=$suite" "$manifest"
 grep -Fxq "workloads=$workloads" "$manifest"
@@ -173,7 +194,7 @@ if [[ $actual_rtl_sha != "$expected_rtl_sha" ]]; then
   exit 1
 fi
 
-run_root="$artifact_root/runs/cpu_${cpu_short}_chiplab_${chiplab_commit:0:12}/${variant}_model_${model_key:0:12}_software_${software_key:0:12}/$memory_mode"
+run_root="$artifact_root/runs/cpu_${cpu_short}_chiplab_${chiplab_version}/${variant}_model_${model_key:0:12}_software_${software_key:0:12}/$memory_mode"
 mkdir -p "$run_root"
 IFS=',' read -r -a workload_list <<< "$workloads"
 IFS=',' read -r -a seed_list <<< "$seeds"
@@ -253,7 +274,8 @@ run_one() {
   {
     printf 'format=nscscc-sim-run-v3\n'
     printf 'cpu_commit=%s\n' "$cpu_commit"
-    printf 'chiplab_commit=%s\n' "$chiplab_commit"
+    printf 'chiplab_version=%s\n' "$chiplab_version"
+    printf 'difftest=%s\n' "$difftest"
     printf 'profile=%s\n' "$profile"
     printf 'suite=%s\n' "$suite"
     printf 'memory_mode=%s\n' "$memory_mode"
@@ -459,16 +481,34 @@ if [[ $suite == perf20 ]]; then
 elif [[ $suite == func58 ]]; then
   results_csv="$run_root/matrix_${matrix_id}_func58.csv"
   printf 'workload,memory_mode,axi_seed,passed_points,verdict\n' > "$results_csv"
+  passed_lanes=0
+  total_lanes=0
   for seed in "${seed_list[@]}"; do
+    total_lanes=$((total_lanes + 1))
     lane_dir="$run_root/func58/seed_$seed/limit_${time_limit}ns"
     verdict=$(<"$lane_dir/verdict.txt")
     passed_points=
     if [[ -f $lane_dir/func58-result.json ]]; then
       passed_points=58
+      passed_lanes=$((passed_lanes + 1))
     fi
     printf 'func58,%s,%s,%s,%s\n' "$memory_mode" "$seed" "$passed_points" "$verdict" \
       >> "$results_csv"
+    if [[ $verdict == pass && $passed_points == 58 ]]; then
+      printf '%bfunc58 seed %s: PASS (%s/58)%b\n' \
+        "$color_pass" "$seed" "$passed_points" "$color_reset"
+    else
+      printf '%bfunc58 seed %s: FAIL (%s/58, verdict=%s)%b\n' \
+        "$color_fail" "$seed" "${passed_points:-0}" "$verdict" "$color_reset"
+    fi
   done
+  if [[ $status == 0 && $passed_lanes == $total_lanes ]]; then
+    printf '%bFUNC58 SIMULATION: PASS (%s/%s seeds, 58/58 points each)%b\n' \
+      "$color_pass" "$passed_lanes" "$total_lanes" "$color_reset"
+  else
+    printf '%bFUNC58 SIMULATION: FAIL (%s/%s seeds passed)%b\n' \
+      "$color_fail" "$passed_lanes" "$total_lanes" "$color_reset"
+  fi
   printf 'func58 results: %s\n' "$results_csv"
 fi
 printf 'simulation matrix summary: %s\n' "$summary"

@@ -6,7 +6,7 @@
       "path": "chiplab",
       "remote": "https://gitee.com/loongson-edu/chiplab.git",
       "branch": "nscscc2026",
-      "commit": "c398d274812f164d387146fa7d8f612a4a1296d9",
+      "version": "Finals",
       "management": "git-submodule",
       "purpose": "决赛 SoC、Verilator 仿真平台和 Vivado 工程",
       "required_for": ["sim", "vivado", "linux"],

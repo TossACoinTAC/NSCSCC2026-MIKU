@@ -37,6 +37,7 @@ SIM_LANE_PEAK_MB ?=
 SIM_REBUILD ?= 0
 SIM_BRANCH_TRACE ?= 0
 CPU_BRANCH_TRACE ?= $(SIM_BRANCH_TRACE)
+SIM_FORCE_COLOR ?= 1
 PERF_CPU_MHZ ?= 100
 SOC_ARCHIVE_CLASS ?= auto
 SOC_BUILD_KIND ?= perf
@@ -47,6 +48,9 @@ SOC_EXPERIMENT_MANIFEST ?=
 EXPERIMENT_ID ?= experiment-$(shell date +%Y%m%d-%H%M%S)
 EXPERIMENT_EVIDENCE ?=
 EXPERIMENT_MANIFEST ?= $(BUILD_ROOT)/reports/experiments/$(EXPERIMENT_ID)/experiment-manifest.json
+ifeq ($(strip $(SOC_EXPERIMENT_MANIFEST)),)
+SOC_EXPERIMENT_MANIFEST := $(EXPERIMENT_MANIFEST)
+endif
 BASE_MATRIX ?=
 CANDIDATE_MATRIX ?=
 COMPARE_ID ?= comparison-$(shell date +%Y%m%d-%H%M%S)
@@ -60,7 +64,9 @@ TEST_IMPACT_OUT ?= $(BUILD_ROOT)/reports/test-impact/$(shell date +%Y%m%d-%H%M%S
 BOARD_JOB ?=
 POST_ROUTE_INPUT_DCP ?= $(BUILD_ROOT)/chiplab-perf/fpga/nscscc-team/run_vivado/project/loongson.runs/impl_1/soc_top_routed.dcp
 POST_ROUTE_OUTPUT ?= $(BUILD_ROOT)/vivado/postroute-$(shell date +%Y%m%d-%H%M%S)
-CHIPLAB_COMMIT ?= c398d274812f164d387146fa7d8f612a4a1296d9
+CHIPLAB_VERSION ?= Finals
+SIM_CHIPLAB_VERSION ?= $(CHIPLAB_VERSION)
+SIM_DIFFTEST ?= 1
 PERF20_TIME_LIMIT ?= 600000000
 FUNC58_TIME_LIMIT ?= 30000000
 LINUX_TIME_LIMIT ?= 50000000
@@ -72,7 +78,7 @@ CONTAINER_SIM_PATH := /opt/nscscc/toolchains/loongson-gnu-toolchain-8.3-x86_64-l
 
 .PHONY: help doctor status ide-setup env-build toolchain-check docs-check experiment-freeze experiment-compare timing-analyze test-impact perf-observation-summary \
   cpu-test cpu-test-all cpu-contract-test custom-test custom-check cpu-generate cpu-check cpu-locked-gates \
-  sim sim-prepare sim-matrix func58-sim perf20-sim linux-sim branch-trace-summary wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
+  sim sim-prepare sim-matrix func58-sim func-release perf20-sim linux-sim branch-trace-summary wave soc-impl soc-func soc-postroute-opt soc-archive soc-timing \
   board-queue board-status board-result \
   clean clean-build clean-cpu clean-sim clean-vivado clean-ide-state clean-all
 
@@ -92,13 +98,14 @@ help:
 		'  make cpu-test CPU_TEST=miku.execute.OooExecutionClusterSpec' \
 		'  make cpu-contract-test 运行全部轻量 Python 合同测试' \
 		'  make custom-test       运行自定义指令 Scala 与编码工具测试' \
-		'  make custom-check CUSTOM_PROFILE=<name> 生成赛题 profile 并运行 RTL 检查' \
+		'  make custom-check          修改 Makefile 中的 profile 后运行 RTL 检查' \
 		'  make cpu-check          Scala、Python、RTL 接口、lint、Yosys 完整门禁' \
 		'  make cpu-generate       Docker 内生成并发布 build/rtl/mycpu_top.v' \
 		'  make sim                单个软件仿真（RUN_SOFTWARE 可覆盖）' \
-		'  make sim-prepare        生成或复用内容寻址的 Chiplab/Verilator 模型' \
+		'  make sim-prepare        按静态 Chiplab 版本标签生成 Verilator 模型' \
 		'  make sim-matrix         独立 workload/seed 并行运行' \
 		'  make func58-sim         全 func58 固定 seeds' \
+		'  make func-release       freeze + func SoC implementation + archive' \
 		'  make perf20-sim         完整 perf20（包含 stringsearch）' \
 		'  make linux-sim          Linux 软件仿真入口' \
 		'  make branch-trace-summary BRANCH_TRACE=... 汇总逐分支 predictor trace' \
@@ -112,6 +119,8 @@ help:
 		'  make clean              清理可再生构建输出，保留 IDE 状态' \
 		'  make clean-all          额外清理显式 IDE 状态' '' \
 		'路径覆盖：VIVADO_HOME VIVADO SURFER LABAGENT_HOST LABAGENT_SSH_KEY DOCKER_IMAGE JOBS SIM_LANES' \
+		'仿真覆盖：CHIPLAB_VERSION SIM_CHIPLAB_VERSION SIM_DIFFTEST SIM_REBUILD' \
+		'颜色输出：默认高亮，SIM_FORCE_COLOR=0 可关闭' \
 		'实现归档：SOC_EXPERIMENT_MANIFEST=... SOC_ARCHIVE_CLASS=auto|candidate|stable' \
 		'缓存失效：SIM_REBUILD=1 仅重建当前 sim-prepare 请求对应的缓存项' \
 		'分支观察：SIM_BRANCH_TRACE=1 生成仿真专用 branch-trace-v1 sidecar'
@@ -156,7 +165,7 @@ docs-check:
 experiment-freeze: cpu-generate
 	@python3 scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
 		--experiment-id "$(EXPERIMENT_ID)" --chiplab-dir "$(CHIPLAB_HOME)" \
-		--chiplab-commit "$(CHIPLAB_COMMIT)" --docker-image "$(DOCKER_IMAGE)" \
+		--chiplab-version "$(CHIPLAB_VERSION)" --docker-image "$(DOCKER_IMAGE)" \
 		--generation-manifest "$(BUILD_ROOT)/rtl/generation-manifest.json" \
 		$(foreach item,$(EXPERIMENT_EVIDENCE),--evidence "$(item)") --out "$(EXPERIMENT_MANIFEST)"
 
@@ -240,7 +249,8 @@ cpu-check: cpu-test-all cpu-generate cpu-locked-gates docs-check cpu-contract-te
 sim-prepare: cpu-generate
 	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/prepare" \
 		--workspace "$(ROOT_DIR)" --artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" \
-		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
+		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-version "$(SIM_CHIPLAB_VERSION)" \
+		--difftest "$(SIM_DIFFTEST)" \
 		--profile "$(SIM_PROFILE)" --suite "$(SIM_SUITE)" --workloads "$(SIM_WORKLOADS)" \
 		--branch-trace "$(SIM_BRANCH_TRACE)" \
 		--config-args '--run $(RUN_SOFTWARE) --disable-trace-comp --disable-simu-trace --output-uart-info --dump-fst' \
@@ -248,9 +258,10 @@ sim-prepare: cpu-generate
 		--rebuild "$(SIM_REBUILD)"
 
 sim-matrix:
-	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" \
+	@FORCE_COLOR="$(SIM_FORCE_COLOR)" $(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" \
 		--workspace "$(ROOT_DIR)" --artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" \
-		--chiplab-commit "$(CHIPLAB_COMMIT)" --profile "$(SIM_PROFILE)" --suite "$(SIM_SUITE)" \
+		--chiplab-version "$(SIM_CHIPLAB_VERSION)" --difftest "$(SIM_DIFFTEST)" \
+		--profile "$(SIM_PROFILE)" --suite "$(SIM_SUITE)" \
 		--memory-mode "$(SIM_MEMORY_MODE)" --workloads "$(SIM_WORKLOADS)" --seeds "$(SIM_SEEDS)" \
 		--lanes "$(SIM_LANES)" --time-limit "$(TIME_LIMIT)" --sim-path "$(CONTAINER_SIM_PATH)" \
 		--allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
@@ -258,17 +269,30 @@ sim-matrix:
 sim: sim-prepare sim-matrix
 
 func58-sim:
-	@$(MAKE) sim-prepare SIM_PROFILE="$(SIM_PROFILE)" SIM_SUITE=func58 SIM_WORKLOADS="$(FUNC58_WORKLOADS)" RUN_SOFTWARE=func/func_lab19
-	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" --workspace "$(ROOT_DIR)" \
-		--artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
+	@$(MAKE) sim-prepare SIM_PROFILE="$(SIM_PROFILE)" SIM_SUITE=func58 SIM_WORKLOADS="$(FUNC58_WORKLOADS)" RUN_SOFTWARE=func/func_lab19 SIM_DIFFTEST=0
+	@FORCE_COLOR="$(SIM_FORCE_COLOR)" $(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" --workspace "$(ROOT_DIR)" \
+		--artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" \
+		--chiplab-version "$(SIM_CHIPLAB_VERSION)" --difftest 0 \
 		--profile "$(SIM_PROFILE)" --suite func58 --memory-mode random --workloads "$(FUNC58_WORKLOADS)" \
 		--seeds 240,255,141 --lanes "$(SIM_LANES)" --time-limit "$(FUNC58_TIME_LIMIT)" \
 		--sim-path "$(CONTAINER_SIM_PATH)" --allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
 
+func-release: cpu-generate
+	@python3 scripts/experiment/freeze.py --root "$(ROOT_DIR)" \
+		--experiment-id "$(EXPERIMENT_ID)" --chiplab-dir "$(CHIPLAB_HOME)" \
+		--chiplab-version "$(CHIPLAB_VERSION)" --docker-image "$(DOCKER_IMAGE)" \
+		--generation-manifest "$(BUILD_ROOT)/rtl/generation-manifest.json" \
+		$(foreach item,$(EXPERIMENT_EVIDENCE),--evidence "$(item)") --out "$(EXPERIMENT_MANIFEST)"
+	@VIVADO="$(VIVADO)" PERF_CPU_MHZ=32.726797 \
+		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_VERSION)" "$(BUILD_ROOT)/chiplab-func"
+	@$(MAKE) soc-archive SOC_BUILD_KIND=func PERF_CPU_MHZ=32.726797 \
+		SOC_EXPERIMENT_MANIFEST="$(EXPERIMENT_MANIFEST)" SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
+
 perf20-sim:
 	@$(MAKE) sim-prepare SIM_PROFILE="$(SIM_PROFILE)" SIM_SUITE=perf20 SIM_WORKLOADS="$(PERF20_WORKLOADS)" RUN_SOFTWARE=coremark
-	@$(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" --workspace "$(ROOT_DIR)" \
-		--artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
+	@FORCE_COLOR="$(SIM_FORCE_COLOR)" $(CONTAINER_RUN) "$(ROOT_DIR)/scripts/sim/matrix" --workspace "$(ROOT_DIR)" \
+		--artifact-root "$(SIM_ARTIFACT_ROOT)" --cpu-dir "$(CPU_DIR)" \
+		--chiplab-version "$(SIM_CHIPLAB_VERSION)" --difftest "$(SIM_DIFFTEST)" \
 		--profile "$(SIM_PROFILE)" --suite perf20 --memory-mode ideal --workloads "$(PERF20_WORKLOADS)" \
 		--seeds 0 --lanes "$(SIM_LANES)" --time-limit "$(PERF20_TIME_LIMIT)" \
 		--sim-path "$(CONTAINER_SIM_PATH)" --allow-three "$(SIM_ALLOW_THREE)" --lane-peak-mb "$(SIM_LANE_PEAK_MB)"
@@ -290,14 +314,14 @@ soc-impl: cpu-generate
 	@test -n "$(strip $(SOC_EXPERIMENT_MANIFEST))" || { printf 'SOC_EXPERIMENT_MANIFEST 不能为空；先运行 experiment-freeze\n' >&2; exit 2; }
 	@test -f "$(SOC_EXPERIMENT_MANIFEST)" || { printf '实验清单不存在: %s\n' "$(SOC_EXPERIMENT_MANIFEST)" >&2; exit 2; }
 	@VIVADO="$(VIVADO)" PERF_CPU_MHZ="$(PERF_CPU_MHZ)" \
-		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-perf"
+		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_VERSION)" "$(BUILD_ROOT)/chiplab-perf"
 	@$(MAKE) soc-archive SOC_BUILD_KIND=perf SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
 
 soc-func: cpu-generate
 	@test -n "$(strip $(SOC_EXPERIMENT_MANIFEST))" || { printf 'SOC_EXPERIMENT_MANIFEST 不能为空；先运行 experiment-freeze\n' >&2; exit 2; }
 	@test -f "$(SOC_EXPERIMENT_MANIFEST)" || { printf '实验清单不存在: %s\n' "$(SOC_EXPERIMENT_MANIFEST)" >&2; exit 2; }
 	@VIVADO="$(VIVADO)" PERF_CPU_MHZ=32.726797 \
-		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_COMMIT)" "$(BUILD_ROOT)/chiplab-func"
+		scripts/vivado/implement.sh "$(ROOT_DIR)" "$(CHIPLAB_HOME)" "$(CHIPLAB_VERSION)" "$(BUILD_ROOT)/chiplab-func"
 	@$(MAKE) soc-archive SOC_BUILD_KIND=func PERF_CPU_MHZ=32.726797 SOC_ARCHIVE_CLASS="$(SOC_ARCHIVE_CLASS)"
 
 soc-postroute-opt:
@@ -316,7 +340,7 @@ soc-archive:
 		printf 'SOC_BUILD_KIND 必须是 perf 或 func\n' >&2; exit 2 ;; esac
 	@python3 scripts/vivado/archive.py --root "$(ROOT_DIR)" \
 		--build-dir "$(SOC_BUILD_DIR)" \
-		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-commit "$(CHIPLAB_COMMIT)" \
+		--chiplab-dir "$(CHIPLAB_HOME)" --chiplab-version "$(CHIPLAB_VERSION)" \
 		--kind "$(SOC_BUILD_KIND)" --requested-mhz "$(PERF_CPU_MHZ)" \
 		--experiment-manifest "$(SOC_EXPERIMENT_MANIFEST)" \
 		--class "$(SOC_ARCHIVE_CLASS)" --stage "$(SOC_IMPL_STAGE)" \

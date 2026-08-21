@@ -1,0 +1,74 @@
+diff --git a/cpu/tests/python/test_sim_contract.py b/cpu/tests/python/test_sim_contract.py
+index cf7b18f3d51ee8de7bf6ee480e8ae1b2344b6a8b..3be66025c783561cb84a2abaeda8420786b0e20f 100755
+--- a/cpu/tests/python/test_sim_contract.py
++++ b/cpu/tests/python/test_sim_contract.py
+@@ -67,2 +67,4 @@ class SimulationContractTest(unittest.TestCase):
+         self.assertIn("FUNC58 SIMULATION: PASS", matrix)
++        self.assertIn("59/59 points each", matrix)
++        self.assertIn("3b00003b", matrix)
+         self.assertIn("FORCE_COLOR", matrix)
+@@ -103,4 +105,4 @@ int main() {
+   assert(!miku_sim::simulationCompletionReached(2, 123, 1, 1));
+-  assert(miku_sim::simulationCompletionReached(2, 0x3a00003a, 1, 1));
+-  assert(std::string(miku_sim::completionSourceName()) == "func58-pins");
++  assert(miku_sim::simulationCompletionReached(2, 0x3b00003b, 1, 1));
++  assert(std::string(miku_sim::completionSourceName()) == "func59-pins");
+ }
+diff --git a/scripts/sim/commit_endpoint_observer.h b/scripts/sim/commit_endpoint_observer.h
+index 5f35b910333df0df4c7dfd3ccc2a4262502ed912..ff0d08b7aa41316bff0be43884e31f56a263c866 100644
+--- a/scripts/sim/commit_endpoint_observer.h
++++ b/scripts/sim/commit_endpoint_observer.h
+@@ -13,3 +13,3 @@ enum class CompletionSource : unsigned int {
+   Perf20Pins = 2,
+-  Func58Pins = 3
++  Func59Pins = 3
+ };
+@@ -77,4 +77,4 @@ inline bool simulationCompletionReached(int profile, std::uint32_t numData,
+     source = CompletionSource::Perf20Pins;
+-  } else if (profile == 2 && passLeds && numData == 0x3a00003aU) {
+-    source = CompletionSource::Func58Pins;
++  } else if (profile == 2 && passLeds && numData == 0x3b00003bU) {
++    source = CompletionSource::Func59Pins;
+   }
+@@ -95,4 +95,4 @@ inline const char *completionSourceName() {
+       return "perf20-pins";
+-    case CompletionSource::Func58Pins:
+-      return "func58-pins";
++    case CompletionSource::Func59Pins:
++      return "func59-pins";
+     default:
+diff --git a/scripts/sim/matrix b/scripts/sim/matrix
+index 970f89675516aadbe73776a2366313aaf87c5c1b..ca1a0c87e277ae570ae98a0243b5878ab64b4b5f 100755
+--- a/scripts/sim/matrix
++++ b/scripts/sim/matrix
+@@ -408,3 +408,3 @@ EOF
+       fi
+-      if [[ $result == 0 && ( $observed_switch != "$runtime_switch_value" || ${num_hex,,} != 3a00003a || $led_rg0 != 1 || $led_rg1 != 1 ) ]]; then
++      if [[ $result == 0 && ( $observed_switch != "$runtime_switch_value" || ${num_hex,,} != 3b00003b || $led_rg0 != 1 || $led_rg1 != 1 ) ]]; then
+         result=1
+@@ -413,3 +413,3 @@ EOF
+         cat > func58-result.json <<EOF
+-{"format":"nscc-func58-result-v3","workload":"$workload","memory_mode":"$memory_mode","axi_seed":$seed,"runtime_switch_value":"0x$runtime_switch_value","num_data":"0x${num_hex,,}","led_rg0":$led_rg0,"led_rg1":$led_rg1,"passed_points":58}
++{"format":"nscc-func58-result-v3","workload":"$workload","memory_mode":"$memory_mode","axi_seed":$seed,"runtime_switch_value":"0x$runtime_switch_value","num_data":"0x${num_hex,,}","led_rg0":$led_rg0,"led_rg1":$led_rg1,"passed_points":59}
+ EOF
+@@ -491,3 +491,3 @@ elif [[ $suite == func58 ]]; then
+     if [[ -f $lane_dir/func58-result.json ]]; then
+-      passed_points=58
++      passed_points=59
+       passed_lanes=$((passed_lanes + 1))
+@@ -496,7 +496,7 @@ elif [[ $suite == func58 ]]; then
+       >> "$results_csv"
+-    if [[ $verdict == pass && $passed_points == 58 ]]; then
+-      printf '%bfunc58 seed %s: PASS (%s/58)%b\n' \
++    if [[ $verdict == pass && $passed_points == 59 ]]; then
++      printf '%bfunc58 seed %s: PASS (%s/59)%b\n' \
+         "$color_pass" "$seed" "$passed_points" "$color_reset"
+     else
+-      printf '%bfunc58 seed %s: FAIL (%s/58, verdict=%s)%b\n' \
++      printf '%bfunc58 seed %s: FAIL (%s/59, verdict=%s)%b\n' \
+         "$color_fail" "$seed" "${passed_points:-0}" "$verdict" "$color_reset"
+@@ -505,3 +505,3 @@ elif [[ $suite == func58 ]]; then
+   if [[ $status == 0 && $passed_lanes == $total_lanes ]]; then
+-    printf '%bFUNC58 SIMULATION: PASS (%s/%s seeds, 58/58 points each)%b\n' \
++    printf '%bFUNC58 SIMULATION: PASS (%s/%s seeds, 59/59 points each)%b\n' \
+       "$color_pass" "$passed_lanes" "$total_lanes" "$color_reset"

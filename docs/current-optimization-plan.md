@@ -48,7 +48,7 @@ FQ01，若 pending-load/requestSent 仍在 top-N，再隔离 FQ02。以下 R0--R
   LDQ16 timing-fail candidate，R21 是 dirty LDQ16 aggregate；二者都不替代下一份 matching
   源码/RTL 身份。`fbc9634`/`6bbf9ed` 及 R5/R6 的 perf20、板测和 direct-full 结果也均为
   历史证据。
-- Chiplab：`c398d274812f164d387146fa7d8f612a4a1296d9`。
+- Chiplab：`Finals` 静态版本标签。
 
 以下 R5/R6、R3/R4、R20、R21 和早期 IPC 数字均保留作历史归因，不构成当前 clean
 B02-F+LDQ16 或 dirty LDQ16 aggregate 的 matching 性能/时序预算；当前开发只以后续 matching manifest
